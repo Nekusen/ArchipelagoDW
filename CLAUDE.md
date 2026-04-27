@@ -143,3 +143,31 @@ These come from [docs/style.md](docs/style.md) and the ruff config and override 
 - Shipping a world separately: package with the Launcher's "Build APWorlds" component rather than
   zipping by hand, so the `archipelago.json` metadata (`version`, `compatible_version`) is filled in
   correctly. Filenames must be lowercase or frozen Python will fail to import.
+
+
+## Project: Digimon World 1 (PS1) APWorld
+
+- **Goal**: build a stable Archipelago world for Digimon World 1 (PS1, USA build).
+  A previous community implementation exists but is unstable; this project is a
+  rewrite from scratch.
+- **Working branch**: `digimon-world-ps1`
+- **World package location** (target): `worlds/digimon_world/`
+- **Current phase**: exploration and planning. No code has been written yet.
+  Before proposing any implementation, read `docs/world api.md` and
+  `docs/adding games.md`, study 1–2 reference worlds with similar architecture
+  (PS1 / external emulator client + ROM patching), and produce a written plan
+  in `PLAN.md`.
+- **Reference worlds to study** (TBD — to be filled after exploration): list any
+  world that uses an external emulator client plus binary patching of an
+  ISO/BIN file.
+- **Architecture decisions pending**:
+  - Emulator target (PCSX-Redux / BizHawk / DuckStation).
+  - Client language (Python in-tree vs. Lua script for the emulator).
+  - Patching strategy (bsdiff vs. custom binary writer vs. xdelta).
+- **Conventions**:
+  - All code, identifiers, commit messages, and committed documentation in
+    English.
+  - Conversational comments and ad-hoc notes with the human collaborator may
+    be in Spanish.
+  - Follow the repo-wide style notes above (120-col, double quotes, modern
+    type annotations).
