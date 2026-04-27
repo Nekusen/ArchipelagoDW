@@ -48,9 +48,9 @@ Citation conventions:
 | --- | --- |
 | `__init__.py:31-381` | World subclass; six regions (Menu, Start Game, Cards, Prosperity, Digimon, Chests); hard-coded recruitment rules at lines ~270-315; `generate_output` (329-381) writes everything to `slot_data` for the C# client to consume. **No ROM patching at all.** |
 | `Items.py:38-274` | 6 categories: Consumable=0, Misc=1, Event=2, Recruit=3, Skip=4, DV=5, Soul=6. Recruit IDs 1000-1049, Soul IDs 4000-4049. |
-| `Locations.py:64-300` | 51 digimon recruits (69005000-69054000), 66 cards (69002000-69002065), 100 prosperity checks (69004000-69004099), 1 test chest (69001000). |
+| `Locations.py:64-300` | 50 digimon recruits (69005000-69054000), 66 cards (69002000-69002065), 100 prosperity checks (69004000-69004099), 1 test chest (69001000). |
 | `Options.py:7-81` | 9 options: Goal, RequiredProsperity, EarlyStatCap, ProgressiveStatCaps, GuaranteedItems, ExpMultiplier, RandomStarter, RandomTechniques, FastDrimogemon, EasyMonochromon. |
-| `RecruitDigimon.py:11-63` | 51-entry table: `(name, prosperity_value, digimon_requirements, prosperity_requirement, requires_soul)`. Recruitment is modeled as a **static prerequisite graph**, not a state machine; iterative satisfiability check (10 iterations max) at `__init__.py:183-239`. |
+| `RecruitDigimon.py:11-63` | 50-entry table: `(name, prosperity_value, digimon_requirements, prosperity_requirement, requires_soul)`. Recruitment is modeled as a **static prerequisite graph**, not a state machine; iterative satisfiability check (10 iterations max) at `__init__.py:183-239`. |
 | `docs/` | Setup notes; not architecturally interesting. |
 
 ### 1.2 C# runtime architecture
@@ -145,7 +145,7 @@ Each of the following is grounded in a citation, not speculation.
    uses an `items_received` counter and per-category atomic writes that
    the game loop cannot stomp.
 3. **Hard-coded rules in the World subclass** — `__init__.py:267-315`
-   contains 51 manual recruit rules. Adding a new randomizable system
+   contains 50 manual recruit rules. Adding a new randomizable system
    requires editing rule code, not data tables. Contrast with FFT
    (`worlds/fftii/data/logic/topologies/*.py`), which keeps logic in
    data modules.
@@ -193,12 +193,12 @@ All cited from `references/digimon_world_randomizer/digimon/data.py`.
 | Tech learn (battle) | 583-593 | 0x14D66A2C, blockSize 0x1DE, count 0x3A | `<BBB` |
 | Tech learn (brain training) | 595-604 | 0x14C8E58C, blockSize 0x18, count 0x08 | `<BBB` |
 | Tech tier list | 606-615 | 0x14C8E554, blockSize 0x38, count 0x07 | `<8B` |
-| Chest items | 229-243 | 79 hardcoded offsets in 0x13FE3118-0x14081900 | `<BB` (id, qty) |
-| Map item spawns | 245-307 | ~300 offsets in 0x13FE2800-0x140FECFA | `<BB` |
+| Chest items | 229-243 | 73 hardcoded offsets in 0x13FE3118-0x14081900 | `<BB` (id, qty) |
+| Map item spawns | 245-307 | 463 offsets in 0x13FDD564-0x1407C38A | `<BB` |
 | Tokomon gifts | 540-550 | 6 offsets at 0x14071064-0x14071078 | `<BxBB` |
 | Seadramon teach | 552-569 | 4 learn + 4 check offsets | `<2B` / `<B` |
-| Special-evolution overrides | 504-538 | 14 offsets | `<B` |
-| Recruitment triggers | 309-502 | 51 offset tuples in 0x14059A40-0x140B9BDA | `<H` |
+| Special-evolution overrides | 504-538 | 15 entries (20 offsets total) | `<B` |
+| Recruitment triggers | 309-502 | 40 active entries (47 documented; 7 commented out) in 0x13FD63CA-0x140BAB1E | `<H` |
 | Starter digimon | 189-192 | (constraint, not direct offset) | `<B` |
 
 This catalog is **the** value of the standalone randomizer. DWAP has
@@ -578,7 +578,7 @@ disagreement.
 | --- | --- | --- | --- |
 | RAM addresses | 21 listed (Addresses.cs:16-46) | None (operates on ROM offsets) | Different scopes; **union** is the useful map |
 | ROM offsets | None | Full catalog (data.py — see 2.2) | Different scopes; **union** is the useful map |
-| Recruitment count | 51 (RecruitDigimon.py:11-63) | 50 trigger entries (data.py:309-502) | Same data; standalone excludes Agumon (in-town starter, not a recruit-trigger entry). No conflict. |
+| Recruitment count | 50 (RecruitDigimon.py:11-63) | 40 active trigger entries (47 documented; 7 commented out) in data.py:309-502 | Standalone has fewer because it omits entries with no in-town behavior or no Jijimon dialogue (Greymon, Monzaemon, Angemon, Birdramon, Vegiemon, Palmon, Centarumon). No conflict in fact. |
 | Drimogemon gate | Runtime flag at `0x001BE130` + `fast_drimogemon` option | Static recruit-trigger override + softlock patch | Same gate, different layer (runtime vs. ROM). No conflict in fact. |
 | Toy Town softlock | `fast_drimogemon` option (Options.py:46-48) | Unlock-patch `0x015D0001` to `0x140479EA` (data.py:508-509) | Same softlock acknowledged. Different fix mechanism. No conflict in fact. |
 | Stage encoding | 0-indexed enum (`DigimonStage.cs:9-16`) | 1-indexed hex (`data.py:28-34`) | Same five stages, different encoding. No conflict in fact. |

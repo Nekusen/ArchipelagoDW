@@ -152,18 +152,18 @@ These come from [docs/style.md](docs/style.md) and the ruff config and override 
   rewrite from scratch.
 - **Working branch**: `digimon-world-ps1`
 - **World package location** (target): `worlds/digimon_world/`
-- **Current phase**: exploration and planning. No code has been written yet.
-  Before proposing any implementation, read `docs/world api.md` and
-  `docs/adding games.md`, study 1–2 reference worlds with similar architecture
-  (PS1 / external emulator client + ROM patching), and produce a written plan
-  in `PLAN.md`.
-- **Reference worlds to study** (TBD — to be filled after exploration): list any
-  world that uses an external emulator client plus binary patching of an
-  ISO/BIN file.
-- **Architecture decisions pending**:
-  - Emulator target (PCSX-Redux / BizHawk / DuckStation).
-  - Client language (Python in-tree vs. Lua script for the emulator).
-  - Patching strategy (bsdiff vs. custom binary writer vs. xdelta).
+- **Current status**: Phase 0 (pre-flight) closed 2026-04-27. The world
+  package skeleton exists at [worlds/digimon_world/](worlds/digimon_world/)
+  (empty `__init__.py` + verified `data/addresses.py` manifest, no
+  `World` subclass yet). Phase 1 (stub skeleton + tests) is next — see
+  [PLAN.md](PLAN.md) §c for the full phased plan and exit criteria.
+- **Architecture** (locked): BizHawk + Nymashock + APProcedurePatch +
+  generic Lua connector — the FFT Ivalice Island pattern. Custom Lua
+  (SOTN-style) is the controlled escalation path. PCSX-Redux is fallback
+  only. The unified RAM/ROM address manifest lives at
+  [worlds/digimon_world/data/addresses.py](worlds/digimon_world/data/addresses.py)
+  and is the **single source of truth** — Phase 3 (patcher) and Phase 4
+  (client) import from there, never from `references/` directly.
 - **Conventions**:
   - All code, identifiers, commit messages, and committed documentation in
     English.
@@ -219,13 +219,14 @@ into the world package):
   Docs: `worlds/sotn/docs/sotn-en.md` inside the clone.
   Architecture: BizHawk 2.9.1 + Nymashock PSX core + a **custom
   game-specific Lua connector** (`connector_sotn.lua`) instead of the
-  generic one. Explicitly handles multi-track BIN/CUE (track 1 data,
-  track 2 audio).
-  Primary value: reference for multi-track PS1 disc-image handling
-  (very likely relevant for DW1) and reference for the trade-off
-  between using the generic BizHawk Lua connector vs. writing a
-  game-specific one. Note: there exists at least one other community
-  SOTN AP implementation; this is one of two.
+  generic one. **Does NOT patch the ROM at runtime** — the world ships
+  with no patcher (verified by grepping for `cue/track/audio/sector`).
+  Primary value: case study for the custom-Lua design path (Option C
+  escalation from our locked Option B). Useful if DW1 surfaces an
+  event class the generic connector cannot detect; **not** a
+  multi-track BIN/CUE reference (DW1 is single-track per Phase 0).
+  Note: there exists at least one other community SOTN AP
+  implementation; this is one of two.
 
 #### Notes for Claude when studying references
 

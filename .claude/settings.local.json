@@ -1,7 +1,16 @@
 {
   "permissions": {
     "allow": [
-      "Bash(xargs grep *)"
+      "Bash(xargs grep *)",
+      "Bash(venv/Scripts/python.exe --version)",
+      "Bash(venv/Scripts/python.exe phase0_bizhawk_smoke.py)",
+      "Bash(git -C references/fft_ivalice_island branch -a)",
+      "Bash(git -C /c/opt/dev/AP/ArchipelagoDW/references/fft_ivalice_island branch -a)",
+      "Bash(git -C /c/opt/dev/AP/ArchipelagoDW/references/fft_ivalice_island ls-tree -d origin/finalfantasytactics worlds/)",
+      "Bash(git -C /c/opt/dev/AP/ArchipelagoDW/references/fft_ivalice_island show origin/finalfantasytactics:worlds/fftii/Client.py)",
+      "Bash(venv/Scripts/python.exe -c ' *)",
+      "Bash(awk 'NR==1, NR==70' references/DWAP/Apworld/dw1/RecruitDigimon.py)",
+      "Bash(awk 'NR>=11 && NR<=63' references/DWAP/Apworld/dw1/RecruitDigimon.py)"
     ]
   }
 }
