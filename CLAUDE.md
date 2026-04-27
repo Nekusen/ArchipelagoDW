@@ -171,3 +171,71 @@ These come from [docs/style.md](docs/style.md) and the ruff config and override 
     be in Spanish.
   - Follow the repo-wide style notes above (120-col, double quotes, modern
     type annotations).
+
+### References
+
+Reference projects are available locally under `references/` (read-only,
+study material — do not modify, copy verbatim, or import code from these
+into the world package):
+
+- **`references/DWAP/`** — existing unstable Archipelago world for Digimon
+  World 1, by ArsonAssassin (MIT license).
+  Repo: https://github.com/ArsonAssassin/DWAP
+  Architecture: non-standard. Python apworld in `Apworld/dw1/`, but the
+  runtime client is in **C#** under `source/`, built on the author's
+  separate `Archipelago.Core` .NET library
+  (https://github.com/ArsonAssassin/Archipelago.Core).
+  Primary value: memory addresses, item and location IDs already mapped
+  for DW1 USA, and a catalogue of architectural choices that may be
+  contributing to instability (evidence-based assessment expected — do
+  not speculate).
+
+- **`references/digimon_world_randomizer/`** — non-AP standalone
+  randomizer for DW1, by meekrhino. Last release Feb 2021. No explicit
+  LICENSE file — treat as study-only, do not copy code verbatim.
+  Repo: https://github.com/meekrhino/digimon_world_randomizer
+  Primary value: complete catalogue of what is randomizable in DW1 and
+  where in the .bin each item lives; .bin patching approach refined over
+  5+ years; game-specific quirks and bug workarounds (Toy Town access,
+  Whamon recruit, Drimogemon fight, softlocks, etc.); implicit progression
+  logic that translates into AP `rules.py`.
+
+- **`references/fft_ivalice_island/`** — Final Fantasy Tactics: Ivalice
+  Island APWorld, by Rosalie-A. Listed as **Stable** in the community
+  Playable Worlds sheet, with extensive wiki documentation.
+  Repo: https://github.com/Rosalie-A/Archipelago (full Archipelago fork;
+  the world lives under `worlds/` — locate it on first read).
+  Wiki: https://github.com/Rosalie-A/Archipelago/wiki
+  Architecture: BizHawk + Nymashock PSX core + **APProcedurePatch**
+  (`.apfftii` files) + the standard `connector_bizhawk_generic.lua`.
+  User supplies a legal USA ISO; client patches it on first run.
+  Primary value: highest-priority architectural reference. PS1 USA,
+  state-heavy RPG, BizHawk-based, well documented. Most directly
+  comparable to the DW1 target.
+
+- **`references/sotn_archipelago/`** — Castlevania: Symphony of the Night
+  APWorld, by AdmiralTryhard.
+  Repo: https://github.com/AdmiralTryhard/SOTNArchipelago
+  Docs: `worlds/sotn/docs/sotn-en.md` inside the clone.
+  Architecture: BizHawk 2.9.1 + Nymashock PSX core + a **custom
+  game-specific Lua connector** (`connector_sotn.lua`) instead of the
+  generic one. Explicitly handles multi-track BIN/CUE (track 1 data,
+  track 2 audio).
+  Primary value: reference for multi-track PS1 disc-image handling
+  (very likely relevant for DW1) and reference for the trade-off
+  between using the generic BizHawk Lua connector vs. writing a
+  game-specific one. Note: there exists at least one other community
+  SOTN AP implementation; this is one of two.
+
+#### Notes for Claude when studying references
+
+- The PS1 + BizHawk + Nymashock + APProcedurePatch architecture is
+  already proven in production by FFT Ivalice Island, this SOTN
+  implementation, and Ape Escape. Treat that path as the established
+  pattern, not an unknown to validate from scratch.
+- Cross-reference findings between projects when possible. Where DWAP
+  and the standalone randomizer disagree on something (e.g. an address
+  or a randomizable system's identity), flag it as an open question
+  rather than picking one silently.
+- See `references/README.md` for any additional per-clone notes the
+  human collaborator added.
