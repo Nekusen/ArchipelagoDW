@@ -1,0 +1,145 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Repository overview
+
+This is a fork of [ArchipelagoMW/Archipelago](https://github.com/ArchipelagoMW/Archipelago)
+(remotes: `origin` = `Nekusen/ArchipelagoDW`, `upstream` = `ArchipelagoMW/Archipelago`).
+Default branch for PRs upstream is `main`. Archipelago is a multiworld randomizer framework: the core
+generates and serves a "multiworld" composed of one or more game-specific "worlds" living in [worlds/](worlds/).
+
+Python 3.11 – 3.13 are the supported versions (CI runs 3.11.2, 3.12, 3.13). Worlds must keep working on the
+oldest supported version.
+
+## Common commands
+
+Most workflows assume the working directory is the repo root.
+
+| Task | Command |
+| --- | --- |
+| Install / update deps (uses pinned [requirements.txt](requirements.txt)) | `python ModuleUpdate.py --yes` |
+| Generate `host.yaml` if missing | `python Launcher.py --update_settings` |
+| Run the launcher (entry to clients, "Generate Template Options", "Build APWorlds", etc.) | `python Launcher.py` |
+| Generate a multiworld from yamls in `Players/` | `python Generate.py` |
+| Host a generated multiworld locally | `python MultiServer.py path/to/AP_xxx.zip` (add `--log_network` to debug protocol) |
+| Run the WebHost site locally | `python WebHost.py` (copy [docs/webhost configuration sample.yaml](docs/webhost%20configuration%20sample.yaml) to `config.yaml` to override) |
+| Run all tests | `pytest` |
+| Run tests in parallel | `pytest -n auto` (or `-n12`) |
+| Run one world's tests | `pytest worlds/<world>/test` |
+| Run a single test | `pytest worlds/<world>/test/test_foo.py::TestClass::test_method` |
+| Lint | `ruff check` (config in [ruff.toml](ruff.toml), 120-col, `target-version = py311`) |
+| Type-check | `mypy` (uses [mypy.ini](mypy.ini); custom stubs live in [typings/](typings/)) |
+| Build a frozen distribution | `python setup.py build_exe` (Linux AppImage: also `python setup.py bdist_appimage`) |
+| Build `.apworld` zips for distribution | `python Launcher.py "Build APWorlds"` (output: `build/apworlds/`) |
+
+[pytest.ini](pytest.ini) sets `testpaths = test worlds`, so `pytest` from the root picks up both core tests
+and any `test_*.py` inside any world's `test/` package.
+
+CI is wired in [.github/workflows/unittests.yml](.github/workflows/unittests.yml) and runs `pytest -n auto`
+plus a separate `test/hosting/__main__.py` job that exercises live hosting.
+
+## Big-picture architecture
+
+### Top-level entry points
+
+The repo root is full of single-file entry points; they do not form a package. Key ones:
+
+- [Generate.py](Generate.py) — reads yaml files in `Players/`, drives the generation pipeline, writes
+  the multiworld archive (`AP_*.zip`) to `output/`.
+- [Main.py](Main.py) — orchestrates one generation: instantiates each player's `World`, runs the world
+  lifecycle hooks (`generate_early` → `create_regions` → `create_items` → `set_rules` → `pre_fill` →
+  `fill` → `post_fill` → `generate_output`), then calls [Fill.py](Fill.py) to place items.
+- [MultiServer.py](MultiServer.py) — async websocket server that hosts a generated multiworld and
+  speaks the protocol described in [docs/network protocol.md](docs/network%20protocol.md).
+- [Launcher.py](Launcher.py) — Tk-style GUI dispatcher. Worlds register `Component`s via
+  [worlds/LauncherComponents.py](worlds/LauncherComponents.py); the Launcher discovers them at runtime.
+- [WebHost.py](WebHost.py) — boots the Flask app under [WebHostLib/](WebHostLib/) (the `archipelago.gg`
+  site, including generation queue, room hosting, and tracking).
+- [BaseClasses.py](BaseClasses.py) — `MultiWorld`, `Region`, `Entrance`, `Location`, `Item`,
+  `CollectionState`. Read this before touching anything cross-world.
+- [Options.py](Options.py) — base option types (`Toggle`, `Choice`, `Range`, `OptionSet`, …) plus
+  `PerGameCommonOptions`. Worlds extend this dataclass.
+- [settings.py](settings.py) — `host.yaml`-backed user-machine settings (ROM paths, etc.). Different
+  from per-generation options.
+- [NetUtils.py](NetUtils.py) — protocol enums and packet helpers shared by server, clients, and webhost.
+
+### Worlds
+
+Each game lives in [worlds/](worlds/) as its own Python package. The package is auto-discovered through
+the `AutoWorldRegister` metaclass in [worlds/AutoWorld.py](worlds/AutoWorld.py); simply defining a class
+inheriting from `World` with a `game = "..."` attribute registers it. There is no manual registry.
+
+A typical world package contains: `__init__.py` (the `World` subclass), `options.py`, `items.py`,
+`locations.py`, `regions.py`, `rules.py`, optionally `client.py`, and a `test/` package whose
+`bases.py` defines a `WorldTestBase` subclass (see [docs/tests.md](docs/tests.md)).
+
+Worlds intended to be shipped as separate `.apworld` zip files must use **relative imports for
+intra-world code** (`from .options import ...`) and absolute imports for everything outside. See
+[docs/apworld specification.md](docs/apworld%20specification.md) for the metadata file format
+(`archipelago.json`).
+
+When extending the engine, two utilities matter:
+
+- **Rule Builder** ([rule_builder/](rule_builder/), docs in [docs/rule builder.md](docs/rule%20builder.md)):
+  newer worlds prefer composable `Has(...) | HasAll(...)` rules over lambdas. Use the bitwise `&` / `|`
+  operators (boolean `and`/`or` are explicitly disallowed). Worlds can inherit from
+  `CachedRuleBuilderWorld` to opt in to lazy evaluation/caching.
+- **Entrance randomization** ([entrance_rando.py](entrance_rando.py), docs in
+  [docs/entrance randomization.md](docs/entrance%20randomization.md)).
+
+### Important world-implementation gotchas
+
+- Item and location IDs must be unique within a world. They share a numeric namespace per world but can
+  overlap across games. Keep IDs in `1 .. 2**31 - 1`.
+- IDs ≤ 0 are reserved globally — don't use them.
+- An access rule on an `Entrance` that calls `state.can_reach_*` **must** be paired with
+  `multiworld.register_indirect_condition(...)` or generation can become non-deterministic. Set
+  `World.explicit_indirect_conditions = False` only if you are deliberately accepting the perf hit.
+- Events ("fake" items/locations with `id=None`) are real during generation; place them with
+  `Location.place_locked_item(...)` before fill. The standard goal pattern is a `Victory` event item
+  + `multiworld.completion_condition[self.player] = lambda state: state.has("Victory", self.player)`.
+- After `create_items` finishes, items and regions must not be added to the multiworld (use
+  `get_pre_fill_items` if you need to place items in `pre_fill`).
+
+### Tests
+
+[test/](test/) holds shared infrastructure:
+
+- [test/bases.py](test/bases.py) — `WorldTestBase` and helpers like `assertAccessDependency`.
+- [test/general/](test/general/) — generic tests (reachability, fill, IDs, options, manifests, …) that
+  run against **every** registered world. New worlds get these for free; don't break them.
+- [test/param.py](test/param.py) — Archipelago is test-runner-agnostic. Do not use
+  `@pytest.mark.parametrize`; use the helpers here. Use `unittest.subTest` for cheap parametrization but
+  prefer per-method tests when individual timing/parallelism matters.
+- [test/hosting/](test/hosting/) — exercised by a separate CI job, not via plain `pytest`.
+
+Goal: individual tests under one second so `pytest -n auto` parallelizes well. For very expensive
+"fuzz" generation, gate it behind `@unittest.skipIf(env-var-not-set)` rather than running it on every CI
+run.
+
+## Style notes that aren't obvious
+
+These come from [docs/style.md](docs/style.md) and the ruff config and override defaults:
+
+- 120 character line limit (Python, Markdown, everything).
+- Double-quote strings; single quotes inside f-strings (`f"like {d['k']}"`).
+- Prefer modern type annotations (`dict[str, int | None]`, not `Dict[str, Optional[int]]`) for new
+  code.
+- `assert False` is intentional and used as a release-time-eliminated invariant, so ruff's `B011` is
+  disabled. Don't replace these with `raise`.
+- Local imports (inside functions) are accepted and sometimes necessary — `PLC0415` is disabled.
+- Keep `open(..., "r")` explicit; `UP015` is disabled on purpose.
+- New core classes/methods should have reST-style docstrings; world code is held to a softer bar but
+  must be internally consistent.
+
+## Working with this fork
+
+- `upstream/main` is the canonical Archipelago history. New PRs targeting upstream should rebase on it.
+- This fork's working branches (e.g. `digimon-world-ps1`) typically host an in-progress `.apworld`
+  living under [worlds/](worlds/). When adding a new world, also wire up generic tests by giving it a
+  `test/` package with a `WorldTestBase` subclass — without this the generic test suite still runs
+  against the world but you'll have no game-specific coverage.
+- Shipping a world separately: package with the Launcher's "Build APWorlds" component rather than
+  zipping by hand, so the `archipelago.json` metadata (`version`, `compatible_version`) is filled in
+  correctly. Filenames must be lowercase or frozen Python will fail to import.
