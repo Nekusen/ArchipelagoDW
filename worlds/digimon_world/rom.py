@@ -331,6 +331,13 @@ def _write_chest_item_tokens(patch: DigimonWorldProcedurePatch) -> None:
     2. Write a clean 32-byte item-table entry for id 129 with the name
        "AP ITEM" so the chest pickup textbox renders cleanly instead of
        displaying garbage glyphs from random adjacent memory.
+
+    Future improvement (see ``phase_progress.md``): per-chest decision
+    based on AP fill placement — own-slot DW1-representable items
+    could be granted directly with their real ID, with the client
+    skipping the redundant delivery. Blocked on RE work that maps
+    each standalone chest offset to its DWAP-named chest. Until then,
+    every chest uniformly shows "AP ITEM".
     """
 
     item_byte = struct.pack(ROM_CHEST_ITEM_FORMAT, ROM_CHEST_ITEM_VALUE)
