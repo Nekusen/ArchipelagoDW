@@ -130,6 +130,75 @@ assert len(RECRUIT_NAMES) == 50, len(RECRUIT_NAMES)
 
 
 # =============================================================================
+# Recruit PP requirements (Phase 5 logic map)
+# =============================================================================
+# Per-recruit Prosperity Point gate, supplied by the user. The rule
+# applied at each recruit AP location is
+# ``Has("Prosperity Point", count=N)`` where N is the value below.
+# Recruits at 0 PP have no rule (always logically reachable).
+
+RECRUIT_PP_REQUIREMENTS: Final[dict[str, int]] = {
+    # 0 PP
+    "Agumon": 0,
+    "Palmon": 0,
+    "Kunemon": 0,
+    "Coelamon": 0,
+    "Meramon": 0,
+    "Betamon": 0,
+    # 6 PP
+    "Centarumon": 6,
+    "Vegiemon": 6,
+    "Drimogemon": 6,
+    "Monochromon": 6,
+    "Shellmon": 6,
+    "Mojyamon": 6,
+    "Frigimon": 6,
+    "Penguinmon": 6,
+    "Birdramon": 6,
+    "Elecmon": 6,
+    "Patamon": 6,
+    "Biyomon": 6,
+    "Bakemon": 6,
+    "Sukamon": 6,
+    # 10 PP
+    "Unimon": 10,
+    "Whamon": 10,
+    "Gabumon": 10,
+    "Kokatorimon": 10,
+    "Garurumon": 10,
+    "Tyrannomon": 10,
+    # 15 PP
+    "Greymon": 15,
+    "Seadramon": 15,
+    "Mamemon": 15,
+    # 20 PP
+    "Numemon": 20,
+    "Andromon": 20,
+    "MetalMamemon": 20,
+    "Giromon": 20,
+    "Kabuterimon": 20,
+    "Kuwagamon": 20,
+    "Angemon": 20,
+    "Ogremon": 20,
+    "SkullGreymon": 20,
+    "Monzaemon": 20,
+    "Ninjamon": 20,
+    # 45 PP
+    "Leomon": 45,
+    "Vademon": 45,
+    # 50 PP
+    "Nanimon": 50,
+    "Etemon": 50,
+    "Airdramon": 50,
+    "Devimon": 50,
+    "Megadramon": 50,
+    "Digitamamon": 50,
+    "Piximon": 50,
+    "MetalGreymon": 50,
+}
+
+
+# =============================================================================
 # Chest list (65 entries, DWAP naming, all in File City)
 # =============================================================================
 # Names and IDs adopt DWAP's ``Resources/Chests.json`` verbatim. Each

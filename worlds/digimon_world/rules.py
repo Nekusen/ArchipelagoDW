@@ -1,18 +1,12 @@
-"""Access rules for the Digimon World 1 APWorld (Phase 4 v7).
+"""Access rules for the Digimon World 1 APWorld (Phase 5).
 
-Recruit AP locations have no logical prereqs — every recruit location
-is treated as logically reachable. The player has to traverse the world
-in-game the long way around, but AP fill won't gate progression items
-behind recruit-chain prereqs that the world model doesn't track.
+Per-recruit Prosperity Point gates are sourced from
+:data:`worlds.digimon_world.locations.RECRUIT_PP_REQUIREMENTS`. Recruits
+not in the map (Mamemon, MetalGreymon) intentionally receive no rule —
+the user will assign their gate later. Recruits at 0 PP also receive
+no rule (always logically reachable from their region).
 
-What this module sets:
-
-* The completion condition: Final Battle requires AS Decoder + 50
-  ``Prosperity Point`` items. ``Prosperity Point`` is a real AP item in
-  v7 (50 copies in the pool); the in-game prosperity counter is
-  enforced client-side from the count of received items.
-
-* No per-location prereqs beyond Final Battle.
+Final Battle stays at AS Decoder + 50 Prosperity Points.
 """
 
 from __future__ import annotations
@@ -20,6 +14,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from rule_builder.rules import Has
+
+from .locations import RECRUIT_PP_REQUIREMENTS
 
 if TYPE_CHECKING:
     from .world import DigimonWorldWorld
@@ -29,7 +25,21 @@ PROSPERITY_ITEM_NAME = "Prosperity Point"
 
 
 def set_all_rules(world: DigimonWorldWorld) -> None:
+    _set_recruit_rules(world)
     _set_completion_condition(world)
+
+
+def _set_recruit_rules(world: DigimonWorldWorld) -> None:
+    """Attach the user-supplied PP gate to each recruit AP location.
+
+    Recruits with a 0-PP gate are skipped (no rule = always reachable).
+    """
+
+    for recruit_name, pp in RECRUIT_PP_REQUIREMENTS.items():
+        if pp <= 0:
+            continue
+        location = world.get_location(recruit_name)
+        world.set_rule(location, Has(PROSPERITY_ITEM_NAME, count=pp))
 
 
 def _set_completion_condition(world: DigimonWorldWorld) -> None:
