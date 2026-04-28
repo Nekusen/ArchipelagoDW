@@ -155,6 +155,16 @@ RAM_TECHNIQUE_ENTRY_STRIDE: Final = 12 + 2 * 2
 # 0x1BDF58. Three independent depositions, all match the formula.
 
 RAM_INVENTORY_SIZE: Final = 0x000DD4CE         # current item count (TBD: u8 vs u16)
+
+# Player on-hand inventory: 10 fixed slots. Item ID byte at +i, quantity
+# byte at +i+0x1E (0x1E = 30 between IDs and quantities — verified live
+# 2026-04-28 by writing test items and watching them appear in the in-game
+# menu). Empty slot = ID 0xFF.
+RAM_INVENTORY_ITEM_IDS_BASE: Final = 0x0013D474
+RAM_INVENTORY_QUANTITIES_BASE: Final = 0x0013D492
+RAM_INVENTORY_SLOT_COUNT: Final = 10
+RAM_INVENTORY_EMPTY_SLOT_ID: Final = 0xFF
+
 RAM_ITEM_BANK_BASE: Final = 0x001BDF2C         # per-slot bank entries (verified live)
 RAM_ITEM_BANK_SIZE: Final = 128                # one byte per slot, 128 slots
 RAM_CURRENT_BITS: Final = 0x00134EB8           # u32 LE — money (verified live 2026-04-28)
@@ -1596,3 +1606,113 @@ ROM_FIX_LEO_CAVE_OFFSETS: Final = (
 ROM_OGREMON_SOFTLOCK_FORMAT: Final = "<H"
 ROM_OGREMON_SOFTLOCK_VALUE: Final = 235
 ROM_OGREMON_SOFTLOCK_OFFSETS: Final = (0x13FD689A, 0x140B7A1A)
+
+
+# =============================================================================
+# Chest item replacement (Phase 4 v9)
+# =============================================================================
+#
+# DW1 stores each chest's reward as a 2-byte ``spawnChest`` script entry:
+# byte 0 = opcode (``0x75``), byte 1 = 1-byte item ID. Source for the
+# offset table:
+# ``references/digimon_world_randomizer/digimon/data.py:230-243``
+# (``chestItemOffsets``).
+#
+# The standalone enumerated **73** chest entries — slightly more than
+# DWAP's 65-named chest list. The extra 8 entries are mid-cutscene or
+# secondary chest spawns we don't track as AP locations. Patching all
+# 73 is safe: AP only reacts to the 65 we have detection bits for; the
+# rest just become AP-sentinel grants the player won't notice.
+#
+# Replacement strategy: write item ID :data:`AP_CHEST_SENTINEL_ITEM_ID`
+# (129 = ``0x81``) at every chest's item byte. We probed the DW1 item
+# table's boundary live (2026-04-28) and confirmed that ID 129 renders
+# as a completely blank inventory slot — no name, no glyphs, no
+# fallback to a real item.
+#
+# Companion behavior: the AP client wipes any inventory slot containing
+# ID 129 each tick. Net effect: chest opens, blank slot appears for one
+# frame, next tick it's gone. The AP location fires from the chest-bit
+# signal independent of item delivery, so detection is unaffected.
+
+AP_CHEST_SENTINEL_ITEM_ID: Final = 0x81  # 129 — blank-render slot in DW1's item table
+
+ROM_CHEST_ITEM_FORMAT: Final = "B"
+ROM_CHEST_ITEM_VALUE: Final = AP_CHEST_SENTINEL_ITEM_ID
+
+# We also write a real 32-byte item-table entry at slot 129 so DW1's
+# chest-pickup textbox displays a clean "Found AP ITEM" message instead
+# of garbled glyphs from random adjacent memory. Entry layout (32 bytes):
+#
+#   bytes 0..19 : name (ASCII, NUL-padded, max 19 chars + 1 NUL)
+#   bytes 20..31: stats (price u32, then misc fields)
+#
+# We zero the stats — the item should have no real use; the client
+# wipes it from inventory within ~100ms anyway. If DW1 happens to call
+# the item's use-handler with all-zero stats, worst case is a no-op or
+# a brief glitch; the wipe makes such interaction nearly impossible.
+
+ROM_ITEM_TABLE_BASE: Final = 0x14D676C4
+ROM_ITEM_TABLE_ENTRY_SIZE: Final = 32
+
+AP_ITEM_NAME: Final = b"AP ITEM"  # 7 bytes, padded to 20 with NULs
+
+# 32 bytes: name (20) padded with NULs + 12 zero bytes for stats
+ROM_AP_ITEM_ENTRY_BYTES: Final = (
+    AP_ITEM_NAME.ljust(20, b"\x00") + b"\x00" * 12
+)
+assert len(ROM_AP_ITEM_ENTRY_BYTES) == ROM_ITEM_TABLE_ENTRY_SIZE, len(ROM_AP_ITEM_ENTRY_BYTES)
+
+
+def _table_byte_to_bin_flat(table_byte_offset: int) -> int:
+    """Translate a table-internal byte offset to a sector-aware flat BIN offset.
+
+    The item-data table starts at flat BIN ``ROM_ITEM_TABLE_BASE`` (sector
+    148639, user-data position 500) and continues for ``0x1260`` bytes
+    of user data. Because the BIN includes Mode2/2352 sector headers
+    (24 bytes) and EC blocks (280 bytes) interspersed, naive
+    ``base + offset`` arithmetic skips into EC zones for entries past
+    the first ~48. This helper hops over sector boundaries correctly.
+    """
+
+    base_sector = ROM_ITEM_TABLE_BASE // SECTOR_SIZE_BYTES
+    base_pos_in_sector = ROM_ITEM_TABLE_BASE - base_sector * SECTOR_SIZE_BYTES
+    base_pos_in_user_data = base_pos_in_sector - SECTOR_HEADER_BYTES
+    pos = base_pos_in_user_data + table_byte_offset
+    sector_advance, pos_within = divmod(pos, USER_DATA_BYTES)
+    sector = base_sector + sector_advance
+    return sector * SECTOR_SIZE_BYTES + SECTOR_HEADER_BYTES + pos_within
+
+
+ROM_AP_ITEM_ENTRY_OFFSET: Final = _table_byte_to_bin_flat(
+    AP_CHEST_SENTINEL_ITEM_ID * ROM_ITEM_TABLE_ENTRY_SIZE,
+)
+# Sanity: a 32-byte entry must not straddle a sector boundary, otherwise
+# the apply_tokens flat write would clobber a sector header / EC region.
+_entry_end = _table_byte_to_bin_flat(
+    AP_CHEST_SENTINEL_ITEM_ID * ROM_ITEM_TABLE_ENTRY_SIZE
+    + ROM_ITEM_TABLE_ENTRY_SIZE - 1,
+)
+assert (_entry_end - ROM_AP_ITEM_ENTRY_OFFSET) == ROM_ITEM_TABLE_ENTRY_SIZE - 1, (
+    f"AP ITEM entry crosses a sector boundary: "
+    f"start=0x{ROM_AP_ITEM_ENTRY_OFFSET:08X}, end=0x{_entry_end:08X}"
+)
+
+# Each entry below is the ROM offset of the chest's spawnChest opcode
+# (byte 0). The item-ID byte we want to overwrite lives at offset+1.
+ROM_CHEST_ITEM_OFFSETS: Final = (
+    0x13FE3118, 0x13FE6844, 0x13FEE01E, 0x13FEE02A, 0x13FEE036, 0x13FF4DE8,
+    0x13FF4DF4, 0x13FF6978, 0x13FF6984, 0x13FFA098, 0x13FFD7BC, 0x13FFE0F0,
+    0x13FFF35C, 0x14000EDC, 0x14000EE8, 0x14000EF4, 0x14003398, 0x140033A4,
+    0x14005868, 0x140073E8, 0x140073F4, 0x14008F7C, 0x14021168, 0x14021174,
+    0x14022D04, 0x14023624, 0x14023630, 0x14023F54, 0x14023F60, 0x14030964,
+    0x140377A8, 0x13FF58AA, 0x13FF58B6, 0x14038A04, 0x13FFA508, 0x14039338,
+    0x140396CA, 0x1403AEC4, 0x1403AED0, 0x1403AEDC, 0x1403AEE8, 0x14045424,
+    0x1404A6DC, 0x140539EC, 0x140539F8, 0x1405430C, 0x14054318, 0x14054324,
+    0x1405836C, 0x14058C9C, 0x14067B7C, 0x1406970C, 0x14073334, 0x14078F1C,
+    0x14079848, 0x14079854, 0x14079860, 0x1407986C, 0x1407A178, 0x1407A184,
+    0x1407AA94, 0x1407AAA0, 0x1407AAAC, 0x1407AAB8, 0x1407BD46, 0x1407BD52,
+    0x1407BD5E, 0x1407F430, 0x1407FD54, 0x14080688, 0x14080FB4, 0x140818F4,
+    0x14081900,
+)
+assert len(ROM_CHEST_ITEM_OFFSETS) == 73, len(ROM_CHEST_ITEM_OFFSETS)

@@ -58,8 +58,13 @@ from worlds.Files import APPatchExtension, APProcedurePatch, APTokenMixin, APTok
 
 from .data import edc
 from .data.addresses import (
+    ROM_AP_ITEM_ENTRY_BYTES,
+    ROM_AP_ITEM_ENTRY_OFFSET,
     ROM_BIN_BYTES,
     ROM_BIN_SHA1,
+    ROM_CHEST_ITEM_FORMAT,
+    ROM_CHEST_ITEM_OFFSETS,
+    ROM_CHEST_ITEM_VALUE,
     ROM_FIX_LEO_CAVE_FORMAT,
     ROM_FIX_LEO_CAVE_OFFSETS,
     ROM_FIX_LEO_CAVE_VALUE,
@@ -313,6 +318,30 @@ def _write_pp_calc_patch_tokens(patch: DigimonWorldProcedurePatch) -> None:
     patch.write_token(APTokenTypes.WRITE, ROM_PP_CALC_PATCH_OFFSET, patch_bytes)
 
 
+def _write_chest_item_tokens(patch: DigimonWorldProcedurePatch) -> None:
+    """Replace every chest's vanilla reward with the AP sentinel item.
+
+    Two parts:
+
+    1. For each chest's ``spawnChest`` script entry (opcode 0x75 + 1-byte
+       item ID), overwrite the item-ID byte to the AP sentinel
+       (id 129). AP-routed items remain the meaningful chest reward;
+       the in-game pickup is a transient placeholder we wipe in the
+       next client tick.
+    2. Write a clean 32-byte item-table entry for id 129 with the name
+       "AP ITEM" so the chest pickup textbox renders cleanly instead of
+       displaying garbage glyphs from random adjacent memory.
+    """
+
+    item_byte = struct.pack(ROM_CHEST_ITEM_FORMAT, ROM_CHEST_ITEM_VALUE)
+    for offset in ROM_CHEST_ITEM_OFFSETS:
+        patch.write_token(APTokenTypes.WRITE, offset + 1, item_byte)
+
+    patch.write_token(
+        APTokenTypes.WRITE, ROM_AP_ITEM_ENTRY_OFFSET, ROM_AP_ITEM_ENTRY_BYTES,
+    )
+
+
 def _write_softlock_fix_tokens(patch: DigimonWorldProcedurePatch) -> None:
     """Emit the standalone's softlock fix patches.
 
@@ -376,6 +405,7 @@ def write_patch(world: DigimonWorldWorld, output_directory: str) -> None:
     _write_recruit_remap_tokens(patch, world.recruit_remap)
     _write_pp_calc_patch_tokens(patch)
     _write_softlock_fix_tokens(patch)
+    _write_chest_item_tokens(patch)
 
     patch.write_file("token_data.bin", patch.get_token_binary())
 

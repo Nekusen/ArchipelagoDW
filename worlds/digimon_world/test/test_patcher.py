@@ -235,6 +235,22 @@ class TestGenerateOutput(DigimonWorldTestBase):
         for off in ROM_OGREMON_SOFTLOCK_OFFSETS:
             self.assertIn((off, ogremon_bytes), observed)
 
+        # Chest-item replacement tokens.
+        from ..data.addresses import (
+            ROM_AP_ITEM_ENTRY_BYTES,
+            ROM_AP_ITEM_ENTRY_OFFSET,
+            ROM_CHEST_ITEM_OFFSETS,
+            ROM_CHEST_ITEM_VALUE,
+        )
+        chest_item_bytes = struct.pack("B", ROM_CHEST_ITEM_VALUE)
+        for off in ROM_CHEST_ITEM_OFFSETS:
+            self.assertIn((off + 1, chest_item_bytes), observed)
+        # Item-table entry for the AP sentinel name.
+        self.assertIn(
+            (ROM_AP_ITEM_ENTRY_OFFSET, ROM_AP_ITEM_ENTRY_BYTES),
+            observed,
+        )
+
 
 # =============================================================================
 # EDC recalculation against a synthetic disc image
