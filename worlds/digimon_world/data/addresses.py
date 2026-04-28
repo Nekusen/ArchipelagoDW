@@ -50,7 +50,6 @@ from __future__ import annotations
 
 from typing import Final, NamedTuple
 
-
 # =============================================================================
 # BIN sector geometry (Mode2/2352, FFT pattern)
 # =============================================================================
@@ -133,10 +132,32 @@ RAM_MAX_MP: Final = 0x001557F2                # u16
 RAM_TECHNIQUE_ENTRY_STRIDE: Final = 12 + 2 * 2
 
 # ----- Inventory and economy ------------------------------------------------
+#
+# Bank layout (verified live 2026-04-28):
+#
+#     bank_quantity[item] = ram[RAM_ITEM_BANK_BASE + (item.dw_code - 2000)]
+#
+# i.e. each item in DWAP's 2000-block (consumables, MISC, DV items, key
+# items) has a fixed 1-byte slot at ``RAM_ITEM_BANK_BASE + slot_index``,
+# where the byte stores the quantity (0..max) the player has stashed.
+# The bank spans exactly 128 bytes (0x001BDF2C..0x001BDFAB) — slots 0
+# through 127. Slot 128 lands at :data:`RAM_CARD_LIST_BASE`.
+#
+# This is the **bank** (offline storage at any in-game bank NPC), NOT
+# the personal inventory the player carries. Personal inventory lives
+# at a separate, RE-pending address. AP item delivery uses the bank
+# because it's a single-write-per-item operation that works regardless
+# of where the player is in the game; the player retrieves AP-delivered
+# items via any bank visit.
+#
+# Verified samples 2026-04-28: MP Floppy (dw_code 2004) at 0x1BDF30,
+# Meat (dw_code 2038) at 0x1BDF52, Digimushrm (dw_code 2044) at
+# 0x1BDF58. Three independent depositions, all match the formula.
 
 RAM_INVENTORY_SIZE: Final = 0x000DD4CE         # current item count (TBD: u8 vs u16)
-RAM_ITEM_BANK_BASE: Final = 0x001BDF2C         # per-slot inventory entries
-RAM_CURRENT_BITS: Final = 0x00134EB8           # u32 — money
+RAM_ITEM_BANK_BASE: Final = 0x001BDF2C         # per-slot bank entries (verified live)
+RAM_ITEM_BANK_SIZE: Final = 128                # one byte per slot, 128 slots
+RAM_CURRENT_BITS: Final = 0x00134EB8           # u32 LE — money (verified live 2026-04-28)
 RAM_MONOCHROME_PROFIT: Final = 0x0013500C      # Monochromon side-business cash
 
 # ----- Recruit / town progress ---------------------------------------------
@@ -176,6 +197,140 @@ RAM_LAST_SCRIPT: Final = 0x00134FDC
 # unimplemented — see PLAN.md Q2 "RAM map availability" subquestions.
 
 RAM_RECRUITMENT_FUNCTION_PLACEHOLDER: Final = 0x00000000
+
+
+# =============================================================================
+# RAM — per-location completion-bit / threshold tables (DWAP-ingested)
+# =============================================================================
+#
+# Source: ``references/DWAP/source/DWAP/Resources/{Locations,Chests,Prosperity}.json``.
+# These tables map each AP location to a runtime-detectable RAM signal:
+#
+# * **Recruits and chests** are bit-set checks: the K-th bit at a known byte
+#   address flips from 0 to 1 when the in-game event happens. Bit position
+#   is little-endian within the byte (bit 0 is the 0x01 mask).
+# * **Prosperity NPC gifts** are value-comparisons: a single byte at
+#   :data:`RAM_PROSPERITY_POINTS` carries the running prosperity count, and
+#   the K-th gift unlocks when ``byte > K - 1``. The N-th-gift logic is
+#   ``(RAM_PROSPERITY_POINTS, N)`` meaning "byte must be >= N".
+#
+# **Validation status (2026-04-28):** ingested verbatim from DWAP's
+# Resources directory but **not yet validated against a live BizHawk
+# session**. DWAP's recruit-detection runtime hook (``RecruitmentHook.cs``)
+# never installed because ``RecruitmentFunctionAddress = 0x00000000``, so
+# the bit-poll code path was never exercised in production. The addresses
+# here are best-available data, not verified data. Phase 4 v2 should
+# validate against 2-3 entries (one recruit, one chest, one prosperity
+# threshold) in a live BizHawk session before trusting the rest.
+#
+# Discrepancy with the standalone randomizer's chest catalog: DWAP ships
+# **65** runtime-detectable chests; the standalone's
+# :data:`ROM_CHEST_ITEM_OFFSETS` enumerates **73** chest *placement*
+# offsets. The 8 extras may be decoy chests, duplicates, or chests DWAP
+# missed. Phase 2's location list currently has 73 chests; reconciliation
+# is open work and is documented in ``phase_progress.md``.
+
+# Per-recruit completion bits. Keyed by recruit *location* name (the bare
+# Digimon name; matches :data:`worlds.digimon_world.locations.RECRUIT_NAMES`).
+# Source: DWAP Locations.json.
+RECRUIT_RAM_BITS: Final[dict[str, tuple[int, int]]] = {
+    "Agumon":       (0x001BDFE6, 3),
+    "Betamon":      (0x001BDFE6, 4),
+    "Greymon":      (0x001BDFE6, 5),
+    "Devimon":      (0x001BDFE6, 6),
+    "Airdramon":    (0x001BDFE6, 7),
+    "Tyrannomon":   (0x001BDFE7, 0),
+    "Meramon":      (0x001BDFE7, 1),
+    "Seadramon":    (0x001BDFE7, 2),
+    "Numemon":      (0x001BDFE7, 3),
+    "MetalGreymon": (0x001BDFE7, 4),
+    "Mamemon":      (0x001BDFE7, 5),
+    "Monzaemon":    (0x001BDFE7, 6),
+    "Gabumon":      (0x001BDFE8, 1),
+    "Elecmon":      (0x001BDFE8, 2),
+    "Kabuterimon":  (0x001BDFE8, 3),
+    "Angemon":      (0x001BDFE8, 4),
+    "Birdramon":    (0x001BDFE8, 5),
+    "Garurumon":    (0x001BDFE8, 6),
+    "Frigimon":     (0x001BDFE8, 7),
+    "Whamon":       (0x001BDFE9, 0),
+    "Vegiemon":     (0x001BDFE9, 1),
+    "SkullGreymon": (0x001BDFE9, 2),
+    "MetalMamemon": (0x001BDFE9, 3),
+    "Vademon":      (0x001BDFE9, 4),
+    "Patamon":      (0x001BDFE9, 7),
+    "Kunemon":      (0x001BDFEA, 0),
+    "Unimon":       (0x001BDFEA, 1),
+    "Ogremon":      (0x001BDFEA, 2),
+    "Shellmon":     (0x001BDFEA, 3),
+    "Centarumon":   (0x001BDFEA, 4),
+    "Bakemon":      (0x001BDFEA, 5),
+    "Drimogemon":   (0x001BDFEA, 6),
+    "Sukamon":      (0x001BDFEA, 7),
+    "Andromon":     (0x001BDFEB, 0),
+    "Giromon":      (0x001BDFEB, 1),
+    "Etemon":       (0x001BDFEB, 2),
+    "Biyomon":      (0x001BDFEB, 5),
+    "Palmon":       (0x001BDFEB, 6),
+    "Monochromon":  (0x001BDFEB, 7),
+    "Leomon":       (0x001BDFEC, 0),
+    "Coelamon":     (0x001BDFEC, 1),
+    "Kokatorimon":  (0x001BDFEC, 2),
+    "Kuwagamon":    (0x001BDFEC, 3),
+    "Mojyamon":     (0x001BDFEC, 4),
+    "Nanimon":      (0x001BDFEC, 5),
+    "Megadramon":   (0x001BDFEC, 6),
+    "Piximon":      (0x001BDFEC, 7),
+    "Digitamamon":  (0x001BDFED, 0),
+    "Penguinmon":   (0x001BDFED, 1),
+    "Ninjamon":     (0x001BDFED, 2),
+}
+
+# Per-chest completion bits, keyed by DWAP's chest name ("Chest 1".."Chest 65"
+# plus one descriptively-named "Chest: Dragon Eye Lake" at slot 55).
+# Source: DWAP Chests.json. Phase 2's locations currently use names like
+# "Chest 01 (File City)"..."Chest 73 (Tower)"; reconciling those with these
+# DWAP names is open work — see ``phase_progress.md`` Phase 4 v2 notes.
+DWAP_CHEST_RAM_BITS: Final[dict[str, tuple[int, int]]] = {
+    "Chest 1":  (0x001BE01E, 2),  "Chest 2":  (0x001BE01E, 3),
+    "Chest 3":  (0x001BE01E, 4),  "Chest 4":  (0x001BE01E, 5),
+    "Chest 5":  (0x001BE01E, 6),  "Chest 6":  (0x001BE01E, 7),
+    "Chest 7":  (0x001BE01F, 0),  "Chest 8":  (0x001BE01F, 1),
+    "Chest 9":  (0x001BE01F, 2),  "Chest 10": (0x001BE01F, 3),
+    "Chest 11": (0x001BE01F, 4),  "Chest 12": (0x001BE01F, 5),
+    "Chest 13": (0x001BE01F, 6),  "Chest 14": (0x001BE01F, 7),
+    "Chest 15": (0x001BE020, 0),  "Chest 16": (0x001BE020, 1),
+    "Chest 17": (0x001BE020, 2),  "Chest 18": (0x001BE020, 3),
+    "Chest 19": (0x001BE020, 4),  "Chest 20": (0x001BE020, 5),
+    "Chest 21": (0x001BE020, 6),  "Chest 22": (0x001BE020, 7),
+    "Chest 23": (0x001BE021, 0),  "Chest 24": (0x001BE021, 1),
+    "Chest 25": (0x001BE021, 2),  "Chest 26": (0x001BE021, 3),
+    "Chest 27": (0x001BE021, 4),  "Chest 28": (0x001BE021, 5),
+    "Chest 29": (0x001BE021, 6),  "Chest 30": (0x001BE021, 7),
+    "Chest 31": (0x001BE022, 0),  "Chest 32": (0x001BE022, 1),
+    "Chest 33": (0x001BE022, 2),  "Chest 34": (0x001BE022, 3),
+    "Chest 35": (0x001BE022, 4),  "Chest 36": (0x001BE022, 5),
+    "Chest 37": (0x001BE022, 6),  "Chest 38": (0x001BE022, 7),
+    "Chest 39": (0x001BE023, 0),  "Chest 40": (0x001BE023, 1),
+    "Chest 41": (0x001BE023, 2),  "Chest 42": (0x001BE023, 3),
+    "Chest 43": (0x001BE023, 5),  "Chest 44": (0x001BE023, 6),
+    "Chest 45": (0x001BE023, 7),  "Chest 46": (0x001BE024, 0),
+    "Chest 47": (0x001BE024, 1),  "Chest 48": (0x001BE024, 2),
+    "Chest 49": (0x001BE024, 4),  "Chest 50": (0x001BE024, 5),
+    "Chest 51": (0x001BE024, 6),  "Chest 52": (0x001BE024, 7),
+    "Chest 53": (0x001BE025, 0),  "Chest 54": (0x001BE025, 1),
+    "Chest: Dragon Eye Lake": (0x001BE025, 2),
+    "Chest 56": (0x001BE025, 3),  "Chest 57": (0x001BE025, 4),
+    "Chest 58": (0x001BE025, 5),  "Chest 59": (0x001BE025, 6),
+    "Chest 60": (0x001BE025, 7),  "Chest 61": (0x001BE026, 0),
+    "Chest 62": (0x001BE026, 1),  "Chest 63": (0x001BE026, 2),
+    "Chest 64": (0x001BE026, 3),  "Chest 65": (0x001BE026, 4),
+}
+
+# Bit gaps (intentional, mirrored from DWAP):
+#   - 0x001BE023 bit 4 — between "Chest 42" (bit 3) and "Chest 43" (bit 5).
+#   - 0x001BE024 bit 3 — between "Chest 48" (bit 2) and "Chest 49" (bit 4).
+# These bits may be reserved or correspond to chests not yet mapped by DWAP.
 
 
 # =============================================================================

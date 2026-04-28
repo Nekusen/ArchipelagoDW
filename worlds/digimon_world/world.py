@@ -1,0 +1,86 @@
+""":class:`World` subclass for Digimon World 1 (PS1, SLUS-01032).
+
+What works in this revision:
+
+* The world registers with :class:`AutoWorldRegister` under
+  ``game = "Digimon World"``.
+* ``python Generate.py`` produces both a multiworld archive and a
+  per-player ``.apdw1`` patch file (the Phase 3 deliverable).
+* The Launcher recognises ``.apdw1`` files via :mod:`.components`.
+* The generic test suite under :mod:`test.general` passes.
+
+What is intentionally still stubbed:
+
+* Phase 4's :mod:`.client` — no :class:`BizHawkClient` subclass yet, no
+  Lua wiring, no in-game item delivery. ``.apdw1`` opens the in-tree
+  BizHawk client until then.
+* Phase 3's token list is intentionally minimal (only an ISO9660
+  volume-id marker). Per-byte chest/recruit ROM rewrites land once
+  their offsets in :mod:`.data.addresses` are individually verified.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from typing import Any, ClassVar
+
+from worlds.AutoWorld import World
+
+from . import items, locations, regions, rom, rules
+from .options import DigimonWorldOptions
+from .rom import DigimonWorldSettings
+
+
+class DigimonWorldWorld(World):
+    """Digimon World 1 (PS1, SLUS-01032 USA build).
+
+    This package is in active development on the ``digimon-world-ps1``
+    branch of the ArchipelagoDW fork. It is a from-scratch rewrite — the
+    older community implementation (see ``references/DWAP``) is studied
+    only, never imported. See ``PLAN.md`` for the full phased plan and
+    ``REFERENCES_NOTES.md`` for the upstream-reference bibliography.
+    """
+
+    game: ClassVar[str] = "Digimon World"
+    options_dataclass = DigimonWorldOptions
+    options: DigimonWorldOptions
+
+    settings_key = "digimon_world_options"
+    settings: ClassVar[DigimonWorldSettings]
+
+    item_name_to_id = items.ITEM_NAME_TO_ID
+    location_name_to_id = locations.LOCATION_NAME_TO_ID
+
+    item_name_groups = items.ITEM_NAME_GROUPS
+    location_name_groups = locations.LOCATION_NAME_GROUPS
+
+    def create_regions(self) -> None:
+        regions.create_and_connect_regions(self)
+        locations.create_all_locations(self)
+        locations.create_events(self)
+
+    def create_items(self) -> None:
+        items.create_all_items(self)
+
+    def set_rules(self) -> None:
+        rules.set_all_rules(self)
+
+    def create_item(self, name: str) -> items.DigimonWorldItem:
+        return items.create_item(self, name)
+
+    def get_filler_item_name(self) -> str:
+        return items.FILLER_ITEM_NAME
+
+    def fill_slot_data(self) -> Mapping[str, Any]:
+        return self.options.as_dict("goal")
+
+    def generate_output(self, output_directory: str) -> None:
+        """Phase 3 entry point — emit the per-player ``.apdw1`` patch.
+
+        Generation does **not** read the user's ``.bin``. The token
+        blob is composed entirely from in-memory data; the source ROM
+        is only consulted later, at patch-apply time, by
+        :class:`worlds.digimon_world.rom.DigimonWorldProcedurePatch`.
+        """
+
+        rom.write_patch(self, output_directory)
