@@ -1,4 +1,4 @@
-"""Item table for the Digimon World 1 APWorld (Phase 2: full v1 pool).
+"""Item table for the Digimon World 1 APWorld (Phase 4 v6: AP-recruit-free).
 
 Item IDs use DWAP's ``base_id = 690_000`` convention from
 ``references/DWAP/Apworld/dw1/Items.py`` (an item's AP id is
@@ -7,25 +7,28 @@ cross-walk-ability with DWAP-era seeds for items that overlap.
 
 DWAP's ``dw_code`` namespace partitions:
 
-* ``1000``-block — recruit-completion items (kept in DWAP, **deliberately
-  unused here**: this world models recruitment via location checks plus
-  a "Recruit: X Soul" pool item, not a separate "X Recruited" pool item).
+* ``1000``-block — reserved (DWAP recruit-completion items).
 * ``2000``-block — consumables, MISC, DV items.
 * ``3000``-block — progressive / bits.
-* ``4000``-block — souls (one per recruitable Digimon).
+* ``4000``-block — reserved (was recruit items in earlier phases).
 
-Locked v1 MVP scope (see ``mvp_scope.md`` memory): chests + NPC gifts +
-starter + recruitment. Digivolution randomization deferred to v2, so the
-``DV`` items are present only as filler/useful pool ballast — they don't
-gate logic. DeathLink deferred. ``Progressive Stat Cap`` from DWAP's
-3000-block is **not** in the v1 pool because it is a digivolution-system
-item.
+Recruit handling
+================
 
-Souls for Greymon and MetalGreymon are intentionally absent: per
-``dw1_recruitment_logic.md`` and DWAP's ``RecruitDigimon.py``, both
-recruits are unlocked via prosperity (15 PP and 50 PP respectively) plus
-a recruit-chain prereq, not via soul items. Their AP locations therefore
-have non-soul AP items shuffled onto them by fill.
+Recruits are NOT AP items in this revision. After live testing showed
+the trigger-remap mechanism couldn't decouple "encounter completed"
+from "Digimon joins city" without much deeper RE work (see
+``phase_progress.md``), recruits were moved out of the AP loop:
+
+* No ``"X Recruit"`` items exist in the pool.
+* No AP locations exist for fighting Digimon.
+* The patcher still ships a closed-shuffle ``recruit_remap`` that
+  vanilla-style remaps which Digimon recruits at which spawn point
+  (the standalone DW1 randomizer's well-tested behavior).
+
+Net effect: the player still sees a randomized recruit roster as they
+explore the world, but it's resolved entirely in-ROM. AP carries
+chests, prosperity gifts, and the starter only.
 """
 
 from __future__ import annotations
@@ -69,48 +72,6 @@ _KEY_ITEMS: Final[dict[str, ItemEntry]] = {
 }
 
 # =============================================================================
-# Recruit souls
-# =============================================================================
-# Soul items track DWAP's 4000-block. Each soul's ``dw_code`` is
-# ``4000 + recruit-index`` from DWAP's RecruitDigimon order (preserved here so
-# AP IDs match DWAP's). Greymon (4002) and MetalGreymon (4009) soul codes
-# are reserved (skipped) so the namespace doesn't shift.
-
-_SOUL_NAMES: Final[tuple[str, ...]] = (
-    "Agumon", "Betamon", "Devimon", "Airdramon", "Tyrannomon",
-    "Meramon", "Seadramon", "Numemon", "Mamemon", "Monzaemon",
-    "Gabumon", "Elecmon", "Kabuterimon", "Angemon", "Birdramon",
-    "Garurumon", "Frigimon", "Whamon", "Vegiemon", "SkullGreymon",
-    "MetalMamemon", "Vademon", "Patamon", "Kunemon", "Unimon",
-    "Ogremon", "Shellmon", "Centarumon", "Bakemon", "Drimogemon",
-    "Sukamon", "Andromon", "Giromon", "Etemon", "Biyomon",
-    "Palmon", "Monochromon", "Leomon", "Coelamon", "Kokatorimon",
-    "Kuwagamon", "Mojyamon", "Nanimon", "Megadramon", "Piximon",
-    "Digitamamon", "Penguinmon", "Ninjamon",
-)
-
-# DWAP soul-code mapping. Source: references/DWAP/Apworld/dw1/Items.py:224-273.
-_SOUL_DW_CODES: Final[dict[str, int]] = {
-    "Agumon": 4000, "Betamon": 4001, "Devimon": 4003, "Airdramon": 4004,
-    "Tyrannomon": 4005, "Meramon": 4006, "Seadramon": 4007, "Numemon": 4008,
-    "Mamemon": 4010, "Monzaemon": 4011, "Gabumon": 4012, "Elecmon": 4013,
-    "Kabuterimon": 4014, "Angemon": 4015, "Birdramon": 4016, "Garurumon": 4017,
-    "Frigimon": 4018, "Whamon": 4019, "Vegiemon": 4020, "SkullGreymon": 4021,
-    "MetalMamemon": 4022, "Vademon": 4023, "Patamon": 4024, "Kunemon": 4025,
-    "Unimon": 4026, "Ogremon": 4027, "Shellmon": 4028, "Centarumon": 4029,
-    "Bakemon": 4030, "Drimogemon": 4031, "Sukamon": 4032, "Andromon": 4033,
-    "Giromon": 4034, "Etemon": 4035, "Biyomon": 4036, "Palmon": 4037,
-    "Monochromon": 4038, "Leomon": 4039, "Coelamon": 4040, "Kokatorimon": 4041,
-    "Kuwagamon": 4042, "Mojyamon": 4043, "Nanimon": 4044, "Megadramon": 4045,
-    "Piximon": 4046, "Digitamamon": 4047, "Penguinmon": 4048, "Ninjamon": 4049,
-}
-
-_SOUL_ITEMS: Final[dict[str, ItemEntry]] = {
-    f"{name} Soul": ItemEntry(_SOUL_DW_CODES[name], ItemClassification.progression)
-    for name in _SOUL_NAMES
-}
-
-# =============================================================================
 # DV (digivolution) items
 # =============================================================================
 # Pool ballast for v1. Digivolution randomization is deferred to v2; until
@@ -141,15 +102,15 @@ _CONSUMABLES: Final[dict[str, ItemEntry]] = {
     name: ItemEntry(code, ItemClassification.filler) for name, code in (
         ("SM Recovery", 2000), ("Med Recovery", 2001), ("Lrg Recovery", 2002),
         ("Sup Recovery", 2003), ("MP Floppy", 2004), ("Medium MP", 2005),
-        ("Large MP", 2006), ("Double flop", 2007), ("Various", 2008),
-        ("Omnipotent", 2009), ("Protection", 2010), ("Restore", 2011),
-        ("Sup.restore", 2012), ("Bandage", 2013), ("Medicine", 2014),
+        ("Large MP", 2006), ("Various", 2008),
+        ("Protection", 2010), ("Restore", 2011),
+        ("Sup.restore", 2012), ("Medicine", 2014),
         ("Off. Disk", 2015), ("Def. Disk", 2016), ("Hispeed dsk", 2017),
-        ("Omni Disk", 2018), ("S.Off.disk", 2019), ("S.Def.disk", 2020),
-        ("S.speed.disk", 2021), ("Auto Pilot", 2022), ("Off. Chip", 2023),
-        ("Def. Chip", 2024), ("Brain Chip", 2025), ("Quick Chip", 2026),
+        ("Omni Disk", 2018),
+        ("Off. Chip", 2023),
+        ("Brain Chip", 2025),
         ("HP Chip", 2027), ("MP Chip", 2028), ("Meat", 2038),
-        ("Giant Meat", 2039), ("Sirloin", 2040), ("Supercarrot", 2041),
+        ("Sirloin", 2040), ("Supercarrot", 2041),
         ("Hawk radish", 2042), ("Spiny green", 2043),
     )
 }
@@ -165,15 +126,36 @@ _BITS: Final[dict[str, ItemEntry]] = {
 }
 
 # =============================================================================
+# Prosperity Point — AP-controlled in-game prosperity
+# =============================================================================
+# In-game prosperity is enforced client-side: every watcher tick the
+# client writes the count of received ``Prosperity Point`` items to
+# :data:`worlds.digimon_world.data.addresses.RAM_PROSPERITY_POINTS`.
+# Any vanilla DW1 attempt to bump prosperity is overwritten on the next
+# tick. AP is the single source of truth for prosperity progression.
+#
+# The pool ships exactly :data:`PROSPERITY_POINT_COUNT` copies of the
+# item — comfortably above the 50 Final-Battle goal gate so logic has
+# room to place them.
+
+PROSPERITY_POINT_NAME: Final = "Prosperity Point"
+PROSPERITY_POINT_COUNT: Final = 50
+
+_PROSPERITY: Final[dict[str, ItemEntry]] = {
+    PROSPERITY_POINT_NAME: ItemEntry(3003, ItemClassification.progression),
+}
+
+
+# =============================================================================
 # Final assembled item table
 # =============================================================================
 
 _ITEM_TABLE: Final[dict[str, ItemEntry]] = {
     **_KEY_ITEMS,
-    **_SOUL_ITEMS,
     **_DV_ITEMS,
     **_CONSUMABLES,
     **_BITS,
+    **_PROSPERITY,
 }
 
 ITEM_NAME_TO_ID: Final[dict[str, int]] = {
@@ -181,11 +163,11 @@ ITEM_NAME_TO_ID: Final[dict[str, int]] = {
 }
 
 ITEM_NAME_GROUPS: Final[dict[str, set[str]]] = {
-    "Recruit Souls": set(_SOUL_ITEMS),
     "Progression Keys": set(_KEY_ITEMS),
     "DV Items": set(_DV_ITEMS),
     "Consumables": set(_CONSUMABLES),
     "Bits": set(_BITS),
+    "Prosperity": set(_PROSPERITY),
 }
 
 FILLER_ITEM_NAME: Final = "1000 Bits"
@@ -194,10 +176,10 @@ FILLER_ITEM_NAME: Final = "1000 Bits"
 # =============================================================================
 # Itempool construction
 # =============================================================================
-# Total non-event location count is fixed by :mod:`.locations`. We seed the
-# pool with exactly the items defined above (149 entries), which by design
-# matches the location count. If a future option changes the location
-# count, the residual is filled with :func:`get_filler_item_name` calls.
+# Pool composition: one copy each of the explicit items in :data:`_ITEM_TABLE`,
+# plus :data:`PROSPERITY_POINT_COUNT - 1` extra copies of ``Prosperity Point``
+# (the table already includes one). Pad with filler to the unfilled-location
+# count.
 
 
 def create_item(world: DigimonWorldWorld, name: str) -> DigimonWorldItem:
@@ -206,9 +188,14 @@ def create_item(world: DigimonWorldWorld, name: str) -> DigimonWorldItem:
 
 
 def create_all_items(world: DigimonWorldWorld) -> None:
-    """Submit the v1 itempool (149 items)."""
+    """Submit the v1 itempool, padding to the unfilled-location count."""
 
     itempool: list[Item] = [world.create_item(name) for name in _ITEM_TABLE]
+    # _ITEM_TABLE contributes one ``Prosperity Point``; ship the rest.
+    itempool.extend(
+        world.create_item(PROSPERITY_POINT_NAME)
+        for _ in range(PROSPERITY_POINT_COUNT - 1)
+    )
     needed = len(world.multiworld.get_unfilled_locations(world.player)) - len(itempool)
     itempool.extend(world.create_filler() for _ in range(max(needed, 0)))
     world.multiworld.itempool += itempool

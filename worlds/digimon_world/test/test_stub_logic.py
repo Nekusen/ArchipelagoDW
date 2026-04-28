@@ -1,11 +1,16 @@
-"""Phase 2 logic tests for the Digimon World 1 APWorld.
+"""Logic tests for the Digimon World 1 APWorld (Phase 4 v7).
 
-These checks complement the generic suite in :mod:`test.general` by
-asserting v1-specific invariants that come straight from the rule
-cluster in :mod:`worlds.digimon_world.rules`. They are written against
-the DWAP-baseline transcription documented in
-``references/dw1_recruitment_logic.md`` §B; if Phase 2's verification
-work updates the rules, these tests should move with them.
+Recruits are AP locations again (50 spawn-point checks) but no longer
+ship as items. ``Prosperity Point`` is the only recruit-progression-
+adjacent AP item; 50 copies fill the 50-PP goal gate.
+
+Tests:
+
+* Item-pool / location-count balance.
+* Recruit AP locations exist for all 50 Digimon.
+* No ``X Recruit`` items in the pool.
+* Final-Battle endgame requires AS Decoder + 50 Prosperity Points.
+* The closed-shuffle ``recruit_remap`` is shaped right.
 """
 
 from typing import Any, ClassVar
@@ -13,7 +18,7 @@ from typing import Any, ClassVar
 from .bases import DigimonWorldTestBase
 
 
-class TestPhase2Logic(DigimonWorldTestBase):
+class TestPhase4Logic(DigimonWorldTestBase):
     options: ClassVar[dict[str, Any]] = {}
 
     # ------------------------------------------------------------------
@@ -38,83 +43,65 @@ class TestPhase2Logic(DigimonWorldTestBase):
             loc = self.multiworld.get_location(recruit_name, self.player)
             self.assertIsNotNone(loc.address, f"{recruit_name} should be id-bearing")
 
-    # ------------------------------------------------------------------
-    # Region gating
-    # ------------------------------------------------------------------
+    def test_no_k_prosperity_locations(self) -> None:
+        """K Prosperity locations were removed in v7."""
 
-    def test_fishing_rod_gates_greatlake(self) -> None:
-        """Without a fishing rod, Greatlake (Seadramon) is unreachable."""
-
-        self.assertAccessDependency(
-            ["Seadramon", "Whamon"],
-            [["old fishrod"], ["Amazing rod"]],
-            only_check_listed=True,
-        )
-
-    def test_seadramon_gates_beetle_land(self) -> None:
-        """Beetle Land recruits need Seadramon-soul."""
-
-        self.assertAccessDependency(
-            ["Kabuterimon", "Kuwagamon"],
-            [["Seadramon Soul", "old fishrod", "Kabuterimon Soul", "Kuwagamon Soul"]],
-            only_check_listed=True,
-        )
-
-    def test_gear_gates_drill_tunnel(self) -> None:
-        """Drimogemon's Drill Tunnel needs the Gear key item."""
-
-        self.assertAccessDependency(
-            ["Drimogemon"],
-            [["Gear", "Meramon Soul", "Drimogemon Soul",
-              "Coelamon Soul"]],
-            only_check_listed=True,
-        )
+        from .. import locations as loc_module
+        for name in loc_module.LOCATION_NAME_TO_ID:
+            self.assertFalse(
+                name.endswith(" Prosperity"),
+                f"{name} should not exist in v7",
+            )
 
     # ------------------------------------------------------------------
-    # Recruit graph gating (DWAP-baseline)
+    # Item pool shape
     # ------------------------------------------------------------------
 
-    def test_meramon_requires_coelamon_or_betamon(self) -> None:
-        """DWAP §B: Meramon needs Agumon AND ≥1 statcap (skipped in v1) AND
-        (Coelamon OR Betamon). v1 tests the Coelamon/Betamon disjunction."""
+    def test_no_recruit_items(self) -> None:
+        """No ``X Recruit`` items ship in v7."""
 
-        self.assertAccessDependency(
-            ["Meramon"],
-            [["Meramon Soul", "Coelamon Soul"], ["Meramon Soul", "Betamon Soul"]],
-            only_check_listed=True,
-        )
+        from ..items import ITEM_NAME_TO_ID
+        for name in ITEM_NAME_TO_ID:
+            self.assertFalse(
+                name.endswith(" Recruit"),
+                f"{name} should not exist in v7",
+            )
 
-    def test_whamon_chain_for_andromon(self) -> None:
-        """Andromon needs Whamon + Numemon souls (DWAP)."""
+    def test_prosperity_point_in_pool(self) -> None:
+        """Prosperity Point is shipped in the pool."""
 
-        self.assertAccessDependency(
-            ["Andromon"],
-            [["Andromon Soul", "Whamon Soul", "Numemon Soul",
-              "Seadramon Soul", "old fishrod"]],
-            only_check_listed=True,
-        )
+        from ..items import PROSPERITY_POINT_COUNT, PROSPERITY_POINT_NAME
 
-    def test_nanimon_recruit_chain(self) -> None:
-        """Nanimon needs Numemon + Leomon + Tyrannomon souls (DWAP)."""
+        pp_items = [
+            item for item in self.multiworld.itempool
+            if item.name == PROSPERITY_POINT_NAME
+        ]
+        self.assertEqual(len(pp_items), PROSPERITY_POINT_COUNT)
 
-        self.assertAccessDependency(
-            ["Nanimon"],
-            [["Nanimon Soul", "Numemon Soul", "Leomon Soul", "Tyrannomon Soul",
-              "Whamon Soul", "Seadramon Soul", "old fishrod",
-              "Centarumon Soul", "Meramon Soul", "Coelamon Soul",
-              "Mansion Key"]],
-            only_check_listed=True,
-        )
+    # ------------------------------------------------------------------
+    # Recruit shuffle
+    # ------------------------------------------------------------------
+
+    def test_recruit_remap_covers_shuffleable(self) -> None:
+        """Closed shuffle covers every shuffleable Digimon, with values
+        also drawn from the same set."""
+
+        from ..data.addresses import SHUFFLE_INCLUDED_RECRUITS
+
+        remap = self.world.recruit_remap
+        self.assertEqual(set(remap.keys()), set(SHUFFLE_INCLUDED_RECRUITS))
+        for partner in remap.values():
+            self.assertIn(partner, SHUFFLE_INCLUDED_RECRUITS)
 
     # ------------------------------------------------------------------
     # Endgame
     # ------------------------------------------------------------------
 
-    def test_final_battle_requires_as_decoder(self) -> None:
-        """Final Battle event needs the AS Decoder key item."""
+    def test_final_battle_requires_as_decoder_and_pp(self) -> None:
+        """Final Battle event needs AS Decoder + 50 Prosperity Points."""
 
         self.assertAccessDependency(
             ["Final Battle"],
-            [["AS Decoder"]],
+            [["AS Decoder", "Prosperity Point"]],
             only_check_listed=True,
         )

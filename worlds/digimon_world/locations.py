@@ -1,28 +1,28 @@
-"""Location table for the Digimon World 1 APWorld (Phase 2: full v1 list).
+"""Location table for the Digimon World 1 APWorld (Phase 4 v7).
 
 Location IDs use DWAP's ``base_id = 69_000_000`` convention, partitioned
 the same way:
 
-* ``69_001_xxx`` — chests
-* ``69_002_xxx`` — cards (not used in v1; reserved for future)
-* ``69_003_xxx`` — start-game / starter pickup
-* ``69_004_xxx`` — prosperity NPC gifts
-* ``69_005_xxx``..``69_054_xxx`` — recruit checks (one Digimon per 1000-block)
+* ``69_001_xxx`` — chests (65)
+* ``69_002_xxx`` — cards (reserved for future, unused in v1)
+* ``69_003_xxx`` — start-game / starter pickup (1)
+* ``69_004_xxx`` — reserved (was prosperity NPC gifts; gone in v7)
+* ``69_005_xxx``..``69_054_xxx`` — recruit checks, one Digimon per 1000-block
 
-Locked v1 MVP scope: chests + NPC gifts + starter + recruitment.
+Locked v1 MVP scope: chests + recruits + starter. NPC-gift "K Prosperity"
+locations are gone — prosperity is now a real AP item shipped in the
+pool, with the in-game prosperity counter enforced client-side from the
+count of delivered ``Prosperity Point`` items.
 
-The 73 chest IDs match the standalone randomizer's chest count
-(``references/digimon_world_randomizer/digimon/data.py:232-243``); chests
-are distributed across DW1 regions by approximate map-zone (see
-:mod:`.regions`). The exact chest-to-region assignment is a Phase 3
-deliverable when the patcher correlates each chest's ROM offset with its
-in-game placement; the v1 stub assignment here is plausible but not
-authoritative.
+Recruit AP locations cover all 50 Digimon. The shuffleable subset (38)
+gets a closed-shuffle trigger remap at patch time so the player sees a
+randomized recruit roster as they explore. The 12 non-shuffleable
+Digimon retain vanilla recruits. AP detection of "encounter completed"
+works the same way for both groups: poll the vanilla recruit-bit byte.
 
-The 25 NPC-gift checkpoints sample the DWAP 100-entry prosperity table
-at logic-relevant thresholds: 1, 2, 3, 5, 10, 15, 20, 25, 30, 35, 40, 45,
-50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100, plus 6 (the DWAP "or
-Meramon" gate threshold) and 12.
+Each recruit AP location is named after the spawn-point Digimon. AP
+fires the location when that spawn's encounter is won, regardless of
+which Digimon trigger-remap actually puts in city.
 """
 
 from __future__ import annotations
@@ -45,7 +45,7 @@ class LocationEntry(NamedTuple):
 
 
 # =============================================================================
-# Recruit locations
+# Recruit locations (50)
 # =============================================================================
 # Order and per-Digimon AP-id offsets follow DWAP's
 # Locations.py:69-118 (e.g. Agumon = 69_005_000, Betamon = 69_006_000, ...,
@@ -126,6 +126,7 @@ _RECRUIT_DW_IDS: Final[dict[str, int]] = {
 }
 
 RECRUIT_NAMES: Final[tuple[str, ...]] = tuple(_RECRUIT_REGIONS)
+assert len(RECRUIT_NAMES) == 50, len(RECRUIT_NAMES)
 
 
 # =============================================================================
@@ -136,19 +137,6 @@ RECRUIT_NAMES: Final[tuple[str, ...]] = tuple(_RECRUIT_REGIONS)
 # DWAP's specially-named ``Chest: Dragon Eye Lake``. AP IDs are zero-
 # indexed (Chest 1 = 69_001_000, Chest 2 = 69_001_001, ...,
 # Chest 65 = 69_001_064; Chest: Dragon Eye Lake at slot 55 = 69_001_054).
-#
-# **Region assignment is provisional**: v1 places every chest in
-# ``File City`` so they're unconditionally reachable from AP's logic
-# perspective. The player still has to traverse DW1 in-game to actually
-# open each chest, but AP fill won't gate progression items behind the
-# wrong region's access rule (which would be the failure mode of an
-# *incorrect* chest→region assignment). Once each chest's true in-game
-# location is identified — see Phase 4 v2.1 in ``phase_progress.md`` —
-# entries should be moved into their proper region.
-#
-# Source for the names: DWAP Chests.json. Source for the runtime bits
-# (used by :data:`worlds.digimon_world.client.LOCATION_RAM_BITS`):
-# :data:`worlds.digimon_world.data.addresses.DWAP_CHEST_RAM_BITS`.
 
 DWAP_CHEST_NAME_AT_SLOT_55: Final = "Chest: Dragon Eye Lake"
 
@@ -167,30 +155,6 @@ _CHEST_LOCATIONS: Final[dict[str, LocationEntry]] = {
 CHEST_NAMES: Final[tuple[str, ...]] = tuple(_CHEST_LOCATIONS)
 assert len(CHEST_NAMES) == 65, len(CHEST_NAMES)
 
-# =============================================================================
-# NPC-gift / prosperity locations (25)
-# =============================================================================
-# Each gift is the K-th gift in DWAP's 100-entry table; we keep DWAP's
-# numerical id (69_004_000 + K - 1) and name ("K Prosperity"). The PP
-# threshold gate ``Has("Prosperity Point", count=K)`` is set in
-# :mod:`.rules`.
-
-# PP thresholds capped at 50 because that is the highest threshold any v1
-# rule actually gates on (Mt. Infinity → Tower, Big Store, the 50-PP
-# recruit cluster). Maximum reachable PP under v1's "1 PP per location"
-# model is 50 recruits + len(thresholds) gifts; thresholds above 50 would
-# be unreachable even in all_state because PP is bounded by the number of
-# PP-granting locations themselves. If Phase 2 verification work changes
-# the per-recruit prosperity_value to match DWAP's RecruitDigimon table
-# (1, 2, 3 per recruit), this list can grow back toward 100.
-PROSPERITY_THRESHOLDS: Final[tuple[int, ...]] = (
-    1, 2, 3, 5, 6, 10, 12, 15, 20, 25, 30, 35, 40, 45, 50,
-)
-
-_PROSPERITY_LOCATIONS: Final[dict[str, LocationEntry]] = {
-    f"{k} Prosperity": LocationEntry(69_004_000 + k - 1, "File City")
-    for k in PROSPERITY_THRESHOLDS
-}
 
 # =============================================================================
 # Starter pickup (1)
@@ -199,6 +163,7 @@ _PROSPERITY_LOCATIONS: Final[dict[str, LocationEntry]] = {
 _STARTER_LOCATION: Final[dict[str, LocationEntry]] = {
     "Start Game": LocationEntry(69_003_000, "File City"),
 }
+
 
 # =============================================================================
 # Final assembled location table
@@ -209,11 +174,7 @@ _LOCATION_TABLE: Final[dict[str, LocationEntry]] = {
     **{name: LocationEntry(_RECRUIT_DW_IDS[name], _RECRUIT_REGIONS[name])
        for name in RECRUIT_NAMES},
     **_CHEST_LOCATIONS,
-    **_PROSPERITY_LOCATIONS,
 }
-
-# Recruit location names use the bare Digimon name; this is the AP-side
-# label. e.g. "Agumon" is the *location*; "Agumon Soul" is the *item*.
 
 LOCATION_NAME_TO_ID: Final[dict[str, int]] = {
     name: entry.id for name, entry in _LOCATION_TABLE.items()
@@ -222,7 +183,6 @@ LOCATION_NAME_TO_ID: Final[dict[str, int]] = {
 LOCATION_NAME_GROUPS: Final[dict[str, set[str]]] = {
     "Recruits": set(RECRUIT_NAMES),
     "Chests": set(_CHEST_LOCATIONS),
-    "Prosperity": set(_PROSPERITY_LOCATIONS),
     "Starter": set(_STARTER_LOCATION),
 }
 
@@ -242,41 +202,14 @@ def create_all_locations(world: DigimonWorldWorld) -> None:
 
 
 # =============================================================================
-# Prosperity-event location names
+# Final-Battle event
 # =============================================================================
-# Each recruit + each NPC gift gets a sibling "PP from <name>" event whose
-# locked item is "Prosperity Point". Names are produced here so both
-# :func:`create_events` (which creates the locations) and the rule-setter in
-# :mod:`.rules` (which applies the rule mirrored from the parent location)
-# agree on the spelling.
-
-def prosperity_event_name(parent_label: str) -> str:
-    return f"PP from {parent_label}"
-
-
-def _pp_event_targets() -> tuple[tuple[str, str, str], ...]:
-    """Return ``(event_name, parent_label, region_name)`` for each PP event."""
-
-    recruit_targets = [
-        (prosperity_event_name(r), r, _RECRUIT_REGIONS[r])
-        for r in RECRUIT_NAMES
-    ]
-    gift_targets = [
-        (prosperity_event_name(f"{k} Prosperity"), f"{k} Prosperity", "File City")
-        for k in PROSPERITY_THRESHOLDS
-    ]
-    return tuple(recruit_targets + gift_targets)
-
-
-PP_EVENT_TARGETS: Final[tuple[tuple[str, str, str], ...]] = _pp_event_targets()
-
+# The endgame is gated on ``AS Decoder`` + the AP-PP item count (50). PP
+# is a real AP item now, not an event item — so we no longer create
+# per-location PP-grant events.
 
 def create_events(world: DigimonWorldWorld) -> None:
-    """Create the Victory event and every Prosperity Point event.
-
-    AP forbids creating new locations during ``set_rules``; per-location
-    rules for these events are attached later in :mod:`.rules`.
-    """
+    """Create the Victory event."""
 
     from . import items as items_module
 
@@ -286,11 +219,3 @@ def create_events(world: DigimonWorldWorld) -> None:
         location_type=DigimonWorldLocation,
         item_type=items_module.DigimonWorldItem,
     )
-
-    for event_name, _parent_label, region_name in PP_EVENT_TARGETS:
-        world.get_region(region_name).add_event(
-            event_name,
-            "Prosperity Point",
-            location_type=DigimonWorldLocation,
-            item_type=items_module.DigimonWorldItem,
-        )

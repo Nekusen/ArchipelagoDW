@@ -1080,3 +1080,519 @@ ROM_GABU_PATCH_OFFSETS: Final = (
     0x0A7EEA9A,  # Brains
     0x0A7EEA9C,  # Bits
 )
+
+
+# =============================================================================
+# Recruit trigger remap data (Phase 4 v4 — full table)
+# =============================================================================
+#
+# DW1's "recruit-cutscene-and-roster" trigger at each recruit spawn point
+# reads a 2-byte little-endian "trigger ID" from a fixed ROM offset. The
+# trigger ID is the index into the game's recruit table; the table maps
+# trigger IDs to Digimon. By rewriting trigger IDs at spawn-point offsets,
+# we change *which Digimon's recruit cutscene + city-roster effects fire*
+# at each spot — without touching any code.
+#
+# **Important empirical finding (2026-04-28 live smoke test):** Swapping
+# the trigger ID at Betamon's spawn-point offsets to Coelamon's trigger ID
+# produced this behavior in-game:
+#
+#   * The wild encounter at Betamon's spawn point still spawned **Betamon**
+#     (the encounter geometry/sprite key is independent of the recruit
+#     trigger). The player fights Betamon.
+#   * After winning, the recruit cutscene + city-roster effect that fires
+#     is **Coelamon's** — Coelamon shows up in File City, not Betamon.
+#
+# This separates "fight done" (always vanilla, governed by encounter
+# geometry) from "in city" (controlled by trigger ID), which is exactly
+# the AP semantics the world wants:
+#
+#   * Walking to Digimon X's spawn → X's encounter fires → AP location
+#     "X Recruit" sends.
+#   * Receiving AP item "Y Recruit" → Y joins File City (delivered via
+#     RAM bit set, see :data:`RECRUIT_RAM_BITS`).
+#
+# Trigger-remap is therefore the patch-side mechanism that decouples
+# the two states; AP delivery handles the runtime side.
+#
+# Source for offsets and trigger IDs: standalone Digimon World randomizer
+# at ``references/digimon_world_randomizer/digimon/data.py:309-502``
+# (recruitOffsets table). Each entry there is
+# ``( (trigger_offsets...), (name_offsets...), trigger_id, digimon_id )``.
+# We carry only the trigger offsets and trigger ID — name strings are
+# DEFERRED groundwork (the standalone's name-byte writes require RE'ing
+# DW1's text encoding via ``scrutil.encode``, which is out of scope for
+# this phase). When a Digimon's encounter is remapped, the on-screen
+# name during the recruit cutscene will read the *vanilla* Digimon's
+# name; AP-side messaging via the AP location text and item text covers
+# the player-facing label gap until name-string writes land.
+#
+# Entries with empty trigger lists in the standalone (Seadramon, Megadramon
+# — "does nothing in town and has no Jijimon message") are excluded here:
+# there's nothing to remap for them.
+#
+# Entries the standalone left commented-out (Greymon, Monzaemon, Angemon,
+# Birdramon, Vegiemon, Centarumon, Palmon) are partial-RE: only one
+# trigger offset known. The standalone authors couldn't safely shuffle
+# them. We mirror that decision via :data:`SHUFFLE_EXCLUDED_RECRUITS`.
+
+ROM_RECRUIT_TRIGGER_FORMAT: Final = "<H"  # little-endian u16
+
+
+class RecruitTriggerEntry(NamedTuple):
+    """One row of the recruit trigger remap table.
+
+    :param trigger_id: 2-byte little-endian ID written at each offset.
+    :param trigger_offsets: ROM offsets where vanilla DW1 stores this
+        Digimon's trigger ID. Sector-aware writes (FFT recipe) handle
+        cross-sector positioning at patch time.
+    :param name_offsets: ROM offsets where the Digimon's display name
+        is stored as encoded bytes. Tracked for groundwork; not yet
+        written by the patcher (text-encoding RE deferred).
+    """
+
+    trigger_id: int
+    trigger_offsets: tuple[int, ...]
+    name_offsets: tuple[int, ...]
+
+
+ROM_RECRUIT_TRIGGERS: Final[dict[str, RecruitTriggerEntry]] = {
+    "Betamon": RecruitTriggerEntry(
+        trigger_id=204,
+        trigger_offsets=(
+            0x14059A40, 0x1405CA20, 0x1405CB42, 0x1405E344, 0x1406AB0A, 0x1405E6C2,
+            0x14060890, 0x1405C40A, 0x1405E222, 0x1402C5AE, 0x1405E044, 0x13FE581A,
+            0x13FD893A, 0x1405CD5C, 0x13FE503A, 0x1405E420, 0x1406D050, 0x1405C6A2,
+            0x1402BBE6, 0x1406D7E6, 0x14063CE2, 0x1406BC52, 0x1406F12E, 0x1405E9B0,
+            0x13FE5D32, 0x140B4572, 0x13FD8A4A, 0x140B9ABA, 0x1405C14A, 0x140B9BCA,
+        ),
+        name_offsets=(0x13FE9066, 0x13FE9BC8),
+    ),
+    "Devimon": RecruitTriggerEntry(
+        trigger_id=206,
+        trigger_offsets=(
+            0x1406FE82, 0x1406F0A4, 0x140B6668, 0x13FE44A2, 0x140BA898, 0x140701D2,
+            0x140BA7B4, 0x13FD9718, 0x13FD9634, 0x13FE543A, 0x1406D75C,
+        ),
+        name_offsets=(),
+    ),
+    "Tyrannomon": RecruitTriggerEntry(
+        trigger_id=208,
+        trigger_offsets=(
+            0x13FE5A02, 0x1406D806, 0x14063D02, 0x1406AC0E, 0x140BA318, 0x1406B784,
+            0x13FE591E, 0x13FD9120, 0x13FE5222, 0x1402BC06, 0x14059C28, 0x1406AB2A,
+            0x1406D238, 0x1406BE3A, 0x13FE513E, 0x140BA442, 0x14059B44, 0x1406C646,
+            0x1406F14E, 0x13FE5D52, 0x1406D154, 0x1406BD56, 0x1402C5CE, 0x13FE505A,
+            0x13FE583A, 0x14059A60, 0x1406C9E6, 0x1405C16A, 0x1406D070, 0x1406BC72,
+            0x140BA176, 0x14060A78, 0x140AD37A, 0x1402BCEA, 0x1406C07E, 0x1406D484,
+            0x1405218A, 0x13FD9198, 0x14060994, 0x1402C796, 0x1405EB98, 0x140BA2A0,
+            0x140598A4, 0x1405BFAE, 0x140608B0, 0x1402C6B2, 0x1405EAB4, 0x1405C5B6,
+            0x140B47C0, 0x13FD92C2, 0x14051FC6, 0x14063ECA, 0x1402BDCE, 0x1405E9D0,
+            0x1405C24E, 0x1406B3DE, 0x140AEBE2, 0x14063DE6, 0x1406D8EA, 0x1406ACF2,
+            0x13FD8FF6, 0x1406D9CE,
+        ),
+        name_offsets=(0x1401727C,),
+    ),
+    "Meramon": RecruitTriggerEntry(
+        trigger_id=209,
+        trigger_offsets=(
+            0x1406D802, 0x13FD9108, 0x1406AC0A, 0x1402BC02, 0x1406C910, 0x1406C516,
+            0x140AD31A, 0x13FE521E, 0x14059C24, 0x1406AB26, 0x140BA42A, 0x1405C5B2,
+            0x1406D234, 0x1406BE36, 0x13FE513A, 0x14059B40, 0x13FE5836, 0x1406F14A,
+            0x13FE5D4E, 0x1406D150, 0x1406BD52, 0x1406D354, 0x13FE5056, 0x140BA15A,
+            0x14059A5C, 0x1406C362, 0x1402BCE6, 0x1405C166, 0x1406D06C, 0x1406BC6E,
+            0x14060A74, 0x13FD917C, 0x140B4880, 0x140AEB82, 0x14052186, 0x140BA288,
+            0x1406B6C2, 0x14060990, 0x1402C792, 0x1405EB94, 0x13FE591A, 0x140598A0,
+            0x13FD92AA, 0x140608AC, 0x1402C6AE, 0x1405EAB0, 0x1406B2B2, 0x1405C24A,
+            0x14051FC2, 0x14063EC6, 0x1406D9CA, 0x1405E9CC, 0x1402BDCA, 0x13FD8FDA,
+            0x1402C5CA, 0x14063DE2, 0x1406D8E6, 0x1406BF52, 0x1406ACEE, 0x13FE59FE,
+            0x140BA2FC, 0x1405BFAA, 0x14063CFE,
+        ),
+        name_offsets=(0x13FF55CA,),
+    ),
+    "Numemon": RecruitTriggerEntry(
+        trigger_id=211,
+        trigger_offsets=(
+            0x1406D760, 0x13FD95E0, 0x1406FC62, 0x13FE44A6, 0x1406FFC8, 0x140B5A62,
+            0x140BA760, 0x140BA850, 0x1406F0A8, 0x13FD96D0, 0x13FE543E,
+        ),
+        name_offsets=(0x140745F6,),
+    ),
+    "Mamemon": RecruitTriggerEntry(
+        trigger_id=213,
+        trigger_offsets=(
+            0x13FD9700, 0x140BA880, 0x1406D764, 0x13FE5446, 0x1406F0AC, 0x1407012E,
+            0x13FE44AE, 0x140BA798, 0x140B598E, 0x13FD9618, 0x1406FDDC,
+        ),
+        name_offsets=(0x13FED010, 0x13FED476, 0x13FEDAB0, 0x1404CF06, 0x1404D9D0),
+    ),
+    "Gabumon": RecruitTriggerEntry(
+        trigger_id=217,
+        trigger_offsets=(
+            0x14067588, 0x13FD8F0C, 0x140BA08C, 0x140672CE, 0x140B563C,
+        ),
+        name_offsets=(
+            0x14036030, 0x14036C76, 0x1403729C, 0x14037C1A, 0x1403851A, 0x14038FB0,
+            0x14039AE2,
+        ),
+    ),
+    "Elecmon": RecruitTriggerEntry(
+        trigger_id=218,
+        trigger_offsets=(
+            0x13FD89F0, 0x1405C5E2, 0x140B4D44, 0x1405C556, 0x1405C4E6, 0x1405C56A,
+            0x13FD8C72, 0x140B9B70, 0x140B9DF2, 0x1405C596, 0x1405C084, 0x1405997A,
+        ),
+        name_offsets=(0x1400DCD6,),
+    ),
+    "Kabuterimon": RecruitTriggerEntry(
+        trigger_id=219,
+        trigger_offsets=(
+            0x1402E900, 0x140B8BF0, 0x14030F06, 0x140319C6, 0x1402E308, 0x1402FECC,
+            0x1402DBAC, 0x1402E090, 0x1402DE34, 0x14032398, 0x13FD7A70, 0x140B5B3A,
+            0x1402E6BE,
+        ),
+        name_offsets=(0x140294CC,),
+    ),
+    "Garurumon": RecruitTriggerEntry(
+        trigger_id=222,
+        trigger_offsets=(
+            0x1406B880, 0x13FE5A06, 0x1406D80A, 0x13FD9012, 0x140AEC2E, 0x1406CADA,
+            0x13FE5922, 0x14063D06, 0x13FE5226, 0x14059C2C, 0x1406AB2E, 0x140BA334,
+            0x13FD9138, 0x140608B4, 0x1406D23C, 0x1402BC0A, 0x13FE583E, 0x1406C742,
+            0x14059B48, 0x1405EAB8, 0x1406F152, 0x13FE5D56, 0x1406D158, 0x1406BD5A,
+            0x13FE505E, 0x14059A64, 0x1406AC12, 0x1405C16E, 0x1406D9D2, 0x1406D074,
+            0x1406BE3E, 0x1406BC76, 0x140BA45A, 0x1406C17A, 0x14060A7C, 0x1406D580,
+            0x13FE5142, 0x1405218E, 0x140BA192, 0x1402BCEE, 0x14060998, 0x1402C79A,
+            0x1405EB9C, 0x140598A8, 0x1405BFB2, 0x13FD91B4, 0x1402C6B6, 0x140BA2B8,
+            0x1405C5BA, 0x140AD3C6, 0x14051FCA, 0x14063ECE, 0x1402C5D2, 0x1405E9D4,
+            0x13FD92DA, 0x140B4B26, 0x14063DEA, 0x1406B4DA, 0x1402BDD2, 0x1406D8EE,
+            0x1405C252, 0x1406ACF6,
+        ),
+        name_offsets=(0x1401F5FE,),
+    ),
+    "Frigimon": RecruitTriggerEntry(
+        trigger_id=223,
+        trigger_offsets=(
+            0x14060A80, 0x1406C280, 0x140BA472, 0x1402BDD6, 0x14063D0A, 0x140B118C,
+            0x13FE5842, 0x1406D80E, 0x14052192, 0x13FD902E, 0x1406CC16, 0x1406B99A,
+            0x1406099C, 0x13FE5D5A, 0x1402C79E, 0x1405EBA0, 0x13FE5926, 0x140AEEAA,
+            0x140598AC, 0x1405C172, 0x140BA1AE, 0x14059C30, 0x1406AB32, 0x1405BFB6,
+            0x140608B8, 0x1402C6BA, 0x1405EABC, 0x13FE5A0A, 0x1405C5BE, 0x1406D240,
+            0x1406BE42, 0x1406C844, 0x13FE5146, 0x1402C5D6, 0x1402BCF2, 0x14059B4C,
+            0x1405C256, 0x14051FCE, 0x140BA350, 0x14063ED2, 0x1406AC16, 0x1402BC0E,
+            0x1406F156, 0x1405E9D8, 0x140B4A80, 0x1406D15C, 0x1406ACFA, 0x1406BD5E,
+            0x1406B5E0, 0x13FD9150, 0x13FE5062, 0x1406D9D6, 0x14063DEE, 0x14059A68,
+            0x1406D8F2, 0x13FD91D0, 0x1406D078, 0x13FD92F2, 0x1406BC7A, 0x140BA2D0,
+            0x13FE522A,
+        ),
+        name_offsets=(0x14040D2E,),
+    ),
+    "Whamon": RecruitTriggerEntry(
+        trigger_id=224,
+        trigger_offsets=(
+            0x140B57F4, 0x13FD86FC, 0x1405BF76, 0x140B987C, 0x1405986C, 0x1405B1FE,
+        ),
+        name_offsets=(0x1404507C,),
+    ),
+    "SkullGreymon": RecruitTriggerEntry(
+        trigger_id=226,
+        trigger_offsets=(0x140B68BE,),
+        name_offsets=(),
+    ),
+    "MetalMamemon": RecruitTriggerEntry(
+        trigger_id=227,
+        trigger_offsets=(0x13FD9982, 0x140B617C, 0x140BAB02),
+        name_offsets=(0x1404CEFC, 0x1404D9C6),
+    ),
+    "Vademon": RecruitTriggerEntry(
+        trigger_id=228,
+        trigger_offsets=(
+            0x13FD91F0, 0x140BA370, 0x13FD904E, 0x140AEEEA, 0x140B11CC, 0x140B626E,
+            0x140BA1CE,
+        ),
+        name_offsets=(0x13FEEC54, 0x1407C2BE, 0x1407CCDC),
+    ),
+    "Patamon": RecruitTriggerEntry(
+        trigger_id=231,
+        trigger_offsets=(
+            0x140B9BD6, 0x1406086C, 0x1402C58A, 0x1405E98C, 0x1402BBC2, 0x13FE5D0E,
+            0x13FE5016, 0x14059A1C, 0x140BA49E, 0x140BA122, 0x13FD8946, 0x1405C126,
+            0x1406D02C, 0x1406BC2E, 0x1405C6B0, 0x13FD931E, 0x1406F10A, 0x14072B0A,
+            0x14063CBE, 0x13FD9560, 0x1406D7C2, 0x13FE57F6, 0x140B9AC6, 0x1405E6A2,
+            0x13FD8A56, 0x140598D8, 0x1406DADE, 0x140BA6E0, 0x1405BFE2, 0x1406AAE6,
+            0x1405C3EA, 0x1407056C, 0x14072670, 0x1405C972, 0x1406E176, 0x140B507C,
+            0x13FD8FA2,
+        ),
+        name_offsets=(0x1400E69C,),
+    ),
+    "Kunemon": RecruitTriggerEntry(
+        trigger_id=232,
+        trigger_offsets=(
+            0x1405E4C6, 0x13FE5B08, 0x140B6C4A, 0x13FE438C, 0x1405C50E, 0x13FE5614,
+            0x13FD8CAE, 0x140B9E2E, 0x13FE43B0, 0x13FE5324, 0x13FE5B2C, 0x13FD89B2,
+            0x140B432E, 0x13FE55F0, 0x13FE5348, 0x140B9B32,
+        ),
+        name_offsets=(0x13FDE31A,),
+    ),
+    "Unimon": RecruitTriggerEntry(
+        trigger_id=233,
+        trigger_offsets=(
+            0x13FD9356, 0x1406E30A, 0x13FD9590, 0x1406F112, 0x1405E994, 0x13FE5D16,
+            0x13FE501E, 0x14059A24, 0x1405E6AA, 0x1405C12E, 0x1406D034, 0x140B9BDE,
+            0x1406BC36, 0x140B4FB8, 0x14060874, 0x1406D7CA, 0x1406DDC2, 0x14063CC6,
+            0x1402BBCA, 0x140B9ACE, 0x1405C6B8, 0x13FD894E, 0x140BA4D6, 0x1402C592,
+            0x13FD8A5E, 0x140598E0, 0x140BA710, 0x1405BFEA, 0x14072B12, 0x1406AAEE,
+            0x13FD8FAA, 0x1405C3F2, 0x14070574, 0x14072678, 0x1405C97A, 0x140BA12A,
+            0x13FE57FE,
+        ),
+        name_offsets=(0x13FEE4D6, 0x13FEF912, 0x13FF0B34, 0x1407B97C),
+    ),
+    "Ogremon": RecruitTriggerEntry(
+        trigger_id=234,
+        trigger_offsets=(0x13FD8BD2, 0x140B9D52, 0x140B5E82),
+        name_offsets=(0x13FF193E,),
+    ),
+    "Shellmon": RecruitTriggerEntry(
+        trigger_id=235,
+        trigger_offsets=(
+            0x13FD8BF6, 0x1405E4A4, 0x140B9D76, 0x13FD8BBE, 0x1405C4EA, 0x140B9B0A,
+            0x1405C496, 0x140B4C64, 0x13FD898A, 0x140B9D3E,
+        ),
+        name_offsets=(0x1403967A, 0x14039A0C),
+    ),
+    "Bakemon": RecruitTriggerEntry(
+        trigger_id=237,
+        trigger_offsets=(
+            0x13FD8970, 0x140B9AF0, 0x13FD8C4A, 0x140B9DCA, 0x140B462E,
+        ),
+        name_offsets=(0x13FF7FB2, 0x13FF8C34, 0x13FF95B0, 0x13FF9EBA),
+    ),
+    "Drimogemon": RecruitTriggerEntry(
+        trigger_id=238,
+        trigger_offsets=(0x140B5568, 0x14059854, 0x1405B1E4, 0x1405BF5E),
+        name_offsets=(0x13FF6416, 0x13FF6E38, 0x13FF7912),
+    ),
+    "Sukamon": RecruitTriggerEntry(
+        trigger_id=239,
+        trigger_offsets=(0x13FD87F6, 0x140B9976),
+        name_offsets=(),
+    ),
+    "Andromon": RecruitTriggerEntry(
+        trigger_id=240,
+        trigger_offsets=(0x13FD8780, 0x140B9900, 0x140B6990),
+        name_offsets=(0x1404FAA2, 0x140519FA),
+    ),
+    "Giromon": RecruitTriggerEntry(
+        trigger_id=241,
+        trigger_offsets=(0x140B5DE0, 0x1405E514),
+        name_offsets=(0x14052A40, 0x14052D5C),
+    ),
+    "Etemon": RecruitTriggerEntry(
+        trigger_id=242,
+        trigger_offsets=(0x13FDD278, 0x13FE0010, 0x13FD63CA, 0x140B754A, 0x140B60CE),
+        name_offsets=(0x13FDF51C, 0x13FDFE62),
+    ),
+    "Biyomon": RecruitTriggerEntry(
+        trigger_id=245,
+        trigger_offsets=(
+            0x14072B0E, 0x1405E990, 0x13FE5D12, 0x13FE501A, 0x13FD8A5A, 0x14059A20,
+            0x14060870, 0x1406D7C6, 0x140BA126, 0x1405C12A, 0x140B5132, 0x1406D030,
+            0x1406BC32, 0x1405C6B4, 0x13FD933A, 0x140B9ACA, 0x1406E240, 0x14063CC2,
+            0x1402BBC6, 0x13FD894A, 0x13FD9578, 0x1406DC52, 0x1406F10E, 0x1402C58E,
+            0x140B9BDA, 0x140598DC, 0x140BA4BA, 0x1405E6A6, 0x1405BFE6, 0x1406AAEA,
+            0x1405C3EE, 0x14070570, 0x14072674, 0x1405C976, 0x13FD8FA6, 0x140BA6F8,
+            0x13FE57FA,
+        ),
+        name_offsets=(0x1400F8E0,),
+    ),
+    "Monochromon": RecruitTriggerEntry(
+        trigger_id=247,
+        trigger_offsets=(
+            0x13FE5802, 0x14072B16, 0x13FD8FAE, 0x1406F116, 0x1405E998, 0x13FE5D1A,
+            0x13FE5022, 0x14059A28, 0x140BA4F2, 0x1405E6AE, 0x1406DF30, 0x1405C132,
+            0x1406BC3A, 0x1405C6BC, 0x1406E3BE, 0x1402C596, 0x14063CCA, 0x140B9BE2,
+            0x1406D7CE, 0x140B4ED0, 0x14060878, 0x13FD8952, 0x1402BBCE, 0x13FD8A62,
+            0x13FD95A8, 0x140598E4, 0x140B9AD2, 0x1405BFEE, 0x140BA728, 0x1406AAF2,
+            0x140BA12E, 0x1405C3F6, 0x14070578, 0x1407267C, 0x13FD9372, 0x1405C97E,
+        ),
+        name_offsets=(0x14000BDC,),
+    ),
+    "Leomon": RecruitTriggerEntry(
+        trigger_id=248,
+        trigger_offsets=(0x140B5F30, 0x13FD8ED2, 0x140BA052),
+        name_offsets=(0x140128F0,),
+    ),
+    "Coelamon": RecruitTriggerEntry(
+        trigger_id=249,
+        trigger_offsets=(
+            0x1405C63A, 0x1405C68A, 0x1406AB0E, 0x1405C612, 0x14060894, 0x13FE581E,
+            0x1405E424, 0x1405C626, 0x1405CA28, 0x1405E22A, 0x1402C5B2, 0x1406F132,
+            0x1405E9B4, 0x13FE5D36, 0x13FD8FBA, 0x1405E03C, 0x13FE503E, 0x140B44C0,
+            0x14059A44, 0x1405CB46, 0x1405E348, 0x1405C64E, 0x1406D054, 0x1405C14E,
+            0x1406BC56, 0x140B6DDC, 0x140BA13A, 0x1405CD60, 0x1405C662, 0x14063CE6,
+            0x1406D7EA, 0x1405C676, 0x1405E47C, 0x1402BBEA, 0x1405C5FE,
+        ),
+        name_offsets=(0x13FE08B0,),
+    ),
+    "Kokatorimon": RecruitTriggerEntry(
+        trigger_id=250,
+        trigger_offsets=(
+            0x140B9946, 0x13FD87C6, 0x14059908, 0x1405994A, 0x1405C012, 0x1405C054,
+            0x140B4E06, 0x13FD873A, 0x140B98BA,
+        ),
+        name_offsets=(0x14032E4A,),
+    ),
+    "Kuwagamon": RecruitTriggerEntry(
+        trigger_id=251,
+        trigger_offsets=(0x13FD7A82, 0x140B5D3C, 0x140B8C02),
+        name_offsets=(0x1402A706,),
+    ),
+    "Mojyamon": RecruitTriggerEntry(
+        trigger_id=252,
+        trigger_offsets=(
+            0x13FE5442, 0x140B58A4, 0x1406FD28, 0x140BA77C, 0x13FE44AA, 0x13FD96E8,
+            0x1407006E, 0x1406F0B0, 0x1406D768, 0x140BA868, 0x13FD95FC,
+        ),
+        name_offsets=(0x1403CE4E, 0x1403D17C, 0x1403D788, 0x1403DAB6, 0x1403E04E),
+    ),
+    "Nanimon": RecruitTriggerEntry(
+        trigger_id=253,
+        trigger_offsets=(0x13FD8F5A, 0x140BA0DA, 0x140B63C6),
+        name_offsets=(),
+    ),
+    "Piximon": RecruitTriggerEntry(
+        trigger_id=255,
+        trigger_offsets=(0x140B600A, 0x13FD9396, 0x140BA516),
+        name_offsets=(0x13FE6B1A, 0x13FE6F98, 0x13FE75D6),
+    ),
+    "Digitamamon": RecruitTriggerEntry(
+        trigger_id=256,
+        trigger_offsets=(
+            0x13FD9210, 0x140BA390, 0x13FD906E, 0x140AEF36, 0x140B67EE, 0x140BA1EE,
+        ),
+        name_offsets=(0x140774C8, 0x140788B0),
+    ),
+    "Penguinmon": RecruitTriggerEntry(
+        trigger_id=257,
+        trigger_offsets=(
+            0x14066400, 0x140BAB1E, 0x140632A4, 0x140B53E6, 0x140663AC, 0x14063250,
+            0x14066374, 0x14095A7E, 0x14063218, 0x1409761C, 0x13FD999E,
+        ),
+        name_offsets=(0x14096804,),
+    ),
+    "Ninjamon": RecruitTriggerEntry(
+        trigger_id=258,
+        trigger_offsets=(0x140B573A, 0x13FD95CE, 0x140BA74E),
+        name_offsets=(0x13FE4AD6,),
+    ),
+}
+
+# All Digimon for which the recruit trigger lives at known ROM offsets and
+# can therefore be remapped. Excludes:
+#   * "Greymon" (trigger 205, 1 offset known) — partial-RE in standalone.
+#   * "Seadramon" (trigger 210) — vanilla "does nothing in town".
+#   * "Monzaemon" (trigger 214, 1 offset known) — partial-RE.
+#   * "Angemon" (trigger 220, 1 offset known) — partial-RE.
+#   * "Birdramon" (trigger 221, 1 offset known) — partial-RE.
+#   * "Vegiemon" (trigger 225, 1 offset known) — partial-RE.
+#   * "MetalGreymon" (trigger 229) — Megadramon-only token in standalone, no entry.
+#   * "Centarumon" (trigger 236, 1 offset known) — partial-RE.
+#   * "Palmon" (trigger 246, 1 offset known) — partial-RE.
+#   * "Megadramon" (trigger 254) — vanilla "does nothing".
+SHUFFLEABLE_RECRUITS: Final[frozenset[str]] = frozenset(ROM_RECRUIT_TRIGGERS.keys())
+
+# Recruits that the standalone DW1 randomizer flagged as softlock-prone:
+# their unique cutscenes/quests have edge cases where the player gets
+# stuck if the encounter is fired out of expected sequence. We unblock
+# them by applying the standalone's softlock-fix MIPS patches (see
+# ``ROM_FIX_*`` constants below) — once those land, all four are
+# shuffleable.
+SOFTLOCK_RISK_RECRUITS: Final[frozenset[str]] = frozenset({
+    "Whamon",
+    "Drimogemon",
+    "Ogremon",
+    "Nanimon",
+})
+
+# Final shuffle pool — what AP can both ship as items and route to recruit
+# locations. With softlock fixes applied this is identical to
+# :data:`SHUFFLEABLE_RECRUITS`.
+SHUFFLE_INCLUDED_RECRUITS: Final[frozenset[str]] = SHUFFLEABLE_RECRUITS
+
+
+# =============================================================================
+# PP-calc patch (Phase 4 v4)
+# =============================================================================
+#
+# Vanilla DW1 derives a Digimon's max PP for each technique slot from a
+# table whose layout is incompatible with arbitrary-recruit assignment:
+# remapping a Digimon to a different evolution slot can produce 0-PP
+# techniques. The standalone DW1 randomizer rewrites the PP-lookup
+# function to use a flat addressing scheme that's stable under
+# remapping. Source: ``references/digimon_world_randomizer/digimon/data.py:709-713``.
+#
+# The 11 32-bit MIPS instructions below replace the vanilla function at
+# ``ROM_PP_CALC_PATCH_OFFSET``. The values are stored ">I" (big-endian)
+# in the standalone — DW1's instructions live in ROM in MIPS forward
+# byte order, which on a little-endian PSX means each instruction word
+# in ROM is the big-endian render of the encoded instruction. We follow
+# the standalone's format exactly.
+
+ROM_PP_CALC_PATCH_OFFSET: Final = 0x14D2848C
+ROM_PP_CALC_PATCH_FORMAT: Final = ">IIIIIIIIIII"  # 11 big-endian u32 instructions
+ROM_PP_CALC_PATCH_VALUE: Final = (
+    0x0F19040C, 0xFFFF6432, 0x1E004010, 0x00000000, 0x1380023C, 0xCECE4224,
+    0x21105200, 0x00004290, 0x03004230, 0x21885100, 0x16000010,
+)
+
+
+# =============================================================================
+# Trigger array geometry (informational)
+# =============================================================================
+# DW1's recruit/chest/story-flag bitfield is a contiguous array starting
+# at :data:`AP_TRIGGER_ARRAY_BASE`. The script-engine opcode
+# ``setTrigger N`` (0x1C) ORs bit ``(N % 8)`` of byte ``base + (N // 8)``.
+# Verified 2026-04-28 by decoding 8 recruit bits in :data:`RECRUIT_RAM_BITS`
+# from their trigger IDs (203..258).
+#
+# We don't use this constant directly anywhere in the patcher today, but
+# it documents the relationship for future RE work.
+
+AP_TRIGGER_ARRAY_BASE: Final = 0x001BDFCD
+
+
+# =============================================================================
+# Standalone-derived softlock fix patches (Phase 4 v5)
+# =============================================================================
+#
+# The standalone DW1 randomizer ships a small set of MIPS-instruction
+# patches that fix specific softlock paths exposed by recruit shuffling.
+# Source: ``references/digimon_world_randomizer/digimon/data.py:715-733``.
+#
+# Applying these unconditionally lets us include Whamon, Drimogemon,
+# Ogremon, and Nanimon in the shuffleable pool. Without them, those
+# four are gated out of the AP location pool because their vanilla
+# encounter chains can softlock when triggered out of expected order.
+
+ROM_FIX_ROTATION_FORMAT: Final = "B"
+ROM_FIX_ROTATION_VALUE: Final = 0x0D
+ROM_FIX_ROTATION_OFFSETS: Final = (0x14CE72C0, 0x14CE7464)
+
+ROM_FIX_MOVE_TO_FORMAT: Final = "<I"
+ROM_FIX_MOVE_TO_VALUE: Final = 0x10400006
+ROM_FIX_MOVE_TO_OFFSETS: Final = (0x14CDB140, 0x14CDB19C)
+
+ROM_FIX_TOY_TOWN_FORMAT: Final = ">I"
+ROM_FIX_TOY_TOWN_VALUE: Final = 0x31FCA302
+ROM_FIX_TOY_TOWN_OFFSETS: Final = (0x14049DD8, 0x1404A2EA)
+
+ROM_FIX_LEO_CAVE_FORMAT: Final = "B"
+ROM_FIX_LEO_CAVE_VALUE: Final = 0x3B
+ROM_FIX_LEO_CAVE_OFFSETS: Final = (
+    0x14030380, 0x14030444, 0x14030D36, 0x14030DFA,
+    0x140317F6, 0x140318BA, 0x140321C8, 0x1403228C,
+)
+
+ROM_OGREMON_SOFTLOCK_FORMAT: Final = "<H"
+ROM_OGREMON_SOFTLOCK_VALUE: Final = 235
+ROM_OGREMON_SOFTLOCK_OFFSETS: Final = (0x13FD689A, 0x140B7A1A)

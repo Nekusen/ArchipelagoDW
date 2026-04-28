@@ -49,6 +49,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import struct
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
@@ -56,7 +57,30 @@ import settings
 from worlds.Files import APPatchExtension, APProcedurePatch, APTokenMixin, APTokenTypes
 
 from .data import edc
-from .data.addresses import ROM_BIN_BYTES, ROM_BIN_SHA1
+from .data.addresses import (
+    ROM_BIN_BYTES,
+    ROM_BIN_SHA1,
+    ROM_FIX_LEO_CAVE_FORMAT,
+    ROM_FIX_LEO_CAVE_OFFSETS,
+    ROM_FIX_LEO_CAVE_VALUE,
+    ROM_FIX_MOVE_TO_FORMAT,
+    ROM_FIX_MOVE_TO_OFFSETS,
+    ROM_FIX_MOVE_TO_VALUE,
+    ROM_FIX_ROTATION_FORMAT,
+    ROM_FIX_ROTATION_OFFSETS,
+    ROM_FIX_ROTATION_VALUE,
+    ROM_FIX_TOY_TOWN_FORMAT,
+    ROM_FIX_TOY_TOWN_OFFSETS,
+    ROM_FIX_TOY_TOWN_VALUE,
+    ROM_OGREMON_SOFTLOCK_FORMAT,
+    ROM_OGREMON_SOFTLOCK_OFFSETS,
+    ROM_OGREMON_SOFTLOCK_VALUE,
+    ROM_PP_CALC_PATCH_FORMAT,
+    ROM_PP_CALC_PATCH_OFFSET,
+    ROM_PP_CALC_PATCH_VALUE,
+    ROM_RECRUIT_TRIGGER_FORMAT,
+    ROM_RECRUIT_TRIGGERS,
+)
 
 if TYPE_CHECKING:
     from .world import DigimonWorldWorld
@@ -241,6 +265,87 @@ class DigimonWorldProcedurePatch(APProcedurePatch, APTokenMixin):
 
 
 # =============================================================================
+# Generation-time helpers (called from write_patch)
+# =============================================================================
+
+def _write_recruit_remap_tokens(
+    patch: DigimonWorldProcedurePatch,
+    remap: dict[str, str],
+) -> None:
+    """Emit closed-shuffle trigger writes for each shuffleable recruit spawn.
+
+    ``remap`` is keyed by the spawn-point Digimon and valued by its
+    closed-shuffle partner Digimon. The patcher writes the partner's
+    vanilla trigger ID at all of the spawn's ROM offsets, so completing
+    the spawn's encounter sets the partner's recruit bit (visual
+    randomization in-game).
+
+    Identity entries (``X -> X``) emit no tokens — the vanilla bytes
+    already carry the right trigger ID.
+    """
+
+    for spawn_name, partner_name in remap.items():
+        if spawn_name == partner_name:
+            continue
+        spawn_entry = ROM_RECRUIT_TRIGGERS[spawn_name]
+        partner_entry = ROM_RECRUIT_TRIGGERS[partner_name]
+        trigger_bytes = struct.pack(
+            ROM_RECRUIT_TRIGGER_FORMAT, partner_entry.trigger_id,
+        )
+        for offset in spawn_entry.trigger_offsets:
+            patch.write_token(APTokenTypes.WRITE, offset, trigger_bytes)
+
+
+def _write_pp_calc_patch_tokens(patch: DigimonWorldProcedurePatch) -> None:
+    """Emit the PP-calc function rewrite from the standalone randomizer.
+
+    Vanilla DW1's PP-lookup function is incompatible with arbitrary
+    recruit assignment: a remapped Digimon can land in an evolution
+    slot that produces 0-PP techniques. The standalone replaces the
+    function with a flat-addressed version that's stable under
+    remapping. We always write the patch, regardless of which recruits
+    are remapped — it's a strict superset of vanilla behavior on the
+    unshuffled subset, since the function still derives PP from the
+    same Digimon parameter table.
+    """
+
+    patch_bytes = struct.pack(ROM_PP_CALC_PATCH_FORMAT, *ROM_PP_CALC_PATCH_VALUE)
+    patch.write_token(APTokenTypes.WRITE, ROM_PP_CALC_PATCH_OFFSET, patch_bytes)
+
+
+def _write_softlock_fix_tokens(patch: DigimonWorldProcedurePatch) -> None:
+    """Emit the standalone's softlock fix patches.
+
+    Five small ROM patches that prevent specific encounter-order
+    softlocks involving Whamon, Drimogemon, Ogremon, and Nanimon.
+    Source:
+    ``references/digimon_world_randomizer/digimon/data.py:715-733``.
+    Applying them unconditionally lets all four Digimon participate in
+    the AP location pool.
+    """
+
+    fix_rotation = struct.pack(ROM_FIX_ROTATION_FORMAT, ROM_FIX_ROTATION_VALUE)
+    for offset in ROM_FIX_ROTATION_OFFSETS:
+        patch.write_token(APTokenTypes.WRITE, offset, fix_rotation)
+
+    fix_move_to = struct.pack(ROM_FIX_MOVE_TO_FORMAT, ROM_FIX_MOVE_TO_VALUE)
+    for offset in ROM_FIX_MOVE_TO_OFFSETS:
+        patch.write_token(APTokenTypes.WRITE, offset, fix_move_to)
+
+    fix_toy_town = struct.pack(ROM_FIX_TOY_TOWN_FORMAT, ROM_FIX_TOY_TOWN_VALUE)
+    for offset in ROM_FIX_TOY_TOWN_OFFSETS:
+        patch.write_token(APTokenTypes.WRITE, offset, fix_toy_town)
+
+    fix_leo_cave = struct.pack(ROM_FIX_LEO_CAVE_FORMAT, ROM_FIX_LEO_CAVE_VALUE)
+    for offset in ROM_FIX_LEO_CAVE_OFFSETS:
+        patch.write_token(APTokenTypes.WRITE, offset, fix_leo_cave)
+
+    fix_ogremon = struct.pack(ROM_OGREMON_SOFTLOCK_FORMAT, ROM_OGREMON_SOFTLOCK_VALUE)
+    for offset in ROM_OGREMON_SOFTLOCK_OFFSETS:
+        patch.write_token(APTokenTypes.WRITE, offset, fix_ogremon)
+
+
+# =============================================================================
 # Generation-time helper (called from world.py:generate_output)
 # =============================================================================
 
@@ -250,11 +355,12 @@ def write_patch(world: DigimonWorldWorld, output_directory: str) -> None:
     Tokens written:
 
     * 32 bytes at :data:`VOLUME_ID_OFFSET` — the AP-marked volume id.
-
-    Sector 16's user data covers offsets 0x9318..0x9B17 (header at
-    0x9300..0x9317, ec_size at 0x9B18..0x9C2F). 0x9340 + 32 = 0x9360,
-    well inside that window — no sector-crossing concern, no need for
-    sector-aware splitting.
+    * One ``<H`` write per ROM offset in
+      :data:`worlds.digimon_world.data.addresses.ROM_RECRUIT_TRIGGERS`
+      for every recruit whose ``world.recruit_remap`` assignment differs
+      from vanilla.
+    * The 44-byte PP-calc function rewrite from the standalone
+      randomizer at :data:`ROM_PP_CALC_PATCH_OFFSET`.
     """
 
     patch = DigimonWorldProcedurePatch(
@@ -266,6 +372,10 @@ def write_patch(world: DigimonWorldWorld, output_directory: str) -> None:
     volume_id = _build_volume_id(f"{seed_name}-{world.player}")
     assert len(volume_id) == VOLUME_ID_LENGTH, (len(volume_id), VOLUME_ID_LENGTH)
     patch.write_token(APTokenTypes.WRITE, VOLUME_ID_OFFSET, volume_id)
+
+    _write_recruit_remap_tokens(patch, world.recruit_remap)
+    _write_pp_calc_patch_tokens(patch)
+    _write_softlock_fix_tokens(patch)
 
     patch.write_file("token_data.bin", patch.get_token_binary())
 

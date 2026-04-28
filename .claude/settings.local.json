@@ -47,7 +47,19 @@
       "Bash(awk '/MARKER 035 -> MARKER 036/,/^$/')",
       "Bash(awk '/MARKER 03[5-9] -> MARKER 0|MARKER 040 -> /,/^$/')",
       "Bash(python -m pytest worlds/digimon_world/test/test_client.py::TestItemDeliverySkeleton -v)",
-      "Bash(python Patch.py \"output/AP_57627681523788716673_P1_Player1.apdw1\")"
+      "Bash(python Patch.py \"output/AP_57627681523788716673_P1_Player1.apdw1\")",
+      "Bash(python Patch.py \"output/AP_41297032611724548271_P1_Player1.apdw1\")",
+      "Bash(venv/Scripts/python -c \"from worlds.digimon_world.data.addresses import ROM_RECRUIT_TRIGGERS, SHUFFLEABLE_RECRUITS, SOFTLOCK_RISK_RECRUITS, SHUFFLE_INCLUDED_RECRUITS, ROM_PP_CALC_PATCH_VALUE, ROM_PP_CALC_PATCH_OFFSET, ROM_RECRUIT_TRIGGER_FORMAT; print\\('shuffleable:', len\\(SHUFFLEABLE_RECRUITS\\)\\); print\\('softlock-risk:', sorted\\(SOFTLOCK_RISK_RECRUITS\\)\\); print\\('included:', len\\(SHUFFLE_INCLUDED_RECRUITS\\)\\); print\\('pp patch words:', len\\(ROM_PP_CALC_PATCH_VALUE\\)\\)\")",
+      "Bash(venv/Scripts/python -c ' *)",
+      "Bash(venv/Scripts/python Generate.py)",
+      "Bash(venv/Scripts/python -m pytest worlds/digimon_world/test)",
+      "Bash(venv/Scripts/python -m pytest test/general -n auto -q)",
+      "Bash(venv/Scripts/python -m ruff check worlds/digimon_world/)",
+      "Bash(venv/Scripts/python -m ruff check worlds/digimon_world/ --fix)",
+      "Bash(venv/Scripts/python -m pytest worlds/digimon_world/test/test_client.py::TestChestDispatchPopulated::test_no_recruit_chest_collision -v)",
+      "Bash(venv/Scripts/python)",
+      "Bash(venv/Scripts/python -m ruff check worlds/digimon_world/ --unsafe-fixes)",
+      "Bash(venv/Scripts/python -m ruff check worlds/digimon_world/ --unsafe-fixes --fix)"
     ]
   }
 }

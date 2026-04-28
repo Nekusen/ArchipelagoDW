@@ -76,8 +76,7 @@ from .data.addresses import (
     RAM_PROSPERITY_POINTS,
     RECRUIT_RAM_BITS,
 )
-from .items import ITEM_ID_BASE, ITEM_NAME_TO_ID
-from .locations import PROSPERITY_THRESHOLDS
+from .items import ITEM_ID_BASE, ITEM_NAME_TO_ID, PROSPERITY_POINT_NAME
 
 if TYPE_CHECKING:
     from worlds._bizhawk.context import BizHawkClientContext
@@ -113,36 +112,31 @@ _PROSPERITY_VALIDATION_CEILING = 100
 # Per-location detection tables
 # =============================================================================
 #
-# Two dispatch styles, mirroring DWAP's runtime semantics:
+# Static bit-set checks for chests and recruit AP locations. The recruit
+# AP location is keyed by the spawn-point Digimon's name, and detection
+# polls that Digimon's vanilla recruit bit in the trigger array. Whether
+# the closed-shuffle trigger remap actually causes a different Digimon's
+# bit to fire when the encounter completes is irrelevant for AP
+# detection — the spawn-point's bit fires either way (when remap is
+# identity) or the partner's bit fires (when remap differs), but the
+# spawn-point bit is what we care about for AP-side state.
 #
-# * :data:`LOCATION_RAM_BITS` — ``name → (byte_address, bit_index)``. The
-#   location fires when ``ram[byte_address] & (1 << bit_index)`` is set.
-#   Used for recruits and chests.
-# * :data:`LOCATION_RAM_THRESHOLDS` — ``name → (byte_address, min_value)``.
-#   The location fires when ``ram[byte_address] >= min_value``. Used for
-#   the K-th prosperity NPC gift.
+# Wait — that's wrong. Re-reading the live test data: the patched seed
+# wrote partner-trigger-IDs at spawn offsets, and AFTER fighting Coelamon
+# the OBSERVED set bits included *Coelamon's vanilla bit*, not just the
+# partner's. So both fire. AP detection on the spawn-point bit is the
+# correct signal — it always fires when that spawn's encounter is won.
 #
-# **Validation status (2026-04-28):** six independent samples verified
-# live against DWAP's ``Resources/{Locations,Chests,Prosperity}.json``:
-# Agumon, Coelamon, Betamon recruit bits all match; Dragon Eye Lake
-# chest and Tropical Jungle chest (DWAP "Chest 43") both match; the
-# prosperity counter at ``RAM_PROSPERITY_POINTS`` ticks per DWAP's
-# per-recruit ``prosperity_value`` (1, 2, 1 → byte 0→1→3→4). Six
-# independent samples across three different DWAP source files all
-# match → the data is authored correctly even though DWAP's runtime
-# hook never installed. The remaining 44 recruit bits and 63 chest
-# bits are extrapolated from the same source file, with the failure
-# mode of "one specific location never auto-fires" rather than
-# anything catastrophic.
-
+# * Chests: read the vanilla DWAP-mapped bits.
+# * Recruits: read the spawn-point's vanilla recruit bit.
 LOCATION_RAM_BITS: dict[str, tuple[int, int]] = {
-    **RECRUIT_RAM_BITS,
     **DWAP_CHEST_RAM_BITS,
+    **RECRUIT_RAM_BITS,
 }
 
-LOCATION_RAM_THRESHOLDS: dict[str, tuple[int, int]] = {
-    f"{k} Prosperity": (RAM_PROSPERITY_POINTS, k) for k in PROSPERITY_THRESHOLDS
-}
+# Threshold-based detection (e.g. NPC-gift PP gates) is unused in v7 —
+# the K Prosperity locations are gone; PP is delivered as an AP item.
+LOCATION_RAM_THRESHOLDS: dict[str, tuple[int, int]] = {}
 
 
 # =============================================================================
@@ -182,37 +176,36 @@ _BANK_QUANTITY_CAP: int = 99
 _MONEY_CAP: int = 9_999_999
 
 
-def _make_soul_deliverer(soul_item_name: str) -> ItemDeliverer:
-    """Return a no-op :class:`ItemDeliverer` for an ``X Soul`` item.
+# Hard ceiling for the in-game prosperity byte. DW1 saturates at 100
+# in normal play; we don't issue more than this regardless of how many
+# Prosperity Point items the seed contains.
+PROSPERITY_RAM_CAP: int = 100
 
-    Souls are **AP-logic-only**: they exist so :mod:`.rules` can gate
-    progression on ``Has("Agumon Soul")`` etc. at fill time, but they
-    must not write to game RAM. Specifically, they must not OR the
-    corresponding bit in :data:`RECRUIT_RAM_BITS` — that bit is the
-    same one :meth:`DigimonWorldClient._check_locations` polls to
-    detect "the player recruited X". If the deliverer flipped that
-    bit, AP would fire the recruit location for X immediately on
-    soul delivery, returning whatever item AP placed there, which
-    could itself cause more bits to flip — a feedback loop.
 
-    The semantics we want:
+def _make_prosperity_deliverer() -> ItemDeliverer:
+    """Return an :class:`ItemDeliverer` for ``Prosperity Point``.
 
-    * AP-side, ``Has("Agumon Soul")`` is the logical key for reaching
-      anything that depends on Agumon being recruitable.
-    * In-game, the player still has to actually recruit Agumon. When
-      they do, DW1 sets the recruit bit and our location-poll fires
-      the AP check.
+    Each delivery bumps the in-game prosperity byte by 1 (saturating at
+    :data:`PROSPERITY_RAM_CAP`). The deliverer is **idempotent**: if the
+    byte is already at the target, the write is dropped.
 
-    Validating ``soul_item_name`` shape — every soul we ship has a
-    recruit-bit entry — guards against typos in the items table.
+    Note: vanilla DW1 also writes prosperity. The watcher's
+    :meth:`DigimonWorldClient._enforce_prosperity` runs every tick to
+    bring the byte back to "AP-controlled value" (see the watcher loop)
+    so vanilla writes don't accumulate. The deliverer just bumps the
+    target value.
     """
 
-    digimon = soul_item_name.removesuffix(" Soul")
-    if digimon not in RECRUIT_RAM_BITS:
-        raise ValueError(f"No RAM bit for soul item {soul_item_name!r}")
-
-    async def deliver(_ctx: BizHawkClientContext) -> list[RamWrite]:
-        return []
+    async def deliver(ctx: BizHawkClientContext) -> list[RamWrite]:
+        current = (await bizhawk.read(
+            ctx.bizhawk_ctx, [(RAM_PROSPERITY_POINTS, 1, DOMAIN_MAIN_RAM)],
+        ))[0]
+        if not current:
+            return []
+        new_value = min(PROSPERITY_RAM_CAP, current[0] + 1)
+        if new_value == current[0]:
+            return []
+        return [(RAM_PROSPERITY_POINTS, [new_value], DOMAIN_MAIN_RAM)]
 
     return deliver
 
@@ -289,8 +282,8 @@ def _build_item_delivery_routes() -> dict[str, ItemDeliverer]:
     routes: dict[str, ItemDeliverer] = {}
     for name, ap_id in ITEM_NAME_TO_ID.items():
         dw_code = ap_id - ITEM_ID_BASE
-        if 4000 <= dw_code <= 4049:
-            routes[name] = _make_soul_deliverer(name)
+        if name == PROSPERITY_POINT_NAME:
+            routes[name] = _make_prosperity_deliverer()
         elif 2000 <= dw_code < 2000 + RAM_ITEM_BANK_SIZE:
             routes[name] = _make_bank_deliverer(dw_code)
         elif dw_code == 3001:
@@ -414,38 +407,57 @@ class DigimonWorldClient(BizHawkClient):
         try:
             await self._check_locations(ctx)
             await self._deliver_items(ctx)
+            await self._enforce_prosperity(ctx)
             await self._check_goal(ctx)
         except bizhawk.RequestFailedError:
             # Lua connector failed to respond; exit the handler and
             # let the BizHawk framework reconnect on the next tick.
             return
 
+    async def _enforce_prosperity(self, ctx: BizHawkClientContext) -> None:
+        """Pin the in-game prosperity byte to the AP-controlled value.
+
+        AP is the single source of truth for prosperity in this world:
+        the byte must equal the number of ``Prosperity Point`` items
+        the server has delivered so far (saturating at
+        :data:`PROSPERITY_RAM_CAP`). Any vanilla DW1 attempt to bump
+        prosperity is overwritten on the next tick.
+
+        Cheap: one RAM read, at most one byte write.
+        """
+
+        target = min(
+            PROSPERITY_RAM_CAP,
+            sum(
+                1
+                for item in ctx.items_received
+                if ctx.item_names.lookup_in_game(item.item, ctx.game)
+                == PROSPERITY_POINT_NAME
+            ),
+        )
+        current = (await bizhawk.read(
+            ctx.bizhawk_ctx, [(RAM_PROSPERITY_POINTS, 1, DOMAIN_MAIN_RAM)],
+        ))[0]
+        if not current:
+            return
+        if current[0] == target:
+            return
+        await bizhawk.write(
+            ctx.bizhawk_ctx, [(RAM_PROSPERITY_POINTS, [target], DOMAIN_MAIN_RAM)],
+        )
+
     async def _check_locations(self, ctx: BizHawkClientContext) -> None:
         """Poll per-location RAM signals and send LocationChecks for new ones.
 
-        Two dispatch paths:
-
-        * :data:`LOCATION_RAM_BITS` — bit-set checks (recruits, future
-          chests). The dict stores ``(byte_address, bit_index)``; the
-          location fires when ``ram[byte] & (1 << bit_index)`` is set.
-        * :data:`LOCATION_RAM_THRESHOLDS` — value comparisons (the K
-          prosperity NPC gifts). The dict stores
-          ``(byte_address, min_value)``; the location fires when
-          ``ram[byte] >= min_value``.
-
-        Both tables read from MainRAM. Phase 4 v2.1 should batch these
-        into a single windowed read; v2.0 keeps it simple with one
-        request per location to make live validation easy to reason
-        about (each request maps 1:1 to one location).
+        Bit-set checks for chests (vanilla DWAP bits) and recruits
+        (vanilla recruit bits — fired by the spawn-point's encounter
+        regardless of trigger remap). Threshold checks were dropped
+        in v7 along with the K Prosperity locations.
         """
-
-        if not LOCATION_RAM_BITS and not LOCATION_RAM_THRESHOLDS:
-            return
 
         assert self._location_name_to_id is not None
         new_checks: list[int] = []
 
-        # Bit checks
         for location_name, (offset, bit_index) in LOCATION_RAM_BITS.items():
             location_id = self._location_name_to_id.get(location_name)
             if location_id is None or location_id in ctx.locations_checked:
@@ -457,7 +469,6 @@ class DigimonWorldClient(BizHawkClient):
             if data and data[0] & (1 << bit_index):
                 new_checks.append(location_id)
 
-        # Threshold checks
         for location_name, (offset, min_value) in LOCATION_RAM_THRESHOLDS.items():
             location_id = self._location_name_to_id.get(location_name)
             if location_id is None or location_id in ctx.locations_checked:
@@ -564,5 +575,6 @@ __all__ = [
     "ITEMS_RECEIVED_COUNTER",
     "ITEM_DELIVERY_ROUTES",
     "LOCATION_RAM_BITS",
+    "PROSPERITY_RAM_CAP",
     "DigimonWorldClient",
 ]

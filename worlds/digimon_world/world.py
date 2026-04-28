@@ -26,7 +26,7 @@ from typing import Any, ClassVar
 
 from worlds.AutoWorld import World
 
-from . import items, locations, regions, rom, rules
+from . import items, locations, recruit_shuffle, regions, rom, rules
 from .options import DigimonWorldOptions
 from .rom import DigimonWorldSettings
 
@@ -54,6 +54,10 @@ class DigimonWorldWorld(World):
     item_name_groups = items.ITEM_NAME_GROUPS
     location_name_groups = locations.LOCATION_NAME_GROUPS
 
+    # Populated lazily on first :attr:`recruit_remap` access. Maps each
+    # shuffleable spawn-point Digimon to its sentinel trigger ID.
+    _recruit_remap: dict[str, int] | None = None
+
     def create_regions(self) -> None:
         regions.create_and_connect_regions(self)
         locations.create_all_locations(self)
@@ -71,7 +75,24 @@ class DigimonWorldWorld(World):
     def get_filler_item_name(self) -> str:
         return items.FILLER_ITEM_NAME
 
+    @property
+    def recruit_remap(self) -> dict[str, int]:
+        """Sentinel-trigger map ``{spawn_digimon: sentinel_trigger_id}``.
+
+        Deterministic — derived purely from the manifest's
+        :data:`worlds.digimon_world.data.addresses.AP_SENTINEL_TRIGGER_BY_DIGIMON`,
+        no fill or option dependence. Cached on first access so callers
+        get a stable view per generation.
+        """
+
+        if self._recruit_remap is None:
+            self._recruit_remap = recruit_shuffle.build_recruit_remap(self)
+        return self._recruit_remap
+
     def fill_slot_data(self) -> Mapping[str, Any]:
+        # ``recruit_remap`` is fully deterministic from the manifest; the
+        # client recomputes it locally instead of round-tripping it via
+        # slot_data. Slot_data only carries player-visible options.
         return self.options.as_dict("goal")
 
     def generate_output(self, output_directory: str) -> None:

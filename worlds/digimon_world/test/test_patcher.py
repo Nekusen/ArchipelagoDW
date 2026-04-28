@@ -116,8 +116,40 @@ class TestVerifyRomHash(DigimonWorldTestBase):
 class TestGenerateOutput(DigimonWorldTestBase):
     options: ClassVar[dict[str, Any]] = {}
 
-    def test_generate_output_writes_apdw1_with_one_token(self) -> None:
-        """Capture the patch zip into an in-memory store and inspect it."""
+    def test_generate_output_writes_apdw1_with_expected_tokens(self) -> None:
+        """Capture the patch zip into an in-memory store and inspect it.
+
+        Phase 4 v7: the token blob holds, in some order:
+
+        * 1 volume-id WRITE.
+        * One 2-byte trigger WRITE per ROM offset of every non-identity
+          entry in ``world.recruit_remap`` (closed shuffle, so identity
+          entries are possible and emit no token).
+        * 1 PP-calc patch WRITE (44 bytes).
+        * 5 softlock-fix bands: ROM_FIX_ROTATION (2 bytes total),
+          ROM_FIX_MOVE_TO (2*4 = 8 bytes), ROM_FIX_TOY_TOWN
+          (2*4 = 8 bytes), ROM_FIX_LEO_CAVE (8*1 byte),
+          ROM_OGREMON_SOFTLOCK (2*2 = 4 bytes).
+        """
+
+        import struct
+
+        from ..data.addresses import (
+            ROM_FIX_LEO_CAVE_OFFSETS,
+            ROM_FIX_LEO_CAVE_VALUE,
+            ROM_FIX_MOVE_TO_OFFSETS,
+            ROM_FIX_MOVE_TO_VALUE,
+            ROM_FIX_ROTATION_OFFSETS,
+            ROM_FIX_ROTATION_VALUE,
+            ROM_FIX_TOY_TOWN_OFFSETS,
+            ROM_FIX_TOY_TOWN_VALUE,
+            ROM_OGREMON_SOFTLOCK_OFFSETS,
+            ROM_OGREMON_SOFTLOCK_VALUE,
+            ROM_PP_CALC_PATCH_OFFSET,
+            ROM_PP_CALC_PATCH_VALUE,
+            ROM_RECRUIT_TRIGGER_FORMAT,
+            ROM_RECRUIT_TRIGGERS,
+        )
 
         captured: dict[str, bytes] = {}
 
@@ -139,18 +171,69 @@ class TestGenerateOutput(DigimonWorldTestBase):
         #   uint32_le token_count
         #   for each: uint8 type, uint32_le offset, uint32_le size, bytes data
         token_count = int.from_bytes(token_blob[:4], "little")
-        self.assertEqual(token_count, 1, f"expected exactly 1 token, got {token_count}")
+        tokens: list[tuple[int, int, int, bytes]] = []
+        bpr = 4
+        for _ in range(token_count):
+            token_type = token_blob[bpr]
+            offset = int.from_bytes(token_blob[bpr + 1:bpr + 5], "little")
+            size = int.from_bytes(token_blob[bpr + 5:bpr + 9], "little")
+            data = token_blob[bpr + 9:bpr + 9 + size]
+            tokens.append((token_type, offset, size, data))
+            bpr += 9 + size
+        for ttype, *_ in tokens:
+            self.assertEqual(ttype, APTokenTypes.WRITE)
 
-        token_type = token_blob[4]
-        offset = int.from_bytes(token_blob[5:9], "little")
-        size = int.from_bytes(token_blob[9:13], "little")
-        data = token_blob[13:13 + size]
+        # Index every token by (offset, data) for set comparison.
+        observed: set[tuple[int, bytes]] = {(off, data) for _t, off, _s, data in tokens}
 
-        self.assertEqual(token_type, APTokenTypes.WRITE)
-        self.assertEqual(offset, rom_module.VOLUME_ID_OFFSET)
-        self.assertEqual(size, rom_module.VOLUME_ID_LENGTH)
-        self.assertEqual(len(data), rom_module.VOLUME_ID_LENGTH)
-        self.assertTrue(data.startswith(rom_module.VOLUME_ID_PREFIX))
+        # Volume-id token.
+        first_off = tokens[0][1]
+        first_data = tokens[0][3]
+        self.assertEqual(first_off, rom_module.VOLUME_ID_OFFSET)
+        self.assertTrue(first_data.startswith(rom_module.VOLUME_ID_PREFIX))
+        self.assertEqual(len(first_data), rom_module.VOLUME_ID_LENGTH)
+
+        # Closed-shuffle trigger writes — every non-identity remap
+        # entry contributes one 2-byte WRITE per ROM offset of the
+        # spawn-point Digimon, valued by the partner's vanilla trigger
+        # ID. Identity entries (X -> X) emit no tokens.
+        remap = self.world.recruit_remap
+        expected_trigger_writes: set[tuple[int, bytes]] = set()
+        for spawn, partner in remap.items():
+            if spawn == partner:
+                continue
+            spawn_entry = ROM_RECRUIT_TRIGGERS[spawn]
+            partner_id = ROM_RECRUIT_TRIGGERS[partner].trigger_id
+            id_bytes = struct.pack(ROM_RECRUIT_TRIGGER_FORMAT, partner_id)
+            for off in spawn_entry.trigger_offsets:
+                expected_trigger_writes.add((off, id_bytes))
+        self.assertTrue(
+            expected_trigger_writes <= observed,
+            f"missing {expected_trigger_writes - observed!r}",
+        )
+
+        # PP-calc patch token.
+        expected_pp_bytes = b"".join(
+            word.to_bytes(4, "big") for word in ROM_PP_CALC_PATCH_VALUE
+        )
+        self.assertIn((ROM_PP_CALC_PATCH_OFFSET, expected_pp_bytes), observed)
+
+        # Softlock-fix tokens.
+        rotation_bytes = struct.pack("B", ROM_FIX_ROTATION_VALUE)
+        for off in ROM_FIX_ROTATION_OFFSETS:
+            self.assertIn((off, rotation_bytes), observed)
+        move_to_bytes = struct.pack("<I", ROM_FIX_MOVE_TO_VALUE)
+        for off in ROM_FIX_MOVE_TO_OFFSETS:
+            self.assertIn((off, move_to_bytes), observed)
+        toy_town_bytes = struct.pack(">I", ROM_FIX_TOY_TOWN_VALUE)
+        for off in ROM_FIX_TOY_TOWN_OFFSETS:
+            self.assertIn((off, toy_town_bytes), observed)
+        leo_cave_bytes = struct.pack("B", ROM_FIX_LEO_CAVE_VALUE)
+        for off in ROM_FIX_LEO_CAVE_OFFSETS:
+            self.assertIn((off, leo_cave_bytes), observed)
+        ogremon_bytes = struct.pack("<H", ROM_OGREMON_SOFTLOCK_VALUE)
+        for off in ROM_OGREMON_SOFTLOCK_OFFSETS:
+            self.assertIn((off, ogremon_bytes), observed)
 
 
 # =============================================================================
