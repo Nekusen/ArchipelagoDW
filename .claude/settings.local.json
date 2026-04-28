@@ -59,7 +59,13 @@
       "Bash(venv/Scripts/python -m pytest worlds/digimon_world/test/test_client.py::TestChestDispatchPopulated::test_no_recruit_chest_collision -v)",
       "Bash(venv/Scripts/python)",
       "Bash(venv/Scripts/python -m ruff check worlds/digimon_world/ --unsafe-fixes)",
-      "Bash(venv/Scripts/python -m ruff check worlds/digimon_world/ --unsafe-fixes --fix)"
+      "Bash(venv/Scripts/python -m ruff check worlds/digimon_world/ --unsafe-fixes --fix)",
+      "WebSearch",
+      "WebFetch(domain:digimon-world-psx.fandom.com)",
+      "WebFetch(domain:almarsguides.com)",
+      "WebFetch(domain:gamefaqs.gamespot.com)",
+      "WebFetch(domain:www.neoseeker.com)",
+      "WebFetch(domain:www.almarsguides.com)"
     ]
   }
 }
