@@ -70,9 +70,14 @@ from worlds._bizhawk.client import BizHawkClient
 
 from .data.addresses import (
     AGUMON_RECRUIT_BIT,
+    AP_CHEST_SENTINEL_ITEM_ID,
     BEATEN_RAM_BITS,
     DWAP_CHEST_RAM_BITS,
     RAM_CURRENT_BITS,
+    RAM_INVENTORY_EMPTY_SLOT_ID,
+    RAM_INVENTORY_ITEM_IDS_BASE,
+    RAM_INVENTORY_QUANTITIES_BASE,
+    RAM_INVENTORY_SLOT_COUNT,
     RAM_ITEM_BANK_BASE,
     RAM_ITEM_BANK_SIZE,
     RAM_PROSPERITY_POINTS,
@@ -507,6 +512,7 @@ class DigimonWorldClient(BizHawkClient):
             await self._check_locations(ctx)
             await self._deliver_items(ctx)
             await self._reconcile_recruits(ctx)
+            await self._wipe_chest_sentinels(ctx)
             await self._enforce_prosperity(ctx)
             await self._enforce_agumon_recruited(ctx)
             await self._check_goal(ctx)
@@ -514,6 +520,48 @@ class DigimonWorldClient(BizHawkClient):
             # Lua connector failed to respond; exit the handler and
             # let the BizHawk framework reconnect on the next tick.
             return
+
+    async def _wipe_chest_sentinels(self, ctx: BizHawkClientContext) -> None:
+        """Remove any AP chest-sentinel items (id 129) from the player's
+        inventory.
+
+        Defensive belt-and-suspenders pairing with the chestGiveItem
+        wrapper installed by Phase 5 piece A's patcher: the wrapper
+        intercepts ``giveItem(129, ...)`` at the script-bytecode chest
+        pickup callsite and short-circuits the inventory write. Live
+        testing showed AP ITEM still landing in inventory in some
+        flows — likely because vanilla DW1 has additional grant paths
+        (NPC dialog, plot triggers, possibly a non-script chest path)
+        that bypass the patched ``jal``. This wipe catches whatever the
+        wrapper missed: each tick, scan the 10 inventory slots and
+        clear any holding the sentinel ID.
+
+        Cost: a single 10-byte read; writes only when sentinels are
+        actually present.
+        """
+
+        ids = (await bizhawk.read(
+            ctx.bizhawk_ctx,
+            [(RAM_INVENTORY_ITEM_IDS_BASE, RAM_INVENTORY_SLOT_COUNT, DOMAIN_MAIN_RAM)],
+        ))[0]
+        if len(ids) != RAM_INVENTORY_SLOT_COUNT:
+            return
+
+        writes: list[RamWrite] = []
+        for slot in range(RAM_INVENTORY_SLOT_COUNT):
+            if ids[slot] == AP_CHEST_SENTINEL_ITEM_ID:
+                writes.append((
+                    RAM_INVENTORY_ITEM_IDS_BASE + slot,
+                    [RAM_INVENTORY_EMPTY_SLOT_ID],
+                    DOMAIN_MAIN_RAM,
+                ))
+                writes.append((
+                    RAM_INVENTORY_QUANTITIES_BASE + slot,
+                    [0],
+                    DOMAIN_MAIN_RAM,
+                ))
+        if writes:
+            await bizhawk.write(ctx.bizhawk_ctx, writes)
 
     async def _reconcile_recruits(self, ctx: BizHawkClientContext) -> None:
         """Dynamic city-toggle of recruit-completion bits (Phase 5 piece C, Path D).

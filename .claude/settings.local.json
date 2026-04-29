@@ -94,7 +94,13 @@
       "Bash(python -c \"from worlds.digimon_world import client; print\\('OK'\\); print\\('CITY_SCREENS:', sorted\\(hex\\(x\\) for x in client.CITY_SCREENS\\)\\); print\\('RECRUIT_BLOCK_BASE:', hex\\(client.RECRUIT_BLOCK_BASE\\)\\); print\\('RECRUIT_BLOCK_SIZE:', client.RECRUIT_BLOCK_SIZE\\); print\\('CURRENT_SCREEN_ADDR:', hex\\(client.CURRENT_SCREEN_ADDR\\)\\)\")",
       "Bash(ruff check *)",
       "Bash(python -m pytest worlds/digimon_world/test/ -x -q)",
-      "Bash(python -c \"from worlds.digimon_world.client import CITY_SCREENS; print\\('size:', len\\(CITY_SCREENS\\)\\); print\\('sorted hex:', [hex\\(x\\) for x in sorted\\(CITY_SCREENS\\)]\\)\")"
+      "Bash(python -c \"from worlds.digimon_world.client import CITY_SCREENS; print\\('size:', len\\(CITY_SCREENS\\)\\); print\\('sorted hex:', [hex\\(x\\) for x in sorted\\(CITY_SCREENS\\)]\\)\")",
+      "Bash(git push *)",
+      "Bash(git checkout *)",
+      "Bash(git stash *)",
+      "Bash(venv/Scripts/python.exe -m pytest worlds/digimon_world/test/ -x -q)",
+      "Bash(venv/Scripts/python.exe Generate.py)",
+      "Bash(venv/Scripts/python.exe -m pytest worlds/digimon_world/test/test_patcher.py::TestGenerateOutput::test_generate_output_writes_apdw1_with_expected_tokens -x)"
     ]
   }
 }

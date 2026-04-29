@@ -1797,17 +1797,28 @@ ROM_OGREMON_SOFTLOCK_OFFSETS: Final = (0x13FD689A, 0x140B7A1A)
 # rest just become AP-sentinel grants the player won't notice.
 #
 # Replacement strategy: write item ID :data:`AP_CHEST_SENTINEL_ITEM_ID`
-# (129 = ``0x81``) at every chest's item byte. We probed the DW1 item
-# table's boundary live (2026-04-28) and confirmed that ID 129 renders
-# as a completely blank inventory slot — no name, no glyphs, no
-# fallback to a real item.
+# (83 = ``0x53``) at every chest's item byte. ID 83 corresponds to
+# vanilla "Electo ring" — confirmed unused / crash-on-use per the
+# standalone Digimon World randomizer (which excludes Electro Ring and
+# Moon Mirror from its chest pool, marking them gamebreaking) and live
+# user verification 2026-04-29. We overwrite slot 83's entry in
+# ITEM_PARA with our "AP ITEM" name so the chest "Found ..." textbox
+# renders cleanly. Slot 83 is well inside ITEM_PARA's 128 x 32 byte
+# region, so writing 32 bytes there does NOT spill into the adjacent
+# ITEM_DESC_PTR table (the slot-129 bug).
 #
 # Companion behavior: the AP client wipes any inventory slot containing
-# ID 129 each tick. Net effect: chest opens, blank slot appears for one
-# frame, next tick it's gone. The AP location fires from the chest-bit
-# signal independent of item delivery, so detection is unaffected.
+# ID 83 each tick (defensive belt-and-suspenders pairing with the
+# chestGiveItem wrapper). Net effect: chest opens, "AP ITEM" briefly
+# appears in inventory if any pickup path bypasses the wrapper, next
+# tick it's gone. The AP location fires from the chest-bit signal
+# independent of item delivery, so detection is unaffected.
+#
+# Reserved for future use: ID 114 (= ``0x72``, vanilla "Moon mirror") is
+# also unused / gamebreaking and is the next available unused slot if
+# we ever need a second sentinel-style item.
 
-AP_CHEST_SENTINEL_ITEM_ID: Final = 0x81  # 129 — blank-render slot in DW1's item table
+AP_CHEST_SENTINEL_ITEM_ID: Final = 0x53  # 83 — vanilla "Electo ring", unused/gamebreaking
 
 ROM_CHEST_ITEM_FORMAT: Final = "B"
 ROM_CHEST_ITEM_VALUE: Final = AP_CHEST_SENTINEL_ITEM_ID
@@ -1900,19 +1911,20 @@ assert len(ROM_CHEST_ITEM_OFFSETS) == 73, len(ROM_CHEST_ITEM_OFFSETS)
 # vanilla originates from inside Cave6).
 #
 # Behavior: if the caller's first argument (``$a0``, the item ID) equals
-# :data:`AP_CHEST_SENTINEL_ITEM_ID`, the wrapper returns 1 ("success")
-# without touching inventory. Otherwise it tail-calls vanilla
-# ``giveItem`` (RAM 0x800C5240) with arguments unchanged. Net effect:
-# chests holding the sentinel display "AP ITEM" via the patched item
-# table entry, the chest's "taken" state still flips (vanilla treats the
-# wrapper's return as success), and no item lands in the player's
-# inventory. AP delivers the *real* AP-fill item separately to the
-# player's bank via the client's deliverer routes.
+# :data:`AP_CHEST_SENTINEL_ITEM_ID` (83 / 0x53 = vanilla "Electo ring",
+# overwritten with "AP ITEM" via :data:`ROM_AP_ITEM_ENTRY_BYTES`), the
+# wrapper returns 1 ("success") without touching inventory. Otherwise
+# it tail-calls vanilla ``giveItem`` (RAM 0x800C5240) with arguments
+# unchanged. Net effect: chests holding the sentinel display "AP ITEM"
+# via the patched item table entry, the chest's "taken" state still
+# flips (vanilla treats the wrapper's return as success), and no item
+# lands in the player's inventory. AP delivers the *real* AP-fill item
+# separately to the player's bank via the client's deliverer routes.
 #
 # Wrapper byte layout (28 bytes / 7 MIPS instructions, all little-endian):
 #
-#   addiu $at, $0, 129     0x24010081   load sentinel constant
-#   beq   $a0, $at, +3     0x10810003   if item == 129 -> jr $ra branch
+#   addiu $at, $0, 83      0x24010053   load sentinel constant (Electo ring)
+#   beq   $a0, $at, +3     0x10810003   if item == 83 -> jr $ra branch
 #   nop                    0x00000000   delay slot
 #   j     0x800C5240       0x08031490   tail-call vanilla giveItem
 #   nop                    0x00000000   delay slot of j
@@ -1922,7 +1934,7 @@ assert len(ROM_CHEST_ITEM_OFFSETS) == 73, len(ROM_CHEST_ITEM_OFFSETS)
 ROM_CHEST_GIVEITEM_WRAPPER_RAM: Final = 0x800957C0
 ROM_CHEST_GIVEITEM_WRAPPER_OFFSET: Final = 0x14CC0B18
 ROM_CHEST_GIVEITEM_WRAPPER_BYTES: Final = bytes((
-    0x81, 0x00, 0x01, 0x24,  # addiu $at, $0, 129
+    0x53, 0x00, 0x01, 0x24,  # addiu $at, $0, 83
     0x03, 0x00, 0x81, 0x10,  # beq   $a0, $at, +3
     0x00, 0x00, 0x00, 0x00,  # nop (delay slot)
     0x90, 0x14, 0x03, 0x08,  # j     0x800C5240 (giveItem)

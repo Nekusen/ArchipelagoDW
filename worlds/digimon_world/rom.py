@@ -426,6 +426,12 @@ def _write_chest_item_tokens(
         for offset in offsets:
             patch.write_token(APTokenTypes.WRITE, offset + 1, item_byte)
 
+    # Write our 32-byte "AP ITEM" entry at the sentinel's slot in
+    # ITEM_PARA (slot 83 = vanilla "Electo ring", confirmed unused /
+    # gamebreaking). Slot 83 sits well inside ITEM_PARA's 128-entry
+    # bound, so this write does NOT spill into the adjacent
+    # ITEM_DESC_PTR region — that was the slot-129 bug fixed
+    # 2026-04-29 by relocating the sentinel from 0x81 to 0x53.
     patch.write_token(
         APTokenTypes.WRITE, ROM_AP_ITEM_ENTRY_OFFSET, ROM_AP_ITEM_ENTRY_BYTES,
     )

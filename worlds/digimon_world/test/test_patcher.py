@@ -262,7 +262,10 @@ class TestGenerateOutput(DigimonWorldTestBase):
         for offsets in CHEST_NAME_TO_ROM_OFFSETS.values():
             for off in offsets:
                 self.assertIn((off + 1, chest_item_bytes), observed)
-        # Item-table entry for the AP sentinel name.
+        # Item-table entry for the AP sentinel name. Sentinel id is 83
+        # (vanilla "Electo ring", unused/gamebreaking) — well inside
+        # ITEM_PARA's 128-entry bound, so this write doesn't spill
+        # into ITEM_DESC_PTR.
         self.assertIn(
             (ROM_AP_ITEM_ENTRY_OFFSET, ROM_AP_ITEM_ENTRY_BYTES),
             observed,
