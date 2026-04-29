@@ -70,6 +70,7 @@ REGION_NAMES: Final[tuple[str, ...]] = (
     "Mt. Infinity",
     "Big Store",
     "Tower",
+    "Overdell",
 )
 
 
@@ -103,6 +104,8 @@ _EDGES: Final[tuple[tuple[str, str], ...]] = (
     ("File City", "Big Store"),
     # Tower is endgame; gated on the 50-PP cluster + Mt. Infinity progress.
     ("Mt. Infinity", "Tower"),
+    # Overdell Cemetery & Grey Lord's Mansion (SkullGreymon area).
+    ("File City", "Overdell"),
 )
 
 

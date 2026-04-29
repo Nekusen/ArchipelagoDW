@@ -119,17 +119,23 @@ class TestGenerateOutput(DigimonWorldTestBase):
     def test_generate_output_writes_apdw1_with_expected_tokens(self) -> None:
         """Capture the patch zip into an in-memory store and inspect it.
 
-        Phase 4 v7: the token blob holds, in some order:
+        Phase 5 piece C: the token blob holds, in some order:
 
         * 1 volume-id WRITE.
-        * One 2-byte trigger WRITE per ROM offset of every non-identity
-          entry in ``world.recruit_remap`` (closed shuffle, so identity
-          entries are possible and emit no token).
+        * setTrigger wrapper bytes (32 bytes at Cave6 offset) + 8-byte
+          patch at the vanilla setTrigger entry (replaces first 2 instrs
+          with ``j wrapper`` + ``nop``).
         * 1 PP-calc patch WRITE (44 bytes).
         * 5 softlock-fix bands: ROM_FIX_ROTATION (2 bytes total),
           ROM_FIX_MOVE_TO (2*4 = 8 bytes), ROM_FIX_TOY_TOWN
           (2*4 = 8 bytes), ROM_FIX_LEO_CAVE (8*1 byte),
           ROM_OGREMON_SOFTLOCK (2*2 = 4 bytes).
+        * Per-chest item byte writes + chestGiveItem wrapper +
+          chest-pickup ``jal`` redirect (Phase 5 piece A).
+
+        Note: closed-shuffle recruit remap was dropped in Phase 5
+        piece C; the setTrigger wrapper now decouples fight-completion
+        from city-join, replacing the visual-only remap.
         """
 
         import struct
@@ -147,8 +153,11 @@ class TestGenerateOutput(DigimonWorldTestBase):
             ROM_OGREMON_SOFTLOCK_VALUE,
             ROM_PP_CALC_PATCH_OFFSET,
             ROM_PP_CALC_PATCH_VALUE,
-            ROM_RECRUIT_TRIGGER_FORMAT,
-            ROM_RECRUIT_TRIGGERS,
+            ROM_SETTRIGGER_PATCH_FORMAT,
+            ROM_SETTRIGGER_PATCH_OFFSET,
+            ROM_SETTRIGGER_PATCH_VALUE,
+            ROM_SETTRIGGER_WRAPPER_BYTES,
+            ROM_SETTRIGGER_WRAPPER_OFFSET,
         )
 
         captured: dict[str, bytes] = {}
@@ -193,23 +202,19 @@ class TestGenerateOutput(DigimonWorldTestBase):
         self.assertTrue(first_data.startswith(rom_module.VOLUME_ID_PREFIX))
         self.assertEqual(len(first_data), rom_module.VOLUME_ID_LENGTH)
 
-        # Closed-shuffle trigger writes — every non-identity remap
-        # entry contributes one 2-byte WRITE per ROM offset of the
-        # spawn-point Digimon, valued by the partner's vanilla trigger
-        # ID. Identity entries (X -> X) emit no tokens.
-        remap = self.world.recruit_remap
-        expected_trigger_writes: set[tuple[int, bytes]] = set()
-        for spawn, partner in remap.items():
-            if spawn == partner:
-                continue
-            spawn_entry = ROM_RECRUIT_TRIGGERS[spawn]
-            partner_id = ROM_RECRUIT_TRIGGERS[partner].trigger_id
-            id_bytes = struct.pack(ROM_RECRUIT_TRIGGER_FORMAT, partner_id)
-            for off in spawn_entry.trigger_offsets:
-                expected_trigger_writes.add((off, id_bytes))
-        self.assertTrue(
-            expected_trigger_writes <= observed,
-            f"missing {expected_trigger_writes - observed!r}",
+        # Phase 5 piece C: setTrigger wrapper installation. The 32-byte
+        # wrapper sits in Cave6 right after the chest-pickup wrapper, and
+        # the 8-byte patch at the setTrigger entry redirects through it.
+        self.assertIn(
+            (ROM_SETTRIGGER_WRAPPER_OFFSET, ROM_SETTRIGGER_WRAPPER_BYTES),
+            observed,
+        )
+        expected_settrigger_patch_bytes = struct.pack(
+            ROM_SETTRIGGER_PATCH_FORMAT, *ROM_SETTRIGGER_PATCH_VALUE,
+        )
+        self.assertIn(
+            (ROM_SETTRIGGER_PATCH_OFFSET, expected_settrigger_patch_bytes),
+            observed,
         )
 
         # PP-calc patch token.
@@ -236,18 +241,45 @@ class TestGenerateOutput(DigimonWorldTestBase):
             self.assertIn((off, ogremon_bytes), observed)
 
         # Chest-item replacement tokens.
+        # WorldTestBase.setUp does NOT run fill, so every chest's
+        # location.item is None and Phase 5 piece A's per-chest decision
+        # falls back to the AP sentinel byte for all 73 spawnChest
+        # offsets. A real Generate.py run would have a mix of sentinel
+        # and real DW1 internal item ids; that's exercised by the
+        # fill-driven test below.
         from ..data.addresses import (
+            AP_CHEST_SENTINEL_ITEM_ID,
+            CHEST_NAME_TO_ROM_OFFSETS,
             ROM_AP_ITEM_ENTRY_BYTES,
             ROM_AP_ITEM_ENTRY_OFFSET,
-            ROM_CHEST_ITEM_OFFSETS,
-            ROM_CHEST_ITEM_VALUE,
+            ROM_CHEST_GIVEITEM_PATCH_FORMAT,
+            ROM_CHEST_GIVEITEM_PATCH_OFFSET,
+            ROM_CHEST_GIVEITEM_PATCH_VALUE,
+            ROM_CHEST_GIVEITEM_WRAPPER_BYTES,
+            ROM_CHEST_GIVEITEM_WRAPPER_OFFSET,
         )
-        chest_item_bytes = struct.pack("B", ROM_CHEST_ITEM_VALUE)
-        for off in ROM_CHEST_ITEM_OFFSETS:
-            self.assertIn((off + 1, chest_item_bytes), observed)
+        chest_item_bytes = struct.pack("B", AP_CHEST_SENTINEL_ITEM_ID)
+        for offsets in CHEST_NAME_TO_ROM_OFFSETS.values():
+            for off in offsets:
+                self.assertIn((off + 1, chest_item_bytes), observed)
         # Item-table entry for the AP sentinel name.
         self.assertIn(
             (ROM_AP_ITEM_ENTRY_OFFSET, ROM_AP_ITEM_ENTRY_BYTES),
+            observed,
+        )
+        # Phase 5 piece A: chestGiveItem wrapper installed at Cave6,
+        # plus the chest-pickup ``jal giveItem`` redirected to it. These
+        # writes are unconditional — they happen regardless of AP fill
+        # placement.
+        self.assertIn(
+            (ROM_CHEST_GIVEITEM_WRAPPER_OFFSET, ROM_CHEST_GIVEITEM_WRAPPER_BYTES),
+            observed,
+        )
+        expected_jal_bytes = struct.pack(
+            ROM_CHEST_GIVEITEM_PATCH_FORMAT, ROM_CHEST_GIVEITEM_PATCH_VALUE,
+        )
+        self.assertIn(
+            (ROM_CHEST_GIVEITEM_PATCH_OFFSET, expected_jal_bytes),
             observed,
         )
 

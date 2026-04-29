@@ -296,51 +296,223 @@ RECRUIT_RAM_BITS: Final[dict[str, tuple[int, int]]] = {
     "Ninjamon":     (0x001BDFED, 2),
 }
 
-# Per-chest completion bits, keyed by DWAP's chest name ("Chest 1".."Chest 65"
-# plus one descriptively-named "Chest: Dragon Eye Lake" at slot 55).
-# Source: DWAP Chests.json. Phase 2's locations currently use names like
-# "Chest 01 (File City)"..."Chest 73 (Tower)"; reconciling those with these
-# DWAP names is open work — see ``phase_progress.md`` Phase 4 v2 notes.
+# Per-chest completion bits, keyed by AP location name. Names follow the
+# Phase 5 chest-mapping document (``references/chest_mapping_phase5.md``):
+# chests in confirmed or strongly-inferred regions are renamed
+# ``Chest: <Area>`` (or ``Chest: <Area> N`` for multiples); chests in
+# unverified regions keep their numeric form.
+#
+# The bit-position mapping itself is unchanged from DWAP's ``Chests.json``;
+# we only rename the keys.
 DWAP_CHEST_RAM_BITS: Final[dict[str, tuple[int, int]]] = {
-    "Chest 1":  (0x001BE01E, 2),  "Chest 2":  (0x001BE01E, 3),
-    "Chest 3":  (0x001BE01E, 4),  "Chest 4":  (0x001BE01E, 5),
-    "Chest 5":  (0x001BE01E, 6),  "Chest 6":  (0x001BE01E, 7),
-    "Chest 7":  (0x001BE01F, 0),  "Chest 8":  (0x001BE01F, 1),
-    "Chest 9":  (0x001BE01F, 2),  "Chest 10": (0x001BE01F, 3),
-    "Chest 11": (0x001BE01F, 4),  "Chest 12": (0x001BE01F, 5),
-    "Chest 13": (0x001BE01F, 6),  "Chest 14": (0x001BE01F, 7),
-    "Chest 15": (0x001BE020, 0),  "Chest 16": (0x001BE020, 1),
-    "Chest 17": (0x001BE020, 2),  "Chest 18": (0x001BE020, 3),
-    "Chest 19": (0x001BE020, 4),  "Chest 20": (0x001BE020, 5),
-    "Chest 21": (0x001BE020, 6),  "Chest 22": (0x001BE020, 7),
-    "Chest 23": (0x001BE021, 0),  "Chest 24": (0x001BE021, 1),
-    "Chest 25": (0x001BE021, 2),  "Chest 26": (0x001BE021, 3),
-    "Chest 27": (0x001BE021, 4),  "Chest 28": (0x001BE021, 5),
-    "Chest 29": (0x001BE021, 6),  "Chest 30": (0x001BE021, 7),
-    "Chest 31": (0x001BE022, 0),  "Chest 32": (0x001BE022, 1),
-    "Chest 33": (0x001BE022, 2),  "Chest 34": (0x001BE022, 3),
-    "Chest 35": (0x001BE022, 4),  "Chest 36": (0x001BE022, 5),
-    "Chest 37": (0x001BE022, 6),  "Chest 38": (0x001BE022, 7),
-    "Chest 39": (0x001BE023, 0),  "Chest 40": (0x001BE023, 1),
-    "Chest 41": (0x001BE023, 2),  "Chest 42": (0x001BE023, 3),
-    "Chest 43": (0x001BE023, 5),  "Chest 44": (0x001BE023, 6),
-    "Chest 45": (0x001BE023, 7),  "Chest 46": (0x001BE024, 0),
-    "Chest 47": (0x001BE024, 1),  "Chest 48": (0x001BE024, 2),
-    "Chest 49": (0x001BE024, 4),  "Chest 50": (0x001BE024, 5),
-    "Chest 51": (0x001BE024, 6),  "Chest 52": (0x001BE024, 7),
-    "Chest 53": (0x001BE025, 0),  "Chest 54": (0x001BE025, 1),
+    # Trigger 650..652 → Mt. Infinity 1..3 (Script ID 50)
+    "Chest: Mt. Infinity 1":  (0x001BE01E, 2),
+    "Chest: Mt. Infinity 2":  (0x001BE01E, 3),
+    "Chest: Mt. Infinity 3":  (0x001BE01E, 4),
+    # Trigger 653..657 → Freezeland 1..5 (Script IDs 55, 58, 61, 94)
+    "Chest: Freezeland 1":    (0x001BE01E, 5),
+    "Chest: Freezeland 2":    (0x001BE01E, 6),
+    "Chest: Freezeland 3":    (0x001BE01E, 7),
+    "Chest: Freezeland 4":    (0x001BE01F, 0),
+    "Chest: Freezeland 5":    (0x001BE01F, 1),
+    # Trigger 658..659 → Drill Tunnel 1..2 (Script ID 33)
+    "Chest: Drill Tunnel 1":  (0x001BE01F, 2),
+    "Chest: Drill Tunnel 2":  (0x001BE01F, 3),
+    # Trigger 660..661 → unknown (Script ID 98 — Cherrymon-area dialog)
+    "Chest 11":               (0x001BE01F, 4),
+    "Chest 12":               (0x001BE01F, 5),
+    # Trigger 662..665 → Freezeland 6..9 (Script IDs 99, 94, 97)
+    "Chest: Freezeland 6":    (0x001BE01F, 6),
+    "Chest: Freezeland 7":    (0x001BE01F, 7),
+    "Chest: Freezeland 8":    (0x001BE020, 0),
+    "Chest: Freezeland 9":    (0x001BE020, 1),
+    # Trigger 666..667 → Drill Tunnel 3..4 (Script IDs 39/122, 110)
+    "Chest: Drill Tunnel 3":  (0x001BE020, 2),
+    "Chest: Drill Tunnel 4":  (0x001BE020, 3),
+    # Trigger 668 → Toy Town (Script ID 145)
+    "Chest: Toy Town":        (0x001BE020, 4),
+    # Trigger 669..671 → unknown
+    "Chest 20":               (0x001BE020, 5),
+    "Chest 21":               (0x001BE020, 6),
+    "Chest 22":               (0x001BE020, 7),
+    # Trigger 672 → Ogre Fortress (Script ID 137)
+    "Chest: Ogre Fortress":   (0x001BE021, 0),
+    # Trigger 673..675 → unknown (Script ID 125 cluster)
+    "Chest 24":               (0x001BE021, 1),
+    "Chest 25":               (0x001BE021, 2),
+    "Chest 26":               (0x001BE021, 3),
+    # Trigger 676 → File City Cards 1 (Script ID 119, Meramon-card NPC)
+    "Chest: File City Cards 1": (0x001BE021, 4),
+    # Trigger 677..678 → unknown (Script ID 155)
+    "Chest 28":               (0x001BE021, 5),
+    "Chest 29":               (0x001BE021, 6),
+    # Trigger 679 → File City Cards 2 (Script ID 121, Meramon-card NPC)
+    "Chest: File City Cards 2": (0x001BE021, 7),
+    # Trigger 680..682 → Mt. Infinity 4..6 (Script IDs 160, 161, 170)
+    "Chest: Mt. Infinity 4":  (0x001BE022, 0),
+    "Chest: Mt. Infinity 5":  (0x001BE022, 1),
+    "Chest: Mt. Infinity 6":  (0x001BE022, 2),
+    # Trigger 683..685 → unknown
+    "Chest 34":               (0x001BE022, 3),
+    "Chest 35":               (0x001BE022, 4),
+    "Chest 36":               (0x001BE022, 5),
+    # Trigger 686 → Mt. Infinity 7 (Script ID 194)
+    "Chest: Mt. Infinity 7":  (0x001BE022, 6),
+    # Trigger 687..691 → Tower 1..5 (Script IDs 195, 196, 197, 198)
+    "Chest: Tower 1":         (0x001BE022, 7),
+    "Chest: Tower 2":         (0x001BE023, 0),
+    "Chest: Tower 3":         (0x001BE023, 1),
+    "Chest: Tower 4":         (0x001BE023, 2),
+    "Chest: Tower 5":         (0x001BE023, 3),
+    # Trigger 693 → Tropical Jungle (Script ID 13). Live-confirmed
+    # 2026-04-29: opening this chest in-game placed the player in the
+    # Tropical Jungle screen, contradicting the earlier dialog-based
+    # inference of Mt. Panorama (Mamemon recruit dialog). The
+    # Mamemon-style cutscene shares Script ID 13 with this Tropical
+    # Jungle chest, but the chest itself is in Tropical Jungle.
+    "Chest: Tropical Jungle": (0x001BE023, 5),
+    # Trigger 694..695 → unknown (Script IDs 31/120)
+    "Chest 44":               (0x001BE023, 6),
+    "Chest 45":               (0x001BE023, 7),
+    # Trigger 696..698 → Great Canyon 1..3 (Script IDs 22/190, Birdramon)
+    "Chest: Great Canyon 1":  (0x001BE024, 0),
+    "Chest: Great Canyon 2":  (0x001BE024, 1),
+    "Chest: Great Canyon 3":  (0x001BE024, 2),
+    # Trigger 700..703 → Mt. Infinity 8..11 (Script ID 188)
+    "Chest: Mt. Infinity 8":  (0x001BE024, 4),
+    "Chest: Mt. Infinity 9":  (0x001BE024, 5),
+    "Chest: Mt. Infinity 10": (0x001BE024, 6),
+    "Chest: Mt. Infinity 11": (0x001BE024, 7),
+    # Trigger 704..705 → unknown (Script ID 53)
+    "Chest 53":               (0x001BE025, 0),
+    "Chest 54":               (0x001BE025, 1),
+    # Trigger 706 → Dragon Eye Lake (Script ID 9, Vending Machine)
     "Chest: Dragon Eye Lake": (0x001BE025, 2),
-    "Chest 56": (0x001BE025, 3),  "Chest 57": (0x001BE025, 4),
-    "Chest 58": (0x001BE025, 5),  "Chest 59": (0x001BE025, 6),
-    "Chest 60": (0x001BE025, 7),  "Chest 61": (0x001BE026, 0),
-    "Chest 62": (0x001BE026, 1),  "Chest 63": (0x001BE026, 2),
-    "Chest 64": (0x001BE026, 3),  "Chest 65": (0x001BE026, 4),
+    # Trigger 707 → Mt. Infinity 12 (Script ID 185)
+    "Chest: Mt. Infinity 12": (0x001BE025, 3),
+    # Trigger 708..713 → Tower 6..11 (Script IDs 186, 187)
+    "Chest: Tower 6":         (0x001BE025, 4),
+    "Chest: Tower 7":         (0x001BE025, 5),
+    "Chest: Tower 8":         (0x001BE025, 6),
+    "Chest: Tower 9":         (0x001BE025, 7),
+    "Chest: Tower 10":        (0x001BE026, 0),
+    "Chest: Tower 11":        (0x001BE026, 1),
+    # Trigger 714..716 → File City Remodel 1..3 (Script ID 156)
+    "Chest: File City Remodel 1": (0x001BE026, 2),
+    "Chest: File City Remodel 2": (0x001BE026, 3),
+    "Chest: File City Remodel 3": (0x001BE026, 4),
 }
 
 # Bit gaps (intentional, mirrored from DWAP):
 #   - 0x001BE023 bit 4 — between "Chest 42" (bit 3) and "Chest 43" (bit 5).
 #   - 0x001BE024 bit 3 — between "Chest 48" (bit 2) and "Chest 49" (bit 4).
 # These bits may be reserved or correspond to chests not yet mapped by DWAP.
+
+
+# =============================================================================
+# Per-chest spawnChest ROM-offset map (Phase 5)
+# =============================================================================
+#
+# Cross-reference table mapping each DWAP chest name to the flat-BIN offsets
+# of its ``spawnChest`` script-bytecode entries (one entry per ROM
+# placement; six chests have duplicate entries because their map screen
+# is loaded under two different Script IDs, and one chest — Drill Tunnel
+# 3 — has four spawn entries spanning Script IDs 39, 122, plus two more
+# duplicates). Item-byte writes must hit *every* entry so all branches
+# spawn the same item.
+#
+# Construction: each ``spawnChest`` opcode in the script bytecode is a
+# 12-byte record: opcode (1) + item id (1) + posX (4 LE) + posY (2 LE)
+# + rotation (2 LE) + trigger id (2 LE). The trigger id at byte offset
+# +10 is the bit-array trigger that DWAP records in
+# :data:`DWAP_CHEST_RAM_BITS`. Reverse-mapping trigger -> chest name
+# yields this table. Source for the 73 raw offsets:
+# ``references/digimon_world_randomizer/digimon/data.py:232``.
+# Source for the trigger -> chest-name mapping: this module's
+# :data:`DWAP_CHEST_RAM_BITS` (the formula is
+# ``trigger = (offset - 0x001BDFCD) * 8 + bit``). Cross-checked against
+# ``references/chest_mapping_phase5.md``.
+#
+# Use case: the per-chest "vanilla-grant for own-slot DW1-representable
+# items" feature (Phase 5 piece A). The patcher decides per-chest
+# whether to write the AP sentinel ID (chest shows "AP ITEM" + nothing
+# given) or the real DW1 internal item ID (chest grants the real item
+# directly via vanilla flow).
+
+CHEST_NAME_TO_ROM_OFFSETS: Final[dict[str, tuple[int, ...]]] = {
+    "Chest: Mt. Infinity 1":      (0x14000EDC,),
+    "Chest: Mt. Infinity 2":      (0x14000EE8,),
+    "Chest: Mt. Infinity 3":      (0x14000EF4,),
+    "Chest: Freezeland 1":        (0x14005868,),
+    "Chest: Freezeland 2":        (0x140073E8,),
+    "Chest: Freezeland 3":        (0x140073F4,),
+    "Chest: Freezeland 4":        (0x14008F7C,),
+    "Chest: Freezeland 5":        (0x14021168,),
+    "Chest: Drill Tunnel 1":      (0x13FF6978,),
+    "Chest: Drill Tunnel 2":      (0x13FF6984,),
+    "Chest 11":                   (0x14023624,),
+    "Chest 12":                   (0x14023630,),
+    "Chest: Freezeland 6":        (0x14023F54,),
+    "Chest: Freezeland 7":        (0x14023F60,),
+    "Chest: Freezeland 8":        (0x14021174,),
+    "Chest: Freezeland 9":        (0x14022D04,),
+    "Chest: Drill Tunnel 3":      (0x13FFA098, 0x13FFA508, 0x14039338, 0x140396CA),
+    "Chest: Drill Tunnel 4":      (0x14030964,),
+    "Chest: Toy Town":            (0x1404A6DC,),
+    "Chest 20":                   (0x13FFD7BC,),
+    "Chest 21":                   (0x13FFE0F0,),
+    "Chest 22":                   (0x13FFF35C,),
+    "Chest: Ogre Fortress":       (0x14045424,),
+    "Chest 24":                   (0x1403AEC4,),
+    "Chest 25":                   (0x1403AED0,),
+    "Chest 26":                   (0x1403AEDC,),
+    "Chest: File City Cards 1":   (0x140377A8,),
+    "Chest 28":                   (0x140539EC,),
+    "Chest 29":                   (0x140539F8,),
+    "Chest: File City Cards 2":   (0x14038A04,),
+    "Chest: Mt. Infinity 4":      (0x1405836C,),
+    "Chest: Mt. Infinity 5":      (0x14058C9C,),
+    "Chest: Mt. Infinity 6":      (0x14067B7C,),
+    "Chest 34":                   (0x1403AEE8,),
+    "Chest 35":                   (0x1406970C,),
+    "Chest 36":                   (0x14073334,),
+    "Chest: Mt. Infinity 7":      (0x1407F430,),
+    "Chest: Tower 1":             (0x1407FD54,),
+    "Chest: Tower 2":             (0x14080688,),
+    "Chest: Tower 3":             (0x14080FB4,),
+    "Chest: Tower 4":             (0x140818F4,),
+    "Chest: Tower 5":             (0x14081900,),
+    "Chest: Tropical Jungle":     (0x13FE6844,),
+    "Chest 44":                   (0x13FF4DE8, 0x13FF58AA),
+    "Chest 45":                   (0x13FF4DF4, 0x13FF58B6),
+    "Chest: Great Canyon 1":      (0x13FEE01E, 0x1407BD46),
+    "Chest: Great Canyon 2":      (0x13FEE02A, 0x1407BD52),
+    "Chest: Great Canyon 3":      (0x13FEE036, 0x1407BD5E),
+    "Chest: Mt. Infinity 8":      (0x1407AA94,),
+    "Chest: Mt. Infinity 9":      (0x1407AAA0,),
+    "Chest: Mt. Infinity 10":     (0x1407AAAC,),
+    "Chest: Mt. Infinity 11":     (0x1407AAB8,),
+    "Chest 53":                   (0x14003398,),
+    "Chest 54":                   (0x140033A4,),
+    "Chest: Dragon Eye Lake":     (0x13FE3118,),
+    "Chest: Mt. Infinity 12":     (0x14078F1C,),
+    "Chest: Tower 6":             (0x14079854,),
+    "Chest: Tower 7":             (0x14079848,),
+    "Chest: Tower 8":             (0x14079860,),
+    "Chest: Tower 9":             (0x1407986C,),
+    "Chest: Tower 10":            (0x1407A178,),
+    "Chest: Tower 11":            (0x1407A184,),
+    "Chest: File City Remodel 1": (0x1405430C,),
+    "Chest: File City Remodel 2": (0x14054318,),
+    "Chest: File City Remodel 3": (0x14054324,),
+}
+assert len(CHEST_NAME_TO_ROM_OFFSETS) == 65, len(CHEST_NAME_TO_ROM_OFFSETS)
+assert sum(len(v) for v in CHEST_NAME_TO_ROM_OFFSETS.values()) == 73, (
+    "expected 73 total ROM offsets (8 duplicate spawn entries)"
+)
+assert set(CHEST_NAME_TO_ROM_OFFSETS) == set(DWAP_CHEST_RAM_BITS), (
+    "chest-name set must match DWAP_CHEST_RAM_BITS exactly"
+)
 
 
 # =============================================================================
@@ -1716,3 +1888,195 @@ ROM_CHEST_ITEM_OFFSETS: Final = (
     0x14081900,
 )
 assert len(ROM_CHEST_ITEM_OFFSETS) == 73, len(ROM_CHEST_ITEM_OFFSETS)
+
+
+# =============================================================================
+# Chest-pickup giveItem wrapper (Phase 5 piece A)
+# =============================================================================
+#
+# Sentinel-aware ``giveItem`` wrapper installed at SydPatches' "Cave6"
+# free-space region (RAM 0x800957C0..0x80096BCC, identified as unused
+# libgs functions — verified self-contained: every jal/j into Cave6 in
+# vanilla originates from inside Cave6).
+#
+# Behavior: if the caller's first argument (``$a0``, the item ID) equals
+# :data:`AP_CHEST_SENTINEL_ITEM_ID`, the wrapper returns 1 ("success")
+# without touching inventory. Otherwise it tail-calls vanilla
+# ``giveItem`` (RAM 0x800C5240) with arguments unchanged. Net effect:
+# chests holding the sentinel display "AP ITEM" via the patched item
+# table entry, the chest's "taken" state still flips (vanilla treats the
+# wrapper's return as success), and no item lands in the player's
+# inventory. AP delivers the *real* AP-fill item separately to the
+# player's bank via the client's deliverer routes.
+#
+# Wrapper byte layout (28 bytes / 7 MIPS instructions, all little-endian):
+#
+#   addiu $at, $0, 129     0x24010081   load sentinel constant
+#   beq   $a0, $at, +3     0x10810003   if item == 129 -> jr $ra branch
+#   nop                    0x00000000   delay slot
+#   j     0x800C5240       0x08031490   tail-call vanilla giveItem
+#   nop                    0x00000000   delay slot of j
+#   jr    $ra              0x03E00008   sentinel return path
+#   addiu $v0, $0, 1       0x24020001   delay slot: $v0 = 1 (true)
+
+ROM_CHEST_GIVEITEM_WRAPPER_RAM: Final = 0x800957C0
+ROM_CHEST_GIVEITEM_WRAPPER_OFFSET: Final = 0x14CC0B18
+ROM_CHEST_GIVEITEM_WRAPPER_BYTES: Final = bytes((
+    0x81, 0x00, 0x01, 0x24,  # addiu $at, $0, 129
+    0x03, 0x00, 0x81, 0x10,  # beq   $a0, $at, +3
+    0x00, 0x00, 0x00, 0x00,  # nop (delay slot)
+    0x90, 0x14, 0x03, 0x08,  # j     0x800C5240 (giveItem)
+    0x00, 0x00, 0x00, 0x00,  # nop (delay slot of j)
+    0x08, 0x00, 0xE0, 0x03,  # jr    $ra
+    0x01, 0x00, 0x02, 0x24,  # addiu $v0, $0, 1 (delay slot of jr)
+))
+assert len(ROM_CHEST_GIVEITEM_WRAPPER_BYTES) == 28, len(ROM_CHEST_GIVEITEM_WRAPPER_BYTES)
+
+# Patch site: replace the chest-pickup ``jal giveItem`` (vanilla
+# ``0x0C031490`` = ``jal 0x800C5240``) at vanilla RAM 0x80102E6C with
+# ``jal ROM_CHEST_GIVEITEM_WRAPPER_RAM`` (= ``0x0C0255F0``). This is
+# the only ``jal giveItem`` callsite in the SLUS whose success path
+# calls ``unsetTrigger(0)`` and failure path calls ``setTrigger(0)`` —
+# the unique fingerprint of the chest-take script-bytecode opcode
+# handler (vanilla equivalent of SydPatches' ``Tamer_tickTakeChest``
+# state 2).
+
+ROM_CHEST_GIVEITEM_PATCH_FORMAT: Final = "<I"
+ROM_CHEST_GIVEITEM_PATCH_OFFSET: Final = 0x14D3E5D4
+ROM_CHEST_GIVEITEM_PATCH_VALUE: Final = (
+    0x0C000000 | ((ROM_CHEST_GIVEITEM_WRAPPER_RAM >> 2) & 0x03FFFFFF)
+)
+assert ROM_CHEST_GIVEITEM_PATCH_VALUE == 0x0C0255F0, hex(ROM_CHEST_GIVEITEM_PATCH_VALUE)
+
+
+# =============================================================================
+# setTrigger wrapper for recruit-fight/recruit-join split (Phase 5 piece C)
+# =============================================================================
+#
+# Vanilla DW1 sets a "Digimon X has joined city" trigger bit at trigger ID
+# ``200 + digimon_id`` (range 203..258 for digimon_ids 3..58). Setting that
+# bit kicks off all of joining: PP recompute via :func:`recalculatePPandArena`,
+# in-city model spawn, business cards, dialogs, etc. The bit is set by
+# script bytecode (post-fight cutscenes, NPC dialog, plot triggers — there
+# is no ``setTrigger(200+i)`` in compiled C code).
+#
+# To split "fight completed" (an AP location signal) from "Digimon joins
+# city" (an AP item reward), we wrap the vanilla ``setTrigger`` function
+# (RAM 0x801065c0) with a small filter installed in SydPatches' Cave6
+# free-space region (immediately after :data:`ROM_CHEST_GIVEITEM_WRAPPER_*`):
+#
+# * If the caller's first argument (``$a0``, the trigger ID) lies in
+#   the recruit range 203..258, the wrapper adds 520 to it, redirecting
+#   the bit-set to the **beaten** range 723..778. Vanilla join effects
+#   (PP, model spawn, etc.) read trigger 200+i and stay off.
+# * Otherwise ``$a0`` is unchanged.
+# * The wrapper then continues with vanilla ``setTrigger``'s body
+#   (replicating its replaced first two instructions: stack frame setup
+#   and saving ``$ra``).
+#
+# AP detection polls the **beaten** bits (bytes 0x001BE027..0x001BE02E,
+# fully unused by vanilla — verified statically: no ``jal setTrigger /
+# unsetTrigger / isTriggerSet`` callsite in vanilla SLUS uses an
+# immediate >= 717, and the highest known dynamic-loop trigger ID is
+# 253 from the recruit-iteration loop). AP item delivery (the
+# "<Digimon> Recruit" item) writes the recruit bit ``200+i`` directly
+# via ``bizhawk.write`` — bypassing the wrapper.
+#
+# Wrapper byte layout (32 bytes / 8 MIPS instructions, little-endian):
+#
+#   addiu $at, $a0, -203      0x2481FF35   r1 = a0 - 203
+#   sltiu $t0, $at, 56          0x2C280038   t0 = (r1 < 56) ? 1 : 0
+#   beq   $t0, $0, +2 -> next  0x11000002   skip the redirect if not in range
+#   nop                         0x00000000   delay slot
+#   addiu $a0, $a0, 520         0x24840208   redirect: 203..258 -> 723..778
+#   addiu $sp, $sp, -32         0x27BDFFE0   original setTrigger instr 1
+#   j     0x801065C8            0x08041972   jump to setTrigger+8 to continue
+#   sw    $ra, 16($sp)          0xAFBF0010   original setTrigger instr 2 (delay slot)
+
+ROM_SETTRIGGER_WRAPPER_RAM: Final = 0x800957DC
+ROM_SETTRIGGER_WRAPPER_OFFSET: Final = 0x14CC0B34
+ROM_SETTRIGGER_WRAPPER_BYTES: Final = bytes((
+    0x35, 0xFF, 0x81, 0x24,  # addiu $at, $a0, -203
+    0x38, 0x00, 0x28, 0x2C,  # sltiu $t0, $at, 56
+    0x02, 0x00, 0x00, 0x11,  # beq   $t0, $0, +2
+    0x00, 0x00, 0x00, 0x00,  # nop (delay slot)
+    0x08, 0x02, 0x84, 0x24,  # addiu $a0, $a0, 520
+    0xE0, 0xFF, 0xBD, 0x27,  # addiu $sp, $sp, -32  (orig instr 1)
+    0x72, 0x19, 0x04, 0x08,  # j     0x801065C8
+    0x10, 0x00, 0xBF, 0xAF,  # sw    $ra, 16($sp)  (orig instr 2, delay slot)
+))
+assert len(ROM_SETTRIGGER_WRAPPER_BYTES) == 32, len(ROM_SETTRIGGER_WRAPPER_BYTES)
+
+# Patch site: replace vanilla ``setTrigger``'s first 2 instructions
+# (``addiu $sp,$sp,-32`` + ``sw $ra,16($sp)``) with ``j wrapper`` + ``nop``.
+# 8 bytes at ROM offset 0x14D42578 (RAM 0x801065C0).
+
+ROM_SETTRIGGER_PATCH_FORMAT: Final = "<II"
+ROM_SETTRIGGER_PATCH_OFFSET: Final = 0x14D42578
+ROM_SETTRIGGER_PATCH_VALUE: Final = (
+    0x08000000 | ((ROM_SETTRIGGER_WRAPPER_RAM >> 2) & 0x03FFFFFF),  # j wrapper
+    0x00000000,                                                      # nop
+)
+assert ROM_SETTRIGGER_PATCH_VALUE[0] == 0x080255F7, hex(ROM_SETTRIGGER_PATCH_VALUE[0])
+
+
+# =============================================================================
+# Recruit-bit RAM addresses (per-Digimon, Phase 5 piece C)
+# =============================================================================
+#
+# :data:`RECRUIT_RAM_BITS` (above) maps each Digimon to the byte/bit of its
+# vanilla "joined city" recruit bit. The setTrigger wrapper redirects these
+# at the source — vanilla never sets them after fight. Three derived maps:
+#
+# * :data:`BEATEN_RAM_BITS` — the (byte, bit) of each Digimon's redirected
+#   "beaten in fight" bit. The AP client polls these for fight-completion
+#   detection (the LocationCheck signal).
+# * :data:`AGUMON_RECRUIT_BIT` — Agumon is the bank NPC and a key game
+#   mechanic; the player must always have him in city for AP item delivery
+#   to work. The client force-sets this bit on connection so Agumon joins
+#   immediately, regardless of when the Agumon-fight cutscene actually
+#   triggers in the player's run. Note: the Agumon-fight AP location still
+#   fires from the beaten bit when the player completes that cutscene; we
+#   only suppress the join-city redirect for Agumon by pre-setting the bit.
+# * :data:`AP_RECRUIT_ITEM_DIGIMON` — the 49-element ordered tuple of
+#   Digimon names that ship as "<X> Recruit" AP items (everyone except
+#   Agumon). Used by the item table builder and the client's deliverer
+#   route registration.
+
+_BEATEN_TRIGGER_OFFSET: Final = 520
+
+
+def _ram_bit_after_offset(byte_addr: int, bit: int, trigger_offset: int) -> tuple[int, int]:
+    """Apply the wrapper's offset to a (byte, bit) pair, returning the new pair."""
+
+    trigger_id = (byte_addr - 0x001BDFCD) * 8 + bit
+    new_id = trigger_id + trigger_offset
+    new_byte, new_bit = divmod(new_id, 8)
+    return (0x001BDFCD + new_byte, new_bit)
+
+
+BEATEN_RAM_BITS: Final[dict[str, tuple[int, int]]] = {
+    name: _ram_bit_after_offset(byte, bit, _BEATEN_TRIGGER_OFFSET)
+    for name, (byte, bit) in RECRUIT_RAM_BITS.items()
+}
+
+# Sanity-check that no beaten byte overlaps the prosperity counter or
+# any chest bit we already use.
+_beaten_bytes = {byte for byte, _ in BEATEN_RAM_BITS.values()}
+_chest_bytes = {byte for byte, _ in DWAP_CHEST_RAM_BITS.values()}
+assert max(_beaten_bytes) < 0x001BE032, (
+    f"Beaten range overflows into RAM_PROSPERITY_POINTS at 0x001BE032: "
+    f"max byte 0x{max(_beaten_bytes):08X}"
+)
+assert _beaten_bytes.isdisjoint(_chest_bytes), (
+    f"Beaten range overlaps chest bits: {_beaten_bytes & _chest_bytes}"
+)
+
+AGUMON_RECRUIT_BIT: Final[tuple[int, int]] = RECRUIT_RAM_BITS["Agumon"]
+
+# AP-item Digimon = every recruit *except* Agumon (Agumon is force-recruited
+# by the client because he's the bank NPC).
+AP_RECRUIT_ITEM_DIGIMON: Final[tuple[str, ...]] = tuple(
+    name for name in RECRUIT_RAM_BITS if name != "Agumon"
+)
+assert len(AP_RECRUIT_ITEM_DIGIMON) == 49, len(AP_RECRUIT_ITEM_DIGIMON)

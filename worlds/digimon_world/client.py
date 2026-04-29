@@ -69,19 +69,21 @@ from NetUtils import ClientStatus
 from worlds._bizhawk.client import BizHawkClient
 
 from .data.addresses import (
-    AP_CHEST_SENTINEL_ITEM_ID,
+    AGUMON_RECRUIT_BIT,
+    BEATEN_RAM_BITS,
     DWAP_CHEST_RAM_BITS,
     RAM_CURRENT_BITS,
-    RAM_INVENTORY_EMPTY_SLOT_ID,
-    RAM_INVENTORY_ITEM_IDS_BASE,
-    RAM_INVENTORY_QUANTITIES_BASE,
-    RAM_INVENTORY_SLOT_COUNT,
     RAM_ITEM_BANK_BASE,
     RAM_ITEM_BANK_SIZE,
     RAM_PROSPERITY_POINTS,
-    RECRUIT_RAM_BITS,
 )
-from .items import ITEM_ID_BASE, ITEM_NAME_TO_ID, PROSPERITY_POINT_NAME
+from .items import (
+    ITEM_ID_BASE,
+    ITEM_NAME_TO_ID,
+    PROSPERITY_PER_ITEM,
+    PROSPERITY_POINT_NAME,
+    digimon_id_for_recruit_item,
+)
 
 if TYPE_CHECKING:
     from worlds._bizhawk.context import BizHawkClientContext
@@ -114,29 +116,68 @@ _PROSPERITY_VALIDATION_CEILING = 100
 
 
 # =============================================================================
+# Path D dynamic-city-toggle constants
+# =============================================================================
+# See ``_reconcile_recruits`` for the toggle algorithm.
+#
+# CURRENT_SCREEN_ADDR — single byte holding the current map/screen ID
+# the engine is rendering. Verified live and cross-referenced with the
+# DW1-SydPatches decompilation
+# (``references/DW1-SydPatches/SLUS_labels.asm:246`` — ``CURRENT_SCREEN``
+# at ``0x80134DA8`` = MainRAM offset ``0x00134DA8``, type ``uint8_t``).
+# (DWAP's C# client reads a different field at ``0x00134FFE`` as a
+# 2-byte short; both addresses appear to track map state but at
+# different points in the transition flow. The decompilation address
+# is the authoritative one and matches our live observations.)
+#
+# CITY_SCREENS — exhaustive set of screen IDs whose Region (per DWAP's
+# ``Helpers.cs:DigimonMap()`` table, IDs 0..254) is one of: File City
+# Top, File City Bottom, Jijimon's House, Birdra Transport, Arena
+# Lobby, Item Keeper, Centar Clinic, Restaurant, Item Shop, Secret
+# Shop. 52 screens total. NOT a contiguous range — non-city screens
+# interleave at IDs 209, 210, 212, 219..222, 224..235.
+#
+# RECRUIT_BLOCK_BASE / RECRUIT_BLOCK_SIZE — byte range covering all
+# recruit-completion bits (trigger 200..258 inclusive). The trigger
+# array starts at 0x001BDFCD; bit 200 lives at offset 200//8=25
+# (``0x001BDFE6``); bit 258 at offset 258//8=32 (``0x001BDFED``). 8
+# bytes inclusive. We read this whole block in one batched read each
+# tick rather than per-Digimon byte reads.
+
+CURRENT_SCREEN_ADDR: int = 0x00134DA8
+CITY_SCREENS: frozenset[int] = frozenset({
+    # 168..208 — File City Top + Bottom + Jijimon's House + Birdra
+    # Transport + Arena Lobby (lobby-without-Mecha variant only)
+    *range(168, 209),
+    # 211 — Item Keeper
+    211,
+    # 213..218 — Centar Clinic, Restaurant x2, Item Shop, Secret Shop,
+    # Jijimon's House (Base Model)
+    *range(213, 219),
+    # 223 — Arena Lobby (with MetalGreymon/Airdramon)
+    223,
+    # 236, 237, 238 — File City Top (Final / Initial cutscene variants)
+    236, 237, 238,
+})
+RECRUIT_BLOCK_BASE: int = 0x001BDFE6
+RECRUIT_BLOCK_SIZE: int = 8
+
+
+# =============================================================================
 # Per-location detection tables
 # =============================================================================
 #
-# Static bit-set checks for chests and recruit AP locations. The recruit
-# AP location is keyed by the spawn-point Digimon's name, and detection
-# polls that Digimon's vanilla recruit bit in the trigger array. Whether
-# the closed-shuffle trigger remap actually causes a different Digimon's
-# bit to fire when the encounter completes is irrelevant for AP
-# detection — the spawn-point's bit fires either way (when remap is
-# identity) or the partner's bit fires (when remap differs), but the
-# spawn-point bit is what we care about for AP-side state.
-#
-# Wait — that's wrong. Re-reading the live test data: the patched seed
-# wrote partner-trigger-IDs at spawn offsets, and AFTER fighting Coelamon
-# the OBSERVED set bits included *Coelamon's vanilla bit*, not just the
-# partner's. So both fire. AP detection on the spawn-point bit is the
-# correct signal — it always fires when that spawn's encounter is won.
-#
-# * Chests: read the vanilla DWAP-mapped bits.
-# * Recruits: read the spawn-point's vanilla recruit bit.
+# * **Chests** — bit-set checks at the vanilla DWAP-mapped trigger bits.
+# * **Recruits** (Phase 5 piece C) — bit-set checks at the *beaten* bits
+#   produced by the setTrigger wrapper installed in the patcher. When
+#   the player completes any recruit cutscene (fight, NPC dialog,
+#   plot-trigger), vanilla calls ``setTrigger(200+digimon_id)``; the
+#   wrapper redirects that to ``setTrigger(723+digimon_id)`` so the
+#   "beaten" bit lights up but vanilla join-city behavior stays
+#   suppressed. AP polls the beaten bit to fire the location check.
 LOCATION_RAM_BITS: dict[str, tuple[int, int]] = {
     **DWAP_CHEST_RAM_BITS,
-    **RECRUIT_RAM_BITS,
+    **BEATEN_RAM_BITS,
 }
 
 # Threshold-based detection (e.g. NPC-gift PP gates) is unused in v7 —
@@ -190,15 +231,15 @@ PROSPERITY_RAM_CAP: int = 100
 def _make_prosperity_deliverer() -> ItemDeliverer:
     """Return an :class:`ItemDeliverer` for ``Prosperity Point``.
 
-    Each delivery bumps the in-game prosperity byte by 1 (saturating at
+    Each delivery bumps the in-game prosperity byte by
+    :data:`PROSPERITY_PER_ITEM` (= 2; saturating at
     :data:`PROSPERITY_RAM_CAP`). The deliverer is **idempotent**: if the
     byte is already at the target, the write is dropped.
 
-    Note: vanilla DW1 also writes prosperity. The watcher's
-    :meth:`DigimonWorldClient._enforce_prosperity` runs every tick to
-    bring the byte back to "AP-controlled value" (see the watcher loop)
-    so vanilla writes don't accumulate. The deliverer just bumps the
-    target value.
+    Note: the watcher's :meth:`DigimonWorldClient._enforce_prosperity`
+    runs every tick to pin the byte to ``ProsperityPoint count *
+    PROSPERITY_PER_ITEM`` so vanilla DW1's recruit-derived PP recompute
+    cannot leak through. The deliverer just bumps the target value.
     """
 
     async def deliver(ctx: BizHawkClientContext) -> list[RamWrite]:
@@ -207,10 +248,40 @@ def _make_prosperity_deliverer() -> ItemDeliverer:
         ))[0]
         if not current:
             return []
-        new_value = min(PROSPERITY_RAM_CAP, current[0] + 1)
+        new_value = min(PROSPERITY_RAM_CAP, current[0] + PROSPERITY_PER_ITEM)
         if new_value == current[0]:
             return []
         return [(RAM_PROSPERITY_POINTS, [new_value], DOMAIN_MAIN_RAM)]
+
+    return deliver
+
+
+def _make_recruit_deliverer(digimon_id: int) -> ItemDeliverer:
+    """Return an :class:`ItemDeliverer` for a ``"<Digimon> Recruit"`` item.
+
+    Phase 5 piece C "deferred write" model: this deliverer is a no-op at
+    delivery time. It does NOT immediately write the recruit-completion
+    bit (200 + digimon_id), because pre-emptively setting that bit
+    triggers vanilla DW1's wild-spawn block — the player can no longer
+    encounter Digimon X in the wild (the location for X then never
+    fires).
+
+    Instead, the actual write is done by
+    :meth:`DigimonWorldClient._reconcile_recruits` once both conditions
+    hold: (a) AP has delivered ``<X> Recruit`` (the item is in
+    ``ctx.items_received``), and (b) the player has actually beaten
+    Digimon X (bit 720+id is SET). At that point — typically right
+    after the wild fight completes — the recruit bit is written and
+    Digimon X joins the city.
+
+    ``digimon_id`` is unused at delivery time but kept in the deliverer
+    factory signature so the dispatch table layout is unchanged.
+    """
+
+    _ = digimon_id  # intentionally unused at delivery time
+
+    async def deliver(_ctx: BizHawkClientContext) -> list[RamWrite]:
+        return []  # no immediate write; reconcile_recruits handles it
 
     return deliver
 
@@ -272,12 +343,18 @@ def _make_money_deliverer(amount: int) -> ItemDeliverer:
 def _build_item_delivery_routes() -> dict[str, ItemDeliverer]:
     """Construct :data:`ITEM_DELIVERY_ROUTES` from the items table.
 
-    Routes by ``dw_code`` band:
+    Routes by item name / ``dw_code`` band:
 
-    * 2000..2127 → bank deliverer
-    * 3001 → 1000-bit money deliverer
-    * 3002 → 5000-bit money deliverer
-    * 4000..4049 → soul deliverer
+    * ``Prosperity Point`` → +``PROSPERITY_PER_ITEM`` PP at
+      :data:`RAM_PROSPERITY_POINTS`.
+    * ``"<Digimon> Recruit"`` (1000-block, Phase 5 piece C) → set the
+      recruit-completion bit ``200 + digimon_id`` directly. This
+      bypasses the setTrigger wrapper (which would otherwise redirect
+      into the beaten range).
+    * 2000-block dw_code (consumables, DV items, key items) → bank-byte
+      increment.
+    * 3001 → 1000-bit money deliverer.
+    * 3002 → 5000-bit money deliverer.
 
     Items outside these ranges are intentionally skipped (no route
     registered); :meth:`DigimonWorldClient._deliver_items` logs a
@@ -289,7 +366,12 @@ def _build_item_delivery_routes() -> dict[str, ItemDeliverer]:
         dw_code = ap_id - ITEM_ID_BASE
         if name == PROSPERITY_POINT_NAME:
             routes[name] = _make_prosperity_deliverer()
-        elif 2000 <= dw_code < 2000 + RAM_ITEM_BANK_SIZE:
+            continue
+        recruit_id = digimon_id_for_recruit_item(name)
+        if recruit_id is not None:
+            routes[name] = _make_recruit_deliverer(recruit_id)
+            continue
+        if 2000 <= dw_code < 2000 + RAM_ITEM_BANK_SIZE:
             routes[name] = _make_bank_deliverer(dw_code)
         elif dw_code == 3001:
             routes[name] = _make_money_deliverer(1000)
@@ -349,6 +431,14 @@ class DigimonWorldClient(BizHawkClient):
         self._location_name_to_id: dict[str, int] | None = None
         self._item_name_to_id: dict[str, int] | None = None
         self._goal_complete_sent = False
+        # Names of chest AP locations whose AP-placed item is the
+        # player's own DW1-representable item. Vanilla DW1 hands those
+        # items to the player directly via the chest-pickup flow, so
+        # the client must NOT also bank-deliver the matching
+        # ReceivedItem (it would duplicate the quantity). Populated
+        # from slot_data on first watcher tick that sees a synced
+        # connection.
+        self._vanilla_grant_chests: frozenset[str] | None = None
 
     # ------------------------------------------------------------------
     # validate_rom
@@ -408,78 +498,161 @@ class DigimonWorldClient(BizHawkClient):
             from . import DigimonWorldWorld
             self._location_name_to_id = DigimonWorldWorld.location_name_to_id
             self._item_name_to_id = DigimonWorldWorld.item_name_to_id
+        if self._vanilla_grant_chests is None and ctx.slot_data is not None:
+            self._vanilla_grant_chests = frozenset(
+                ctx.slot_data.get("vanilla_grant_chests", ()),
+            )
 
         try:
             await self._check_locations(ctx)
             await self._deliver_items(ctx)
-            await self._wipe_chest_sentinels(ctx)
+            await self._reconcile_recruits(ctx)
             await self._enforce_prosperity(ctx)
+            await self._enforce_agumon_recruited(ctx)
             await self._check_goal(ctx)
         except bizhawk.RequestFailedError:
             # Lua connector failed to respond; exit the handler and
             # let the BizHawk framework reconnect on the next tick.
             return
 
-    async def _wipe_chest_sentinels(self, ctx: BizHawkClientContext) -> None:
-        """Remove any AP chest-sentinel items (id 129) from the player's
-        inventory.
+    async def _reconcile_recruits(self, ctx: BizHawkClientContext) -> None:
+        """Dynamic city-toggle of recruit-completion bits (Phase 5 piece C, Path D).
 
-        Vanilla DW1 grants the chest's item ID byte to inventory when a
-        chest is opened. We patch every chest's item byte to 129
-        (a blank-render sentinel) and wipe the slot here on the next
-        tick. Net effect: chest opens, AP location fires from chest-bit
-        detection, sentinel appears for one frame, this method clears
-        it. Player sees ~100ms blip then nothing.
+        For every ``"<X> Recruit"`` item AP has delivered, the
+        recruit-completion bit (200+digimon_id) is set IFF the player
+        is currently in a "city" screen, otherwise cleared.
 
-        Cheap: 20-byte read (10 IDs + 10 quantities), at most a small
-        burst of writes per chest opened.
+        Why dynamic toggle: vanilla DW1 reuses bit 200+X for two
+        unrelated semantics — wild-spawn gate (set => wild Digimon
+        won't appear in field) and city-presence gate (set => city
+        model spawns). Pre-emptively setting it on AP delivery blocks
+        the wild fight; never setting it removes city presence. We
+        sidestep this conflict by setting the bit ONLY while the
+        player is in a city screen and clearing it the moment they
+        leave. Vanilla wild-spawn gate (in field maps) sees bit 200+X
+        cleared → wild X spawns. Vanilla city checks (Map.cpp:1715
+        compiled-C plus city-script reads) see bit 200+X set → city
+        Digimon are rendered.
+
+        Race window: client polls every ~100ms, so on a screen
+        transition there's a window where vanilla loads the new map
+        with the previous bit-state. Mitigation: the player can
+        re-enter the screen (free reload). Acceptable per user
+        guidance.
+
+        :data:`CITY_SCREENS` enumerates the screen IDs we treat as
+        "in city". This is the union of `getFileCityTopMap`'s 12
+        outdoor-variant return values (168..179), the no-Agumon
+        fallback (204), and observed city sub-building screens
+        (180, 211, 218, 238). Add more here as the player encounters
+        new city sub-areas.
+
+        Idempotent — the writes only fire when the byte's actual
+        value differs from desired, never duplicating.
         """
 
-        # Read all 10 inventory slot IDs and quantities in two small reads.
-        ids = (await bizhawk.read(
-            ctx.bizhawk_ctx,
-            [(RAM_INVENTORY_ITEM_IDS_BASE, RAM_INVENTORY_SLOT_COUNT, DOMAIN_MAIN_RAM)],
-        ))[0]
-        if len(ids) != RAM_INVENTORY_SLOT_COUNT:
+        # Discover every received Recruit item's digimon_id.
+        received_dids: set[int] = set()
+        for item in ctx.items_received:
+            item_name = ctx.item_names.lookup_in_game(item.item, ctx.game)
+            did = digimon_id_for_recruit_item(item_name)
+            if did is not None:
+                received_dids.add(did)
+        if not received_dids:
             return
 
-        writes: list[RamWrite] = []
-        for slot in range(RAM_INVENTORY_SLOT_COUNT):
-            if ids[slot] == AP_CHEST_SENTINEL_ITEM_ID:
-                writes.append((
-                    RAM_INVENTORY_ITEM_IDS_BASE + slot,
-                    [RAM_INVENTORY_EMPTY_SLOT_ID],
-                    DOMAIN_MAIN_RAM,
-                ))
-                writes.append((
-                    RAM_INVENTORY_QUANTITIES_BASE + slot,
-                    [0],
-                    DOMAIN_MAIN_RAM,
-                ))
+        # Read current screen + the recruit byte block in one batched read.
+        try:
+            blocks = await bizhawk.read(
+                ctx.bizhawk_ctx,
+                [
+                    (CURRENT_SCREEN_ADDR, 1, DOMAIN_MAIN_RAM),
+                    (RECRUIT_BLOCK_BASE, RECRUIT_BLOCK_SIZE, DOMAIN_MAIN_RAM),
+                ],
+            )
+        except bizhawk.RequestFailedError:
+            return
+        if (len(blocks) != 2 or len(blocks[0]) != 1
+                or len(blocks[1]) != RECRUIT_BLOCK_SIZE):
+            return
+        screen_id = blocks[0][0]
+        in_city = screen_id in CITY_SCREENS
+        recruit_bytes = bytearray(blocks[1])
+
+        original = bytes(recruit_bytes)
+
+        # For each received Recruit, set the bit if in city / clear if not.
+        for did in received_dids:
+            recruit_trig = 200 + did  # 203..258
+            block_off = recruit_trig // 8 - (RECRUIT_BLOCK_BASE - 0x001BDFCD)
+            if not (0 <= block_off < RECRUIT_BLOCK_SIZE):
+                continue  # outside cached block (shouldn't happen)
+            mask = 1 << (recruit_trig % 8)
+            if in_city:
+                recruit_bytes[block_off] |= mask
+            else:
+                recruit_bytes[block_off] &= 0xFF ^ mask
+
+        # Submit only the bytes that actually changed.
+        writes: list[RamWrite] = [
+            (RECRUIT_BLOCK_BASE + off, [recruit_bytes[off]], DOMAIN_MAIN_RAM)
+            for off in range(RECRUIT_BLOCK_SIZE)
+            if recruit_bytes[off] != original[off]
+        ]
         if writes:
             await bizhawk.write(ctx.bizhawk_ctx, writes)
+
+    async def _enforce_agumon_recruited(self, ctx: BizHawkClientContext) -> None:
+        """Pin Agumon's recruit-completion bit on every tick.
+
+        Agumon is the in-city bank NPC and a key delivery mechanic;
+        the player must always have him in city for AP item delivery
+        to work. Pre-setting bit 203 has a side effect — vanilla DW1
+        reads the same bit when deciding whether to spawn the wild
+        Agumon NPC for the recruit fight, so pre-setting it blocks
+        that fight forever. Per the user's preference, accept the
+        Agumon location loss (better than risking the bank to break
+        and losing items). The Agumon location is dropped from the
+        AP pool in :data:`worlds.digimon_world.locations._RECRUIT_REGIONS`.
+
+        Cheap: one byte read, at most one byte write per tick. The
+        write is OR-into-existing (idempotent).
+        """
+
+        byte_addr, bit_index = AGUMON_RECRUIT_BIT
+        bit_mask = 1 << bit_index
+        current = (await bizhawk.read(
+            ctx.bizhawk_ctx, [(byte_addr, 1, DOMAIN_MAIN_RAM)],
+        ))[0]
+        if not current:
+            return
+        if current[0] & bit_mask:
+            return  # already set
+        await bizhawk.write(
+            ctx.bizhawk_ctx,
+            [(byte_addr, [current[0] | bit_mask], DOMAIN_MAIN_RAM)],
+        )
 
     async def _enforce_prosperity(self, ctx: BizHawkClientContext) -> None:
         """Pin the in-game prosperity byte to the AP-controlled value.
 
         AP is the single source of truth for prosperity in this world:
-        the byte must equal the number of ``Prosperity Point`` items
-        the server has delivered so far (saturating at
+        the byte must equal ``ProsperityPoint count *
+        PROSPERITY_PER_ITEM`` (saturating at
         :data:`PROSPERITY_RAM_CAP`). Any vanilla DW1 attempt to bump
-        prosperity is overwritten on the next tick.
+        prosperity (e.g. the recruit-derived recompute) is overwritten
+        on the next tick.
 
         Cheap: one RAM read, at most one byte write.
         """
 
-        target = min(
-            PROSPERITY_RAM_CAP,
-            sum(
-                1
-                for item in ctx.items_received
-                if ctx.item_names.lookup_in_game(item.item, ctx.game)
-                == PROSPERITY_POINT_NAME
-            ),
+        pp_item_count = sum(
+            1
+            for item in ctx.items_received
+            if ctx.item_names.lookup_in_game(item.item, ctx.game)
+            == PROSPERITY_POINT_NAME
         )
+        target = min(PROSPERITY_RAM_CAP, pp_item_count * PROSPERITY_PER_ITEM)
         current = (await bizhawk.read(
             ctx.bizhawk_ctx, [(RAM_PROSPERITY_POINTS, 1, DOMAIN_MAIN_RAM)],
         ))[0]
@@ -568,33 +741,53 @@ class DigimonWorldClient(BizHawkClient):
 
         next_item = ctx.items_received[applied]
         item_name = ctx.item_names.lookup_in_game(next_item.item, ctx.game)
+
+        counter_advance: list[RamWrite] = [(
+            counter_address,
+            list((applied + 1).to_bytes(counter_size, "little")),
+            DOMAIN_MAIN_RAM,
+        )]
+
+        # Skip the bank delivery when this item came from one of the
+        # player's own vanilla-grant chests: vanilla DW1 has already
+        # handed the item to the player via the chest-pickup flow.
+        # Doubly-delivering would stack the bank quantity. The counter
+        # still advances so subsequent items are processed.
+        if (
+            next_item.player == ctx.slot
+            and self._vanilla_grant_chests is not None
+        ):
+            location_name = ctx.location_names.lookup_in_game(
+                next_item.location, ctx.game,
+            )
+            if location_name in self._vanilla_grant_chests:
+                await bizhawk.write(ctx.bizhawk_ctx, counter_advance)
+                return
+
         deliverer = ITEM_DELIVERY_ROUTES.get(item_name)
         if deliverer is None:
             # Unknown item — increment the counter anyway so we don't
             # block on it forever, and log so RE work can add a route.
             logger.warning("No delivery route for item %r; skipping", item_name)
-            await bizhawk.write(ctx.bizhawk_ctx, [(
-                counter_address,
-                list((applied + 1).to_bytes(counter_size, "little")),
-                DOMAIN_MAIN_RAM,
-            )])
+            await bizhawk.write(ctx.bizhawk_ctx, counter_advance)
             return
 
         write_list = await deliverer(ctx)
-        write_list.append((
-            counter_address,
-            list((applied + 1).to_bytes(counter_size, "little")),
-            DOMAIN_MAIN_RAM,
-        ))
+        write_list.extend(counter_advance)
         await bizhawk.write(ctx.bizhawk_ctx, write_list)
 
     async def _check_goal(self, ctx: BizHawkClientContext) -> None:
-        """Fire ``StatusUpdate(GoalComplete)`` once prosperity hits 100.
+        """Fire ``StatusUpdate(GoalComplete)`` once prosperity hits the
+        Final-Battle threshold (50).
 
         Placeholder goal trigger pending Machinedramon-flag RE work.
-        DW1's prosperity counter saturates at 100; the seed is
-        logically completable at 50 PP under Phase 2 rules, so 100 PP
-        is a strict *over*-condition.
+        Phase 5 piece C: max PP is 50 (25 ``Prosperity Point`` items
+        delivering :data:`PROSPERITY_PER_ITEM` = 2 each). The client
+        enforces PP from received items, so reaching 50 means the
+        player has all PP items and can theoretically clear the Final
+        Battle. The AP completion condition still requires AS Decoder
+        in addition; we rely on AP fill to ensure that's reachable
+        whenever PP is.
         """
 
         if self._goal_complete_sent or ctx.finished_game:
@@ -606,7 +799,7 @@ class DigimonWorldClient(BizHawkClient):
             ))[0]
         except bizhawk.RequestFailedError:
             return
-        if data and data[0] >= 100:
+        if data and data[0] >= 50:
             await ctx.send_msgs([{
                 "cmd": "StatusUpdate",
                 "status": ClientStatus.CLIENT_GOAL,

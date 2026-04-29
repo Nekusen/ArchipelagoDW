@@ -1,18 +1,25 @@
-"""Tests for the Digimon World 1 BizHawk client (Phase 4 v7).
+"""Tests for the Digimon World 1 BizHawk client (Phase 5 piece C).
 
-What v7 of the client does:
+What this client does:
 
-* Polls every recruit AP location via the spawn-point Digimon's vanilla
-  recruit bit (50 entries, all of :data:`RECRUIT_RAM_BITS`).
+* Polls every recruit AP location via the *beaten* trigger bit
+  (Phase 5 piece C: the setTrigger wrapper redirects every
+  ``setTrigger(200+digimon_id)`` into the unused 723..778 range, so
+  the player can fight any Digimon without auto-joining the city).
 * Polls every chest AP location via DWAP's chest-bit table (65).
 * On items_received, dispatches each item to a deliverer:
   - bank deliverers for the 2000-block items;
   - money deliverers for the 3001/3002 bits items;
-  - prosperity deliverer for the ``Prosperity Point`` item.
-* Each tick, force-pins the in-game prosperity byte to the count of
-  delivered ``Prosperity Point`` items (saturating at
-  :data:`PROSPERITY_RAM_CAP`).
-* Goal trigger fires when the prosperity byte is at the cap.
+  - prosperity deliverer for the ``Prosperity Point`` item
+    (delivers ``PROSPERITY_PER_ITEM`` = 2 PP per item);
+  - recruit deliverer for ``"<Digimon> Recruit"`` items (writes the
+    recruit-completion bit ``200+digimon_id`` directly, bypassing
+    the wrapper).
+* Each tick, force-pins the in-game prosperity byte to ``PP-item count
+  * PROSPERITY_PER_ITEM`` (saturating at :data:`PROSPERITY_RAM_CAP`).
+* Each tick, force-sets Agumon's recruit bit (he's the bank NPC).
+* Goal trigger fires once prosperity reaches 50 (max deliverable from
+  25 ``Prosperity Point`` items @ 2 PP each).
 """
 
 from __future__ import annotations
@@ -33,11 +40,12 @@ from ..client import (
     DigimonWorldClient,
 )
 from ..data.addresses import (
+    BEATEN_RAM_BITS,
     DWAP_CHEST_RAM_BITS,
     RAM_PROSPERITY_POINTS,
     RECRUIT_RAM_BITS,
 )
-from ..items import PROSPERITY_POINT_NAME
+from ..items import PROSPERITY_PER_ITEM, PROSPERITY_POINT_NAME
 from ..locations import CHEST_NAMES, RECRUIT_NAMES
 from .bases import DigimonWorldTestBase
 
@@ -102,11 +110,15 @@ class TestRecruitDispatch(DigimonWorldTestBase):
         for recruit_name in RECRUIT_NAMES:
             self.assertIn(recruit_name, LOCATION_RAM_BITS)
 
-    def test_recruit_dispatch_uses_vanilla_bits(self) -> None:
+    def test_recruit_dispatch_uses_beaten_bits(self) -> None:
+        """Phase 5 piece C: detection moved from vanilla recruit bits to
+        the redirected ``beaten`` bits installed by the setTrigger
+        wrapper — the recruit bits never light up post-wrapper."""
+
         for recruit_name in RECRUIT_NAMES:
             self.assertEqual(
                 LOCATION_RAM_BITS[recruit_name],
-                RECRUIT_RAM_BITS[recruit_name],
+                BEATEN_RAM_BITS[recruit_name],
             )
 
 
@@ -168,8 +180,9 @@ class TestItemDeliveryRoutes(DigimonWorldTestBase):
 
 
 class TestProsperityDelivery(DigimonWorldTestBase):
-    """Each Prosperity Point delivery bumps the prosperity byte by 1
-    (saturating at PROSPERITY_RAM_CAP). Idempotent at the cap."""
+    """Each Prosperity Point delivery bumps the prosperity byte by
+    :data:`PROSPERITY_PER_ITEM` (saturating at PROSPERITY_RAM_CAP).
+    Idempotent at the cap."""
 
     options: ClassVar[dict[str, Any]] = {}
 
@@ -186,7 +199,7 @@ class TestProsperityDelivery(DigimonWorldTestBase):
         self.assertEqual(len(writes), 1)
         addr, byte_list, domain = writes[0]
         self.assertEqual(addr, RAM_PROSPERITY_POINTS)
-        self.assertEqual(byte_list, [43])
+        self.assertEqual(byte_list, [42 + PROSPERITY_PER_ITEM])
         self.assertEqual(domain, DOMAIN_MAIN_RAM)
 
     def test_saturated_delivery_is_noop(self) -> None:
@@ -304,12 +317,14 @@ class TestGoalDetection(DigimonWorldTestBase):
         return ctx
 
     def test_below_threshold_no_msg(self) -> None:
-        ctx = self._run_check_goal(99)
+        # Phase 5 piece C: threshold dropped from 100 to 50 (max
+        # deliverable from 25 PP items @ 2 PP each).
+        ctx = self._run_check_goal(49)
         self.assertEqual(ctx.sent_msgs, [])
         self.assertFalse(ctx.finished_game)
 
     def test_at_threshold_fires_once(self) -> None:
-        ctx = self._run_check_goal(100)
+        ctx = self._run_check_goal(50)
         self.assertEqual(len(ctx.sent_msgs), 1)
         msg = ctx.sent_msgs[0][0]
         self.assertEqual(msg["cmd"], "StatusUpdate")
@@ -356,10 +371,16 @@ class TestDeliverItemsNoopOnNoPending(DigimonWorldTestBase):
 class TestManifestRecruitTableShape(DigimonWorldTestBase):
     options: ClassVar[dict[str, Any]] = {}
 
-    def test_all_50_recruits_present(self) -> None:
+    def test_all_recruit_names_have_recruit_bits(self) -> None:
+        # RECRUIT_NAMES (49, post-Agumon-drop) is a subset of
+        # RECRUIT_RAM_BITS (50, manifest still includes Agumon for the
+        # client's force-set deliverer).
         for recruit_name in RECRUIT_NAMES:
             self.assertIn(recruit_name, RECRUIT_RAM_BITS)
-        self.assertEqual(len(RECRUIT_RAM_BITS), len(RECRUIT_NAMES))
+        self.assertEqual(len(RECRUIT_RAM_BITS), 50)
+        self.assertEqual(len(RECRUIT_NAMES), 49)
+        self.assertNotIn("Agumon", RECRUIT_NAMES)
+        self.assertIn("Agumon", RECRUIT_RAM_BITS)
 
     def test_bit_indices_in_byte_range(self) -> None:
         for (_offset, bit_index) in RECRUIT_RAM_BITS.values():

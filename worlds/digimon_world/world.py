@@ -26,7 +26,14 @@ from typing import Any, ClassVar
 
 from worlds.AutoWorld import World
 
-from . import items, locations, recruit_shuffle, regions, rom, rules
+from . import (
+    chest_assignments,
+    items,
+    locations,
+    regions,
+    rom,
+    rules,
+)
 from .options import DigimonWorldOptions
 from .rom import DigimonWorldSettings
 
@@ -54,9 +61,9 @@ class DigimonWorldWorld(World):
     item_name_groups = items.ITEM_NAME_GROUPS
     location_name_groups = locations.LOCATION_NAME_GROUPS
 
-    # Populated lazily on first :attr:`recruit_remap` access. Maps each
-    # shuffleable spawn-point Digimon to its sentinel trigger ID.
-    _recruit_remap: dict[str, int] | None = None
+    # Populated lazily on first :attr:`chest_grants` access (post-fill).
+    # Maps each chest AP location name to its resolved grant decision.
+    _chest_grants: dict[str, chest_assignments.ChestGrant] | None = None
 
     def create_regions(self) -> None:
         regions.create_and_connect_regions(self)
@@ -76,24 +83,30 @@ class DigimonWorldWorld(World):
         return items.FILLER_ITEM_NAME
 
     @property
-    def recruit_remap(self) -> dict[str, int]:
-        """Sentinel-trigger map ``{spawn_digimon: sentinel_trigger_id}``.
+    def chest_grants(self) -> dict[str, chest_assignments.ChestGrant]:
+        """Per-chest grant decisions built from the post-fill placement.
 
-        Deterministic — derived purely from the manifest's
-        :data:`worlds.digimon_world.data.addresses.AP_SENTINEL_TRIGGER_BY_DIGIMON`,
-        no fill or option dependence. Cached on first access so callers
-        get a stable view per generation.
+        Must only be accessed after ``fill`` has populated
+        ``Location.item``; in practice that means inside
+        :meth:`fill_slot_data` or later (e.g. :meth:`generate_output`).
+        Cached on first access for cheap re-use across the patcher and
+        slot_data construction.
         """
 
-        if self._recruit_remap is None:
-            self._recruit_remap = recruit_shuffle.build_recruit_remap(self)
-        return self._recruit_remap
+        if self._chest_grants is None:
+            self._chest_grants = chest_assignments.build_chest_grants(self)
+        return self._chest_grants
 
     def fill_slot_data(self) -> Mapping[str, Any]:
-        # ``recruit_remap`` is fully deterministic from the manifest; the
-        # client recomputes it locally instead of round-tripping it via
-        # slot_data. Slot_data only carries player-visible options.
-        return self.options.as_dict("goal")
+        # Per-chest vanilla-grant decisions depend on AP fill outcomes
+        # and must be shipped: the client uses the list to suppress
+        # redundant bank deliveries for items the chest already handed
+        # to the player in-game.
+        slot_data = dict(self.options.as_dict("goal"))
+        slot_data["vanilla_grant_chests"] = sorted(
+            name for name, grant in self.chest_grants.items() if grant.vanilla_grant
+        )
+        return slot_data
 
     def generate_output(self, output_directory: str) -> None:
         """Phase 3 entry point — emit the per-player ``.apdw1`` patch.

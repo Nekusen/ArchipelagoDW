@@ -58,13 +58,18 @@ from worlds.Files import APPatchExtension, APProcedurePatch, APTokenMixin, APTok
 
 from .data import edc
 from .data.addresses import (
+    AP_CHEST_SENTINEL_ITEM_ID,
+    CHEST_NAME_TO_ROM_OFFSETS,
     ROM_AP_ITEM_ENTRY_BYTES,
     ROM_AP_ITEM_ENTRY_OFFSET,
     ROM_BIN_BYTES,
     ROM_BIN_SHA1,
+    ROM_CHEST_GIVEITEM_PATCH_FORMAT,
+    ROM_CHEST_GIVEITEM_PATCH_OFFSET,
+    ROM_CHEST_GIVEITEM_PATCH_VALUE,
+    ROM_CHEST_GIVEITEM_WRAPPER_BYTES,
+    ROM_CHEST_GIVEITEM_WRAPPER_OFFSET,
     ROM_CHEST_ITEM_FORMAT,
-    ROM_CHEST_ITEM_OFFSETS,
-    ROM_CHEST_ITEM_VALUE,
     ROM_FIX_LEO_CAVE_FORMAT,
     ROM_FIX_LEO_CAVE_OFFSETS,
     ROM_FIX_LEO_CAVE_VALUE,
@@ -83,8 +88,13 @@ from .data.addresses import (
     ROM_PP_CALC_PATCH_FORMAT,
     ROM_PP_CALC_PATCH_OFFSET,
     ROM_PP_CALC_PATCH_VALUE,
-    ROM_RECRUIT_TRIGGER_FORMAT,
-    ROM_RECRUIT_TRIGGERS,
+    ROM_RECRUITMENT,
+    ROM_RECRUITMENT_FORMAT,
+    ROM_SETTRIGGER_PATCH_FORMAT,
+    ROM_SETTRIGGER_PATCH_OFFSET,
+    ROM_SETTRIGGER_PATCH_VALUE,
+    ROM_SETTRIGGER_WRAPPER_BYTES,
+    ROM_SETTRIGGER_WRAPPER_OFFSET,
 )
 
 if TYPE_CHECKING:
@@ -273,32 +283,90 @@ class DigimonWorldProcedurePatch(APProcedurePatch, APTokenMixin):
 # Generation-time helpers (called from write_patch)
 # =============================================================================
 
-def _write_recruit_remap_tokens(
+def _write_recruit_trigger_redirect_tokens(
     patch: DigimonWorldProcedurePatch,
-    remap: dict[str, str],
 ) -> None:
-    """Emit closed-shuffle trigger writes for each shuffleable recruit spawn.
+    """Uniformly redirect every script-bytecode reference to a recruit's
+    trigger ID (200+digimon_id) onto the corresponding "beaten" trigger
+    (720+digimon_id).
 
-    ``remap`` is keyed by the spawn-point Digimon and valued by its
-    closed-shuffle partner Digimon. The patcher writes the partner's
-    vanilla trigger ID at all of the spawn's ROM offsets, so completing
-    the spawn's encounter sets the partner's recruit bit (visual
-    randomization in-game).
+    Why: vanilla DW1 reuses the recruit-completion trigger bit at multiple
+    sites in script bytecode — the wild-spawn gate ("if trigger(204) ==
+    true then skip loadDigimon"), the in-city presence checks ("if NPC
+    Betamon is recruited, walk around in city"), the Jijimon dialog
+    "have you recruited X" check, and the post-fight ``setTrigger(204)``
+    call itself. Without this redirect, AP item delivery of "Betamon
+    Recruit" — which writes bit 204 directly — would also flip the
+    wild-spawn gate, blocking the fight from ever spawning and thus
+    preventing the Betamon AP location from firing.
 
-    Identity entries (``X -> X``) emit no tokens — the vanilla bytes
-    already carry the right trigger ID.
+    Mechanism: rewrite the 2-byte trigger ID at every offset in
+    :data:`ROM_RECRUITMENT.trigger_offsets` (the standalone DW1
+    randomizer's catalogue of trigger references in script bytecode)
+    from ``200+digimon_id`` to ``720+digimon_id``. Net effect on each
+    Digimon's script-side semantics:
+
+    * Wild-spawn gate now reads bit 720+id → set only after the player
+      actually fights (via the setTrigger wrapper redirecting vanilla's
+      post-fight ``setTrigger(200+id)`` to ``setTrigger(720+id)``). AP
+      delivery doesn't block wild spawn.
+    * In-city presence and dialog checks also redirect to bit 720+id →
+      set only after fight; AP delivery has no script-side effect for
+      these 40 Digimon. (The 6 with hardcoded compiled-C in-city checks
+      — Agumon at 203, Monzaemon at 214, Angemon at 220, Birdramon at
+      221, Vegimon at 225, Palmon at 246 — are unaffected by this
+      redirect because their checks are in C code, not script bytecode.
+      For those 6, AP delivery of the Recruit item still drives in-city
+      visibility.)
+
+    Total writes: 642 small ``<H`` writes (40 Digimon, ~16 offsets
+    each on average) per generated patch.
     """
 
-    for spawn_name, partner_name in remap.items():
-        if spawn_name == partner_name:
+    for entry in ROM_RECRUITMENT:
+        if not entry.trigger_offsets:
             continue
-        spawn_entry = ROM_RECRUIT_TRIGGERS[spawn_name]
-        partner_entry = ROM_RECRUIT_TRIGGERS[partner_name]
-        trigger_bytes = struct.pack(
-            ROM_RECRUIT_TRIGGER_FORMAT, partner_entry.trigger_id,
-        )
-        for offset in spawn_entry.trigger_offsets:
+        beaten_trigger_id = 720 + entry.digimon_id
+        trigger_bytes = struct.pack(ROM_RECRUITMENT_FORMAT, beaten_trigger_id)
+        for offset in entry.trigger_offsets:
             patch.write_token(APTokenTypes.WRITE, offset, trigger_bytes)
+
+
+def _write_settrigger_wrapper_tokens(patch: DigimonWorldProcedurePatch) -> None:
+    """Install the setTrigger filter wrapper for the recruit split.
+
+    Two parts:
+
+    1. **Wrapper body** at :data:`ROM_SETTRIGGER_WRAPPER_OFFSET` (32
+       bytes / 8 MIPS instructions inside SydPatches' Cave6 free-space
+       region, immediately after the chest-pickup wrapper). Filters the
+       caller's ``a0`` (trigger ID): if in the recruit range 203..258,
+       adds 520 to redirect the bit-set into the unused 723..778
+       "beaten" range.
+    2. **Patch site** at :data:`ROM_SETTRIGGER_PATCH_OFFSET` (8 bytes
+       at the vanilla setTrigger function entry, RAM 0x801065c0):
+       replace the first two instructions (frame setup + ``sw $ra``)
+       with ``j wrapper`` + ``nop``. The wrapper replicates these two
+       instructions before jumping back into setTrigger+8.
+
+    Net effect: every code path that would have set a "Digimon X joined
+    city" bit (200+i) now instead sets the corresponding "beaten in
+    fight" bit (723+i). Vanilla join-city behavior (PP recompute,
+    in-city model spawn, etc.) is suppressed — those checks read the
+    recruit bit which stays 0 until the AP client writes it directly
+    (bypassing the wrapper) on receipt of the matching AP item.
+    """
+
+    patch.write_token(
+        APTokenTypes.WRITE,
+        ROM_SETTRIGGER_WRAPPER_OFFSET,
+        ROM_SETTRIGGER_WRAPPER_BYTES,
+    )
+    patch.write_token(
+        APTokenTypes.WRITE,
+        ROM_SETTRIGGER_PATCH_OFFSET,
+        struct.pack(ROM_SETTRIGGER_PATCH_FORMAT, *ROM_SETTRIGGER_PATCH_VALUE),
+    )
 
 
 def _write_pp_calc_patch_tokens(patch: DigimonWorldProcedurePatch) -> None:
@@ -318,34 +386,63 @@ def _write_pp_calc_patch_tokens(patch: DigimonWorldProcedurePatch) -> None:
     patch.write_token(APTokenTypes.WRITE, ROM_PP_CALC_PATCH_OFFSET, patch_bytes)
 
 
-def _write_chest_item_tokens(patch: DigimonWorldProcedurePatch) -> None:
-    """Replace every chest's vanilla reward with the AP sentinel item.
+def _write_chest_item_tokens(
+    patch: DigimonWorldProcedurePatch,
+    world: DigimonWorldWorld,
+) -> None:
+    """Write the per-chest item byte for every chest.
 
-    Two parts:
+    Three parts:
 
-    1. For each chest's ``spawnChest`` script entry (opcode 0x75 + 1-byte
-       item ID), overwrite the item-ID byte to the AP sentinel
-       (id 129). AP-routed items remain the meaningful chest reward;
-       the in-game pickup is a transient placeholder we wipe in the
-       next client tick.
-    2. Write a clean 32-byte item-table entry for id 129 with the name
-       "AP ITEM" so the chest pickup textbox renders cleanly instead of
-       displaying garbage glyphs from random adjacent memory.
-
-    Future improvement (see ``phase_progress.md``): per-chest decision
-    based on AP fill placement — own-slot DW1-representable items
-    could be granted directly with their real ID, with the client
-    skipping the redundant delivery. Blocked on RE work that maps
-    each standalone chest offset to its DWAP-named chest. Until then,
-    every chest uniformly shows "AP ITEM".
+    1. **Per-chest item byte.** For each chest's ``spawnChest`` script
+       entry (opcode 0x75 + 1-byte item ID), overwrite the item-ID
+       byte. The byte comes from ``world.chest_grants`` — either a real
+       DW1 internal item id (the chest hands the player that item
+       directly via vanilla flow), or
+       :data:`AP_CHEST_SENTINEL_ITEM_ID` (vanilla shows "AP ITEM" and
+       the chest-pickup wrapper short-circuits the inventory write).
+       Chests with multiple ``spawnChest`` placements (Drill Tunnel 3
+       has four; six other chests have two) get the same byte at every
+       placement so all branches spawn the same item.
+    2. **AP ITEM table entry.** A clean 32-byte item-table entry for
+       id 129 with the name "AP ITEM", so the chest pickup textbox
+       renders cleanly instead of displaying garbage glyphs from
+       random adjacent memory.
+    3. **Chest-pickup giveItem wrapper.** A 28-byte sentinel-aware
+       ``giveItem`` wrapper installed at SydPatches' Cave6 free-space
+       region, plus a single ``jal``-target rewrite at the chest
+       pickup callsite. Net effect: chests with the AP sentinel byte
+       show "AP ITEM", flip the chest's "taken" state, but write
+       nothing to the player's inventory; chests with a real item
+       behave entirely as in vanilla.
     """
 
-    item_byte = struct.pack(ROM_CHEST_ITEM_FORMAT, ROM_CHEST_ITEM_VALUE)
-    for offset in ROM_CHEST_ITEM_OFFSETS:
-        patch.write_token(APTokenTypes.WRITE, offset + 1, item_byte)
+    item_format = ROM_CHEST_ITEM_FORMAT[-1]  # ``B`` — leading ``<`` is for multi-byte
+    chest_grants = world.chest_grants
+    for chest_name, offsets in CHEST_NAME_TO_ROM_OFFSETS.items():
+        grant = chest_grants.get(chest_name)
+        item_id = grant.item_byte if grant is not None else AP_CHEST_SENTINEL_ITEM_ID
+        item_byte = struct.pack(f"<{item_format}", item_id)
+        for offset in offsets:
+            patch.write_token(APTokenTypes.WRITE, offset + 1, item_byte)
 
     patch.write_token(
         APTokenTypes.WRITE, ROM_AP_ITEM_ENTRY_OFFSET, ROM_AP_ITEM_ENTRY_BYTES,
+    )
+
+    # Install the chestGiveItem wrapper into Cave6 and redirect the
+    # chest-pickup ``jal giveItem`` to call it. The wrapper short-
+    # circuits when the chest item byte is the AP sentinel; otherwise
+    # it tail-calls vanilla giveItem unchanged.
+    patch.write_token(
+        APTokenTypes.WRITE,
+        ROM_CHEST_GIVEITEM_WRAPPER_OFFSET,
+        ROM_CHEST_GIVEITEM_WRAPPER_BYTES,
+    )
+    patch.write_token(
+        APTokenTypes.WRITE,
+        ROM_CHEST_GIVEITEM_PATCH_OFFSET,
+        struct.pack(ROM_CHEST_GIVEITEM_PATCH_FORMAT, ROM_CHEST_GIVEITEM_PATCH_VALUE),
     )
 
 
@@ -391,12 +488,13 @@ def write_patch(world: DigimonWorldWorld, output_directory: str) -> None:
     Tokens written:
 
     * 32 bytes at :data:`VOLUME_ID_OFFSET` — the AP-marked volume id.
-    * One ``<H`` write per ROM offset in
-      :data:`worlds.digimon_world.data.addresses.ROM_RECRUIT_TRIGGERS`
-      for every recruit whose ``world.recruit_remap`` assignment differs
-      from vanilla.
     * The 44-byte PP-calc function rewrite from the standalone
       randomizer at :data:`ROM_PP_CALC_PATCH_OFFSET`.
+    * Five softlock-fix patches.
+    * Per-chest item byte rewrites + chestGiveItem wrapper + chest
+      pickup ``jal`` redirect (Phase 5 piece A).
+    * setTrigger wrapper installation + entry redirect (Phase 5
+      piece C — splits "fight completed" from "Digimon joined city").
     """
 
     patch = DigimonWorldProcedurePatch(
@@ -409,10 +507,11 @@ def write_patch(world: DigimonWorldWorld, output_directory: str) -> None:
     assert len(volume_id) == VOLUME_ID_LENGTH, (len(volume_id), VOLUME_ID_LENGTH)
     patch.write_token(APTokenTypes.WRITE, VOLUME_ID_OFFSET, volume_id)
 
-    _write_recruit_remap_tokens(patch, world.recruit_remap)
+    _write_settrigger_wrapper_tokens(patch)
+    _write_recruit_trigger_redirect_tokens(patch)
     _write_pp_calc_patch_tokens(patch)
     _write_softlock_fix_tokens(patch)
-    _write_chest_item_tokens(patch)
+    _write_chest_item_tokens(patch, world)
 
     patch.write_file("token_data.bin", patch.get_token_binary())
 

@@ -57,41 +57,35 @@ class TestPhase4Logic(DigimonWorldTestBase):
     # Item pool shape
     # ------------------------------------------------------------------
 
-    def test_no_recruit_items(self) -> None:
-        """No ``X Recruit`` items ship in v7."""
+    def test_recruit_items_present(self) -> None:
+        """Phase 5 piece C: 49 ``X Recruit`` items ship (everyone except Agumon)."""
 
+        from ..data.addresses import AP_RECRUIT_ITEM_DIGIMON
         from ..items import ITEM_NAME_TO_ID
-        for name in ITEM_NAME_TO_ID:
-            self.assertFalse(
-                name.endswith(" Recruit"),
-                f"{name} should not exist in v7",
-            )
+
+        recruit_names = [n for n in ITEM_NAME_TO_ID if n.endswith(" Recruit")]
+        self.assertEqual(len(recruit_names), 49, recruit_names)
+        self.assertNotIn("Agumon Recruit", ITEM_NAME_TO_ID)
+        for digimon in AP_RECRUIT_ITEM_DIGIMON:
+            self.assertIn(f"{digimon} Recruit", ITEM_NAME_TO_ID)
 
     def test_prosperity_point_in_pool(self) -> None:
-        """Prosperity Point is shipped in the pool."""
+        """Phase 5 piece C: 25 Prosperity Point items in the pool, each
+        worth ``PROSPERITY_PER_ITEM`` (= 2) PP at delivery."""
 
-        from ..items import PROSPERITY_POINT_COUNT, PROSPERITY_POINT_NAME
+        from ..items import (
+            PROSPERITY_PER_ITEM,
+            PROSPERITY_POINT_COUNT,
+            PROSPERITY_POINT_NAME,
+        )
 
         pp_items = [
             item for item in self.multiworld.itempool
             if item.name == PROSPERITY_POINT_NAME
         ]
         self.assertEqual(len(pp_items), PROSPERITY_POINT_COUNT)
-
-    # ------------------------------------------------------------------
-    # Recruit shuffle
-    # ------------------------------------------------------------------
-
-    def test_recruit_remap_covers_shuffleable(self) -> None:
-        """Closed shuffle covers every shuffleable Digimon, with values
-        also drawn from the same set."""
-
-        from ..data.addresses import SHUFFLE_INCLUDED_RECRUITS
-
-        remap = self.world.recruit_remap
-        self.assertEqual(set(remap.keys()), set(SHUFFLE_INCLUDED_RECRUITS))
-        for partner in remap.values():
-            self.assertIn(partner, SHUFFLE_INCLUDED_RECRUITS)
+        # Total PP shipped should match the goal threshold (50).
+        self.assertEqual(PROSPERITY_POINT_COUNT * PROSPERITY_PER_ITEM, 50)
 
     # ------------------------------------------------------------------
     # Endgame

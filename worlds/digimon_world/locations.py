@@ -52,8 +52,14 @@ class LocationEntry(NamedTuple):
 # Ninjamon = 69_054_000). Region assignment reflects the recruitment-flowchart
 # transcription in references/dw1_recruitment_logic.md and DW1 map knowledge.
 
+# Phase 5 piece C: Agumon is dropped from the recruit-location pool.
+# His recruit bit is force-set by the client every tick (he's the bank
+# NPC and that's a key delivery mechanic — see
+# :meth:`worlds.digimon_world.client.DigimonWorldClient._enforce_agumon_recruited`).
+# Pre-setting bit 203 also blocks the wild-Agumon-fight spawn, so the
+# Agumon AP location can never fire; better to drop it than risk the
+# bank breaking.
 _RECRUIT_REGIONS: Final[dict[str, str]] = {
-    "Agumon":       "File City",
     "Betamon":      "Native Forest",
     "Greymon":      "Mt. Panorama",
     "Devimon":      "Mt. Infinity",
@@ -74,7 +80,7 @@ _RECRUIT_REGIONS: Final[dict[str, str]] = {
     "Frigimon":     "Freezeland",
     "Whamon":       "Greatlake",
     "Vegiemon":     "Native Forest",
-    "SkullGreymon": "Mt. Infinity",
+    "SkullGreymon": "Overdell",
     "MetalMamemon": "Factorial Town",
     "Vademon":      "Mt. Infinity",
     "Patamon":      "Native Forest",
@@ -106,7 +112,7 @@ _RECRUIT_REGIONS: Final[dict[str, str]] = {
 }
 
 _RECRUIT_DW_IDS: Final[dict[str, int]] = {
-    "Agumon": 69_005_000, "Betamon": 69_006_000, "Greymon": 69_007_000,
+    "Betamon": 69_006_000, "Greymon": 69_007_000,
     "Devimon": 69_008_000, "Airdramon": 69_009_000, "Tyrannomon": 69_010_000,
     "Meramon": 69_011_000, "Seadramon": 69_012_000, "Numemon": 69_013_000,
     "MetalGreymon": 69_014_000, "Mamemon": 69_015_000, "Monzaemon": 69_016_000,
@@ -126,7 +132,8 @@ _RECRUIT_DW_IDS: Final[dict[str, int]] = {
 }
 
 RECRUIT_NAMES: Final[tuple[str, ...]] = tuple(_RECRUIT_REGIONS)
-assert len(RECRUIT_NAMES) == 50, len(RECRUIT_NAMES)
+# Phase 5 piece C: Agumon dropped (see _RECRUIT_REGIONS comment).
+assert len(RECRUIT_NAMES) == 49, len(RECRUIT_NAMES)
 
 
 # =============================================================================
@@ -138,8 +145,7 @@ assert len(RECRUIT_NAMES) == 50, len(RECRUIT_NAMES)
 # Recruits at 0 PP have no rule (always logically reachable).
 
 RECRUIT_PP_REQUIREMENTS: Final[dict[str, int]] = {
-    # 0 PP
-    "Agumon": 0,
+    # 0 PP (Agumon dropped — see _RECRUIT_REGIONS comment)
     "Palmon": 0,
     "Kunemon": 0,
     "Coelamon": 0,
@@ -199,30 +205,124 @@ RECRUIT_PP_REQUIREMENTS: Final[dict[str, int]] = {
 
 
 # =============================================================================
-# Chest list (65 entries, DWAP naming, all in File City)
+# Chest list (65 entries, Phase 5 region-aware naming)
 # =============================================================================
-# Names and IDs adopt DWAP's ``Resources/Chests.json`` verbatim. Each
-# chest is named ``Chest N`` for N in 1..65, except slot 55 which is
-# DWAP's specially-named ``Chest: Dragon Eye Lake``. AP IDs are zero-
-# indexed (Chest 1 = 69_001_000, Chest 2 = 69_001_001, ...,
-# Chest 65 = 69_001_064; Chest: Dragon Eye Lake at slot 55 = 69_001_054).
+# Names follow the chest-mapping document
+# (``references/chest_mapping_phase5.md``). DWAP slot indices 1..65 are
+# preserved as AP IDs (``69_001_000`` + slot-1) so the wire format stays
+# stable. Each slot is renamed to ``Chest: <Area> [N]`` for chests in
+# confirmed/strongly-inferred regions, or kept as ``Chest N`` for the
+# 17 chests whose region is not yet verified.
+#
+# The region used here is the **chest's in-game region**, which informs
+# the per-chest PP gate (= min PP across recruits in that region; see
+# :data:`CHEST_PP_REQUIREMENTS`).
 
-DWAP_CHEST_NAME_AT_SLOT_55: Final = "Chest: Dragon Eye Lake"
+# slot 1..65 → (chest name, in-game region)
+_CHEST_BY_SLOT: Final[dict[int, tuple[str, str]]] = {
+    1:  ("Chest: Mt. Infinity 1",        "Mt. Infinity"),
+    2:  ("Chest: Mt. Infinity 2",        "Mt. Infinity"),
+    3:  ("Chest: Mt. Infinity 3",        "Mt. Infinity"),
+    4:  ("Chest: Freezeland 1",          "Freezeland"),
+    5:  ("Chest: Freezeland 2",          "Freezeland"),
+    6:  ("Chest: Freezeland 3",          "Freezeland"),
+    7:  ("Chest: Freezeland 4",          "Freezeland"),
+    8:  ("Chest: Freezeland 5",          "Freezeland"),
+    9:  ("Chest: Drill Tunnel 1",        "Drill Tunnel"),
+    10: ("Chest: Drill Tunnel 2",        "Drill Tunnel"),
+    11: ("Chest 11",                     None),  # unknown region
+    12: ("Chest 12",                     None),
+    13: ("Chest: Freezeland 6",          "Freezeland"),
+    14: ("Chest: Freezeland 7",          "Freezeland"),
+    15: ("Chest: Freezeland 8",          "Freezeland"),
+    16: ("Chest: Freezeland 9",          "Freezeland"),
+    17: ("Chest: Drill Tunnel 3",        "Drill Tunnel"),
+    18: ("Chest: Drill Tunnel 4",        "Drill Tunnel"),
+    19: ("Chest: Toy Town",              "Toy Town"),
+    20: ("Chest 20",                     None),
+    21: ("Chest 21",                     None),
+    22: ("Chest 22",                     None),
+    23: ("Chest: Ogre Fortress",         "Great Canyon"),  # Ogre Fortress is Great Canyon's sub-area
+    24: ("Chest 24",                     None),
+    25: ("Chest 25",                     None),
+    26: ("Chest 26",                     None),
+    27: ("Chest: File City Cards 1",     "File City"),
+    28: ("Chest 28",                     None),
+    29: ("Chest 29",                     None),
+    30: ("Chest: File City Cards 2",     "File City"),
+    31: ("Chest: Mt. Infinity 4",        "Mt. Infinity"),
+    32: ("Chest: Mt. Infinity 5",        "Mt. Infinity"),
+    33: ("Chest: Mt. Infinity 6",        "Mt. Infinity"),
+    34: ("Chest 34",                     None),
+    35: ("Chest 35",                     None),
+    36: ("Chest 36",                     None),
+    37: ("Chest: Mt. Infinity 7",        "Mt. Infinity"),
+    38: ("Chest: Tower 1",               "Tower"),
+    39: ("Chest: Tower 2",               "Tower"),
+    40: ("Chest: Tower 3",               "Tower"),
+    41: ("Chest: Tower 4",               "Tower"),
+    42: ("Chest: Tower 5",               "Tower"),
+    43: ("Chest: Tropical Jungle",       "Tropical Jungle"),
+    44: ("Chest 44",                     None),
+    45: ("Chest 45",                     None),
+    46: ("Chest: Great Canyon 1",        "Great Canyon"),
+    47: ("Chest: Great Canyon 2",        "Great Canyon"),
+    48: ("Chest: Great Canyon 3",        "Great Canyon"),
+    49: ("Chest: Mt. Infinity 8",        "Mt. Infinity"),
+    50: ("Chest: Mt. Infinity 9",        "Mt. Infinity"),
+    51: ("Chest: Mt. Infinity 10",       "Mt. Infinity"),
+    52: ("Chest: Mt. Infinity 11",       "Mt. Infinity"),
+    53: ("Chest 53",                     None),
+    54: ("Chest 54",                     None),
+    55: ("Chest: Dragon Eye Lake",       "Native Forest"),
+    56: ("Chest: Mt. Infinity 12",       "Mt. Infinity"),
+    57: ("Chest: Tower 6",               "Tower"),
+    58: ("Chest: Tower 7",               "Tower"),
+    59: ("Chest: Tower 8",               "Tower"),
+    60: ("Chest: Tower 9",               "Tower"),
+    61: ("Chest: Tower 10",              "Tower"),
+    62: ("Chest: Tower 11",              "Tower"),
+    63: ("Chest: File City Remodel 1",   "File City"),
+    64: ("Chest: File City Remodel 2",   "File City"),
+    65: ("Chest: File City Remodel 3",   "File City"),
+}
+assert len(_CHEST_BY_SLOT) == 65
+assert len({name for name, _ in _CHEST_BY_SLOT.values()}) == 65, "duplicate chest names"
 
-
-def _chest_name_for_slot(slot: int) -> str:
-    """Return DWAP's name for the K-th chest (1-indexed)."""
-
-    return DWAP_CHEST_NAME_AT_SLOT_55 if slot == 55 else f"Chest {slot}"
-
-
+# AP-side, every chest still resides in File City (region access for
+# chests is governed by the PP gate alone in v7+). The "in-game region"
+# stored above is used only for the PP-gate computation in
+# :data:`CHEST_PP_REQUIREMENTS`.
 _CHEST_LOCATIONS: Final[dict[str, LocationEntry]] = {
-    _chest_name_for_slot(_slot): LocationEntry(69_001_000 + _slot - 1, "File City")
+    _CHEST_BY_SLOT[_slot][0]: LocationEntry(69_001_000 + _slot - 1, "File City")
     for _slot in range(1, 66)
 }
 
 CHEST_NAMES: Final[tuple[str, ...]] = tuple(_CHEST_LOCATIONS)
 assert len(CHEST_NAMES) == 65, len(CHEST_NAMES)
+
+
+def _build_chest_pp_requirements() -> dict[str, int]:
+    """Per-chest PP gate, derived from ``min(recruit PP) across the
+    chest's in-game region``. Chests with no inferred region get 0 PP
+    (always reachable in logic).
+    """
+
+    # Group recruit PPs by region.
+    recruits_by_region: dict[str, list[int]] = {}
+    for recruit_name, pp in RECRUIT_PP_REQUIREMENTS.items():
+        recruits_by_region.setdefault(_RECRUIT_REGIONS[recruit_name], []).append(pp)
+
+    out: dict[str, int] = {}
+    for chest_name, region in _CHEST_BY_SLOT.values():
+        if region is None or region not in recruits_by_region:
+            out[chest_name] = 0
+        else:
+            out[chest_name] = min(recruits_by_region[region])
+    return out
+
+
+CHEST_PP_REQUIREMENTS: Final[dict[str, int]] = _build_chest_pp_requirements()
 
 
 # =============================================================================
