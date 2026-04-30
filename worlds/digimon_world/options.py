@@ -91,13 +91,15 @@ class StatGainMultiplier(Range):
     immediately clamped. Helpful for testing and for shorter playthroughs.
 
     Default 1 (vanilla rate). Set to 5-10 for noticeably faster
-    training; the upper end makes most stats reach cap within a few
-    fights.
+    training. Values around 100 effectively skip training entirely —
+    a single session caps the stat (which is then clamped to 9999 by
+    the unlocked cap). Useful for testing recruitment/progression
+    without grinding.
     """
 
     display_name = "Stat Gain Multiplier"
     range_start = 1
-    range_end = 10
+    range_end = 100
     default = 1
 
 
