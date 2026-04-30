@@ -62,7 +62,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, ClassVar, NamedTuple
 
 import worlds._bizhawk as bizhawk
 from NetUtils import ClientStatus
@@ -71,16 +71,35 @@ from worlds._bizhawk.client import BizHawkClient
 from .data.addresses import (
     AGUMON_RECRUIT_BIT,
     AP_CHEST_SENTINEL_ITEM_ID,
+    AP_RECRUIT_ITEM_DIGIMON,
     BEATEN_RAM_BITS,
     DWAP_CHEST_RAM_BITS,
+    EASY_MONOCHROMON_MAP_ID,
+    EASY_MONOCHROMON_PROFIT_TARGET,
+    FAST_DRIMOGEMON_DIGGING_STATE_TARGET,
+    FAST_DRIMOGEMON_DRIMO_STATE_TARGET,
+    FAST_DRIMOGEMON_TUNNEL_STATE_TARGET,
     RAM_CURRENT_BITS,
+    RAM_HAS_BEATEN_DRIMOGEMON,
     RAM_INVENTORY_EMPTY_SLOT_ID,
     RAM_INVENTORY_ITEM_IDS_BASE,
     RAM_INVENTORY_QUANTITIES_BASE,
     RAM_INVENTORY_SLOT_COUNT,
     RAM_ITEM_BANK_BASE,
     RAM_ITEM_BANK_SIZE,
+    RAM_MERAMON_TUNNEL_DIGGING_STATE,
+    RAM_MERAMON_TUNNEL_DRIMO_STATE,
+    RAM_MERAMON_TUNNEL_STATE,
+    RAM_MONOCHROME_PROFIT,
+    RAM_PERMANENT_BEATEN_SCRATCH_BASE,
+    RAM_PERMANENT_BEATEN_SCRATCH_SIZE,
     RAM_PROSPERITY_POINTS,
+    RAM_STAT_CAP,
+    RAM_STAT_CAP_FLAG,
+    RAM_STAT_GAIN_MULT,
+    RECRUIT_RAM_BITS,
+    STAT_CAP_FLAG_TARGET,
+    STAT_CAP_TARGET,
 )
 from .items import (
     ITEM_ID_BASE,
@@ -167,22 +186,96 @@ CITY_SCREENS: frozenset[int] = frozenset({
 RECRUIT_BLOCK_BASE: int = 0x001BDFE6
 RECRUIT_BLOCK_SIZE: int = 8
 
+# AP-delivered scratch mirror — 8 bytes of client-managed RAM that the
+# toggle writes each tick with the AP-bit map (same byte/bit layout as
+# the recruit block). ``ctx.items_received`` lives in the Python client
+# only; this mirror exposes the same information to BizHawk Lua scripts
+# for live debugging. Located in the gap immediately after the
+# items_received counter (which is itself in unused-trigger gap space
+# verified live 2026-04-28).
+AP_BITS_MIRROR_BASE: int = 0x001BDFF0
+AP_BITS_MIRROR_SIZE: int = 8
+
+# BEATEN block — 8 bytes covering bits 720..783 of the trigger array.
+# The setTrigger wrapper redirects setTrigger(200+X) to setTrigger(720+X)
+# whenever vanilla DW1 tries to mark Digimon X recruited; bit 720+X
+# therefore = "player has won the wild fight at X's spawn point".
+# Bytes 0x001BE027..0x001BE02E are entirely unused by vanilla (verified
+# in :data:`worlds.digimon_world.data.addresses.BEATEN_RAM_BITS`).
+BEATEN_BLOCK_BASE: int = 0x001BE027
+BEATEN_BLOCK_SIZE: int = 8
+
+# changeMap wrapper scratch — the wrapper writes $a0 (destination map id
+# of the call to vanilla's scriptTickChangeMap) here on every fire. We
+# use this as the source of truth for the city/field decision instead
+# of CURRENT_SCREEN_ADDR. Vanilla updates CURRENT_SCREEN_ADDR *after*
+# the wrapper has already loaded the destination's recruit bits, so a
+# toggle keyed on CURRENT_SCREEN reads the source and clobbers the
+# wrapper's write. Keying on $a0 makes the toggle agree with the
+# wrapper through the entire transition window.
+WRAPPER_LAST_A0_ADDR: int = 0x000958A0
+
+
+class _RecruitToggleRow(NamedTuple):
+    """Precomputed offsets for one AP-pool recruit Digimon, used by
+    :meth:`DigimonWorldClient._reconcile_recruits` each tick."""
+    digimon_id: int
+    recruit_block_off: int  # byte offset within RECRUIT_BLOCK_BASE..+SIZE
+    recruit_bit: int        # bit index within that byte
+    beaten_block_off: int   # byte offset within BEATEN_BLOCK_BASE..+SIZE
+    beaten_bit: int         # bit index within that byte
+
+
+def _build_recruit_toggle_targets() -> tuple[_RecruitToggleRow, ...]:
+    """Enumerate per-Digimon byte/bit offsets for the recruit toggle.
+
+    Agumon is excluded because his recruit bit is force-enforced
+    separately by :meth:`DigimonWorldClient._enforce_agumon_recruited`.
+    """
+
+    rows: list[_RecruitToggleRow] = []
+    for name in AP_RECRUIT_ITEM_DIGIMON:
+        recruit_byte_addr, recruit_bit = RECRUIT_RAM_BITS[name]
+        beaten_byte_addr, beaten_bit = BEATEN_RAM_BITS[name]
+        recruit_block_off = recruit_byte_addr - RECRUIT_BLOCK_BASE
+        beaten_block_off = beaten_byte_addr - BEATEN_BLOCK_BASE
+        if not (0 <= recruit_block_off < RECRUIT_BLOCK_SIZE):
+            continue
+        if not (0 <= beaten_block_off < BEATEN_BLOCK_SIZE):
+            continue
+        did = digimon_id_for_recruit_item(f"{name} Recruit")
+        if did is None:
+            continue
+        rows.append(_RecruitToggleRow(
+            did, recruit_block_off, recruit_bit,
+            beaten_block_off, beaten_bit,
+        ))
+    return tuple(rows)
+
+
+_RECRUIT_TOGGLE_TARGETS: tuple[_RecruitToggleRow, ...] = (
+    _build_recruit_toggle_targets()
+)
+
 
 # =============================================================================
 # Per-location detection tables
 # =============================================================================
 #
 # * **Chests** — bit-set checks at the vanilla DWAP-mapped trigger bits.
-# * **Recruits** (Phase 5 piece C) — bit-set checks at the *beaten* bits
-#   produced by the setTrigger wrapper installed in the patcher. When
-#   the player completes any recruit cutscene (fight, NPC dialog,
-#   plot-trigger), vanilla calls ``setTrigger(200+digimon_id)``; the
-#   wrapper redirects that to ``setTrigger(723+digimon_id)`` so the
-#   "beaten" bit lights up but vanilla join-city behavior stays
-#   suppressed. AP polls the beaten bit to fire the location check.
+# * **Recruits** (Plan A revised) — bit-set checks at the *recruit*
+#   bits (200+X). When the player completes any recruit cutscene
+#   (fight, NPC dialog, plot-trigger), vanilla calls
+#   ``setTrigger(200+X)`` directly. AP polls bit 200+X to detect
+#   "the player completed the cutscene" → fire the AP location.
+#   The recruit-block (200+X) is the "cutscene completed" signal;
+#   the beaten-block (720+X) is the "AP delivered the recruit item"
+#   signal. ROM-patches on per-Digimon city scripts redirect their
+#   visibility gates from 200+X → 720+X so the city only shows X
+#   after AP has delivered.
 LOCATION_RAM_BITS: dict[str, tuple[int, int]] = {
     **DWAP_CHEST_RAM_BITS,
-    **BEATEN_RAM_BITS,
+    **RECRUIT_RAM_BITS,
 }
 
 # Threshold-based detection (e.g. NPC-gift PP gates) is unused in v7 —
@@ -264,29 +357,40 @@ def _make_prosperity_deliverer() -> ItemDeliverer:
 def _make_recruit_deliverer(digimon_id: int) -> ItemDeliverer:
     """Return an :class:`ItemDeliverer` for a ``"<Digimon> Recruit"`` item.
 
-    Phase 5 piece C "deferred write" model: this deliverer is a no-op at
-    delivery time. It does NOT immediately write the recruit-completion
-    bit (200 + digimon_id), because pre-emptively setting that bit
-    triggers vanilla DW1's wild-spawn block — the player can no longer
-    encounter Digimon X in the wild (the location for X then never
-    fires).
+    Plan A revised: AP delivery writes bit 720+X (BEATEN_RAM_BITS) for
+    the digimon. Bit 720+X is the "AP delivered" signal; per-Digimon
+    city-visibility ROM patches gate city-spawn on this bit. Wild-spawn
+    (bit 200+X) is left to vanilla — set when the player completes the
+    in-game recruit cutscene.
 
-    Instead, the actual write is done by
-    :meth:`DigimonWorldClient._reconcile_recruits` once both conditions
-    hold: (a) AP has delivered ``<X> Recruit`` (the item is in
-    ``ctx.items_received``), and (b) the player has actually beaten
-    Digimon X (bit 720+id is SET). At that point — typically right
-    after the wild fight completes — the recruit bit is written and
-    Digimon X joins the city.
-
-    ``digimon_id`` is unused at delivery time but kept in the deliverer
-    factory signature so the dispatch table layout is unchanged.
+    Idempotent: reads the byte first, ORs in the bit, writes back. If
+    the bit is already set (e.g. multi-delivery on reconnect), returns
+    no writes.
     """
 
-    _ = digimon_id  # intentionally unused at delivery time
+    # Reverse-lookup: find this Digimon's BEATEN_BLOCK byte+bit via
+    # _RECRUIT_TOGGLE_TARGETS (which maps digimon_id → block offsets).
+    row = next(
+        (r for r in _RECRUIT_TOGGLE_TARGETS if r.digimon_id == digimon_id),
+        None,
+    )
+    if row is None:
+        # Defensive: should not happen for a well-formed recruit table.
+        async def deliver_noop(_ctx: BizHawkClientContext) -> list[RamWrite]:
+            return []
+        return deliver_noop
 
-    async def deliver(_ctx: BizHawkClientContext) -> list[RamWrite]:
-        return []  # no immediate write; reconcile_recruits handles it
+    byte_addr = BEATEN_BLOCK_BASE + row.beaten_block_off
+    bit_index = row.beaten_bit
+    bit_mask = 1 << bit_index
+
+    async def deliver(ctx: BizHawkClientContext) -> list[RamWrite]:
+        current = (await bizhawk.read(
+            ctx.bizhawk_ctx, [(byte_addr, 1, DOMAIN_MAIN_RAM)],
+        ))[0]
+        if not current or (current[0] & bit_mask):
+            return []
+        return [(byte_addr, [current[0] | bit_mask], DOMAIN_MAIN_RAM)]
 
     return deliver
 
@@ -444,7 +548,15 @@ class DigimonWorldClient(BizHawkClient):
         # from slot_data on first watcher tick that sees a synced
         # connection.
         self._vanilla_grant_chests: frozenset[str] | None = None
-
+        # QoL toggle flags shipped via slot_data. ``None`` = not yet
+        # received from server; treat as off until they land. Both
+        # default to "on" once slot_data arrives because the world's
+        # default for the underlying option is :class:`DefaultOnToggle`.
+        self._fast_drimogemon: bool | None = None
+        self._easy_monochromon: bool | None = None
+        # Stat-gain multiplier (1..10). 1 = vanilla rate, no enforcer
+        # writes. Driven by slot_data.
+        self._stat_gain_multiplier: int | None = None
     # ------------------------------------------------------------------
     # validate_rom
     # ------------------------------------------------------------------
@@ -507,12 +619,26 @@ class DigimonWorldClient(BizHawkClient):
             self._vanilla_grant_chests = frozenset(
                 ctx.slot_data.get("vanilla_grant_chests", ()),
             )
+        if self._fast_drimogemon is None and ctx.slot_data is not None:
+            self._fast_drimogemon = bool(ctx.slot_data.get("fast_drimogemon", 0))
+        if self._easy_monochromon is None and ctx.slot_data is not None:
+            self._easy_monochromon = bool(ctx.slot_data.get("easy_monochromon", 0))
+        if self._stat_gain_multiplier is None and ctx.slot_data is not None:
+            self._stat_gain_multiplier = int(
+                ctx.slot_data.get("stat_gain_multiplier", 1),
+            )
 
         try:
             await self._check_locations(ctx)
             await self._deliver_items(ctx)
             await self._reconcile_recruits(ctx)
             await self._wipe_chest_sentinels(ctx)
+            if self._fast_drimogemon:
+                await self._enforce_fast_drimogemon(ctx)
+            if self._easy_monochromon:
+                await self._enforce_easy_monochromon(ctx)
+            if self._stat_gain_multiplier and self._stat_gain_multiplier > 1:
+                await self._enforce_stat_gain_multiplier(ctx)
             await self._enforce_prosperity(ctx)
             await self._enforce_agumon_recruited(ctx)
             await self._check_goal(ctx)
@@ -564,88 +690,47 @@ class DigimonWorldClient(BizHawkClient):
             await bizhawk.write(ctx.bizhawk_ctx, writes)
 
     async def _reconcile_recruits(self, ctx: BizHawkClientContext) -> None:
-        """Dynamic city-toggle of recruit-completion bits (Phase 5 piece C, Path D).
+        """Defensive enforcement: keep BEATEN_BLOCK bits set for any
+        recruit AP has delivered.
 
-        For every ``"<X> Recruit"`` item AP has delivered, the
-        recruit-completion bit (200+digimon_id) is set IFF the player
-        is currently in a "city" screen, otherwise cleared.
+        Plan A revised: AP delivery writes bit 720+X to BEATEN_BLOCK
+        in :func:`_make_recruit_deliverer`. This per-tick pass simply
+        ORs in the bits for every recruit currently in
+        ``ctx.items_received`` — defending against any vanilla code
+        that might clear the byte (unlikely but safe). It NEVER
+        touches the recruit-block (200+X) — vanilla owns that, and
+        clearing recruit bits would break wild-spawn suppression.
 
-        Why dynamic toggle: vanilla DW1 reuses bit 200+X for two
-        unrelated semantics — wild-spawn gate (set => wild Digimon
-        won't appear in field) and city-presence gate (set => city
-        model spawns). Pre-emptively setting it on AP delivery blocks
-        the wild fight; never setting it removes city presence. We
-        sidestep this conflict by setting the bit ONLY while the
-        player is in a city screen and clearing it the moment they
-        leave. Vanilla wild-spawn gate (in field maps) sees bit 200+X
-        cleared → wild X spawns. Vanilla city checks (Map.cpp:1715
-        compiled-C plus city-script reads) see bit 200+X set → city
-        Digimon are rendered.
-
-        Race window: client polls every ~100ms, so on a screen
-        transition there's a window where vanilla loads the new map
-        with the previous bit-state. Mitigation: the player can
-        re-enter the screen (free reload). Acceptable per user
-        guidance.
-
-        :data:`CITY_SCREENS` enumerates the screen IDs we treat as
-        "in city". This is the union of `getFileCityTopMap`'s 12
-        outdoor-variant return values (168..179), the no-Agumon
-        fallback (204), and observed city sub-building screens
-        (180, 211, 218, 238). Add more here as the player encounters
-        new city sub-areas.
-
-        Idempotent — the writes only fire when the byte's actual
-        value differs from desired, never duplicating.
+        Idempotent: only writes the bytes whose value actually changed.
         """
 
-        # Discover every received Recruit item's digimon_id.
         received_dids: set[int] = set()
         for item in ctx.items_received:
             item_name = ctx.item_names.lookup_in_game(item.item, ctx.game)
             did = digimon_id_for_recruit_item(item_name)
             if did is not None:
                 received_dids.add(did)
-        if not received_dids:
-            return
 
-        # Read current screen + the recruit byte block in one batched read.
         try:
             blocks = await bizhawk.read(
                 ctx.bizhawk_ctx,
-                [
-                    (CURRENT_SCREEN_ADDR, 1, DOMAIN_MAIN_RAM),
-                    (RECRUIT_BLOCK_BASE, RECRUIT_BLOCK_SIZE, DOMAIN_MAIN_RAM),
-                ],
+                [(BEATEN_BLOCK_BASE, BEATEN_BLOCK_SIZE, DOMAIN_MAIN_RAM)],
             )
         except bizhawk.RequestFailedError:
             return
-        if (len(blocks) != 2 or len(blocks[0]) != 1
-                or len(blocks[1]) != RECRUIT_BLOCK_SIZE):
+        if len(blocks) != 1 or len(blocks[0]) != BEATEN_BLOCK_SIZE:
             return
-        screen_id = blocks[0][0]
-        in_city = screen_id in CITY_SCREENS
-        recruit_bytes = bytearray(blocks[1])
+        beaten_bytes = bytearray(blocks[0])
+        original = bytes(beaten_bytes)
 
-        original = bytes(recruit_bytes)
+        for row in _RECRUIT_TOGGLE_TARGETS:
+            if row.digimon_id in received_dids:
+                beaten_bytes[row.beaten_block_off] |= 1 << row.beaten_bit
 
-        # For each received Recruit, set the bit if in city / clear if not.
-        for did in received_dids:
-            recruit_trig = 200 + did  # 203..258
-            block_off = recruit_trig // 8 - (RECRUIT_BLOCK_BASE - 0x001BDFCD)
-            if not (0 <= block_off < RECRUIT_BLOCK_SIZE):
-                continue  # outside cached block (shouldn't happen)
-            mask = 1 << (recruit_trig % 8)
-            if in_city:
-                recruit_bytes[block_off] |= mask
-            else:
-                recruit_bytes[block_off] &= 0xFF ^ mask
-
-        # Submit only the bytes that actually changed.
         writes: list[RamWrite] = [
-            (RECRUIT_BLOCK_BASE + off, [recruit_bytes[off]], DOMAIN_MAIN_RAM)
-            for off in range(RECRUIT_BLOCK_SIZE)
-            if recruit_bytes[off] != original[off]
+            (BEATEN_BLOCK_BASE + off, [beaten_bytes[off]], DOMAIN_MAIN_RAM)
+            for off in range(BEATEN_BLOCK_SIZE)
+            if beaten_bytes[off] != original[off]
         ]
         if writes:
             await bizhawk.write(ctx.bizhawk_ctx, writes)
@@ -680,6 +765,145 @@ class DigimonWorldClient(BizHawkClient):
             ctx.bizhawk_ctx,
             [(byte_addr, [current[0] | bit_mask], DOMAIN_MAIN_RAM)],
         )
+
+    async def _enforce_fast_drimogemon(self, ctx: BizHawkClientContext) -> None:
+        """Collapse Drimogemon's 10-day dig wait to "already dug" state.
+
+        Mirrors DWAP's ``EnsureWorldFlags`` for the Fast Drimogemon
+        option. Once :data:`RAM_HAS_BEATEN_DRIMOGEMON` reads 1 (i.e.
+        the player has beaten the Drimogemon fight), pin the three
+        Lava Cave tunnel-state bytes so the player can walk straight
+        through without waiting in-game days.
+
+        Cheap: one batched 4-byte read per tick; writes only fire
+        when the targets aren't already set.
+        """
+
+        addrs = [
+            (RAM_HAS_BEATEN_DRIMOGEMON, 1, DOMAIN_MAIN_RAM),
+            (RAM_MERAMON_TUNNEL_DRIMO_STATE, 1, DOMAIN_MAIN_RAM),
+            (RAM_MERAMON_TUNNEL_STATE, 1, DOMAIN_MAIN_RAM),
+            (RAM_MERAMON_TUNNEL_DIGGING_STATE, 1, DOMAIN_MAIN_RAM),
+        ]
+        try:
+            blocks = await bizhawk.read(ctx.bizhawk_ctx, addrs)
+        except bizhawk.RequestFailedError:
+            return
+        if any(len(b) != 1 for b in blocks):
+            return
+        beaten, drimo_state, tunnel_state, digging_state = (b[0] for b in blocks)
+        if beaten != 1:
+            return  # Drimogemon not beaten yet — leave dig sequence alone
+
+        writes: list[RamWrite] = []
+        if drimo_state != FAST_DRIMOGEMON_DRIMO_STATE_TARGET:
+            writes.append((
+                RAM_MERAMON_TUNNEL_DRIMO_STATE,
+                [FAST_DRIMOGEMON_DRIMO_STATE_TARGET],
+                DOMAIN_MAIN_RAM,
+            ))
+        if tunnel_state != FAST_DRIMOGEMON_TUNNEL_STATE_TARGET:
+            writes.append((
+                RAM_MERAMON_TUNNEL_STATE,
+                [FAST_DRIMOGEMON_TUNNEL_STATE_TARGET],
+                DOMAIN_MAIN_RAM,
+            ))
+        if digging_state != FAST_DRIMOGEMON_DIGGING_STATE_TARGET:
+            writes.append((
+                RAM_MERAMON_TUNNEL_DIGGING_STATE,
+                [FAST_DRIMOGEMON_DIGGING_STATE_TARGET],
+                DOMAIN_MAIN_RAM,
+            ))
+        if writes:
+            await bizhawk.write(ctx.bizhawk_ctx, writes)
+
+    async def _enforce_easy_monochromon(self, ctx: BizHawkClientContext) -> None:
+        """Auto-resolve the Monochromon meat-trade minigame.
+
+        Mirrors DWAP's ``EnsureWorldFlags`` for the Easy Monochromon
+        option. While the player is on the Monochromon business map
+        (id :data:`EASY_MONOCHROMON_MAP_ID`), pin the profit counter
+        at :data:`RAM_MONOCHROME_PROFIT` to the target value so the
+        trade resolves immediately. No-op on every other map.
+        """
+
+        try:
+            blocks = await bizhawk.read(
+                ctx.bizhawk_ctx,
+                [
+                    (CURRENT_SCREEN_ADDR, 1, DOMAIN_MAIN_RAM),
+                    (RAM_MONOCHROME_PROFIT, 4, DOMAIN_MAIN_RAM),
+                ],
+            )
+        except bizhawk.RequestFailedError:
+            return
+        if len(blocks) != 2 or len(blocks[0]) != 1 or len(blocks[1]) != 4:
+            return
+        screen_id = blocks[0][0]
+        if screen_id != EASY_MONOCHROMON_MAP_ID:
+            return
+        current_profit = int.from_bytes(blocks[1], "little")
+        if current_profit >= EASY_MONOCHROMON_PROFIT_TARGET:
+            return
+        await bizhawk.write(
+            ctx.bizhawk_ctx,
+            [(
+                RAM_MONOCHROME_PROFIT,
+                list(EASY_MONOCHROMON_PROFIT_TARGET.to_bytes(4, "little")),
+                DOMAIN_MAIN_RAM,
+            )],
+        )
+
+    async def _enforce_stat_gain_multiplier(self, ctx: BizHawkClientContext) -> None:
+        """Pin DW1's stat-gain multiplier and stat cap.
+
+        Mirrors DWAP's ``SetExpMultiplier`` for the Stat Gain Multiplier
+        option. Vanilla DW1 stores three adjacent values that govern
+        training-stat behaviour: a cap-unlock flag, a multiplier
+        applied to gains, and a hard cap. Pinning all three each tick
+        bumps training speed by the player-chosen factor.
+
+        Cheap: one batched 3-write whenever any of the targets drift
+        from spec; otherwise no-op.
+        """
+
+        assert self._stat_gain_multiplier is not None
+        target_mult = self._stat_gain_multiplier * 10
+        try:
+            blocks = await bizhawk.read(
+                ctx.bizhawk_ctx,
+                [
+                    (RAM_STAT_CAP_FLAG, 1, DOMAIN_MAIN_RAM),
+                    (RAM_STAT_GAIN_MULT, 2, DOMAIN_MAIN_RAM),
+                    (RAM_STAT_CAP, 2, DOMAIN_MAIN_RAM),
+                ],
+            )
+        except bizhawk.RequestFailedError:
+            return
+        if (len(blocks) != 3 or len(blocks[0]) != 1
+                or len(blocks[1]) != 2 or len(blocks[2]) != 2):
+            return
+        cur_flag = blocks[0][0]
+        cur_mult = int.from_bytes(blocks[1], "little")
+        cur_cap = int.from_bytes(blocks[2], "little")
+
+        writes: list[RamWrite] = []
+        if cur_flag != STAT_CAP_FLAG_TARGET:
+            writes.append((RAM_STAT_CAP_FLAG, [STAT_CAP_FLAG_TARGET], DOMAIN_MAIN_RAM))
+        if cur_mult != target_mult:
+            writes.append((
+                RAM_STAT_GAIN_MULT,
+                list(target_mult.to_bytes(2, "little")),
+                DOMAIN_MAIN_RAM,
+            ))
+        if cur_cap != STAT_CAP_TARGET:
+            writes.append((
+                RAM_STAT_CAP,
+                list(STAT_CAP_TARGET.to_bytes(2, "little")),
+                DOMAIN_MAIN_RAM,
+            ))
+        if writes:
+            await bizhawk.write(ctx.bizhawk_ctx, writes)
 
     async def _enforce_prosperity(self, ctx: BizHawkClientContext) -> None:
         """Pin the in-game prosperity byte to the AP-controlled value.

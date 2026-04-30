@@ -2092,3 +2092,401 @@ AP_RECRUIT_ITEM_DIGIMON: Final[tuple[str, ...]] = tuple(
     name for name in RECRUIT_RAM_BITS if name != "Agumon"
 )
 assert len(AP_RECRUIT_ITEM_DIGIMON) == 49, len(AP_RECRUIT_ITEM_DIGIMON)
+
+
+# =============================================================================
+# changeMap wrapper (Phase 5 polish — race-free city/field bit sync)
+# =============================================================================
+#
+# Vanilla DW1's screen-change function lives at RAM 0x800D8E64 (verified
+# 2026-04-29 via Lua probe at the SydPatches-documented call site
+# 0x80105C2C). When the player crosses a screen boundary, the function
+# is called with $a0 = destination map id, then runs the new map's
+# scripts which read recruit bits (0x001BDFE6 block) inline.
+#
+# We hook this call by replacing the JAL at 0x80105C2C with JAL to a
+# wrapper installed in Cave6 free-space. The wrapper:
+#   1. Looks up whether $a0 is a city screen via a precomputed bitmap
+#      at :data:`ROM_CITY_BITMAP_RAM`.
+#   2. Copies an 8-byte source block to the recruit byte block:
+#      - in city: source = AP-bits mirror (0x001BDFF0)
+#      - in field: source = permanent-beaten scratch (0x001BDFF8)
+#   3. Tail-calls vanilla 0x800D8E64.
+#
+# Because the copy runs synchronously *before* vanilla loads the new
+# map's scripts, vanilla scripts read the correct bit values at the
+# moment they need them. No race window like the per-tick toggle has.
+#
+# The two source blocks are maintained by the AP client each tick:
+#   - AP-bits mirror = OR of (received Recruit items, Agumon bit always)
+#   - Permanent-beaten = OR of (current beaten block, Agumon bit always)
+# Agumon's bit is always set so the bank NPC stays in city.
+
+# Cave6 layout after our existing wrappers (BIN offset of each):
+#   0x14CC0B18  chest wrapper (28 bytes, RAM 0x800957C0..DC)
+#   0x14CC0B34  setTrigger wrapper (32 bytes, RAM 0x800957DC..FC)
+#   0x14CC0B54  4-byte gap (rest of sector 148348)
+#   0x14CC0C88  changeMap wrapper (128 bytes, RAM 0x80095800..80)
+#   0x14CC0D08  city screens bitmap (32 bytes, RAM 0x80095880..A0)
+# The 4-byte gap is unavoidable: setTrigger ends at sector 148348 ud-pos
+# 2044 and there's only room for 4 more bytes in that sector. We jump
+# to the start of the next sector for the wrapper's first instruction
+# so the whole wrapper + bitmap fits in one sector (148349).
+
+ROM_CHANGEMAP_WRAPPER_RAM: Final = 0x80095800
+ROM_CHANGEMAP_WRAPPER_OFFSET: Final = 0x14CC0C88
+
+# Permanent-beaten scratch — same byte/bit layout as the recruit block.
+# Maintained by the client each tick: bit X = (Digimon X has ever been
+# beaten in the wild) OR (X == Agumon). Vanilla never reads/writes this
+# range — it's in the unused-trigger gap right after the AP-bits mirror.
+RAM_PERMANENT_BEATEN_SCRATCH_BASE: Final = 0x001BDFF8
+RAM_PERMANENT_BEATEN_SCRATCH_SIZE: Final = 8
+
+# AP-bits mirror is already declared in client.py (AP_BITS_MIRROR_BASE
+# = 0x001BDFF0). The wrapper uses it as the in-city source. We restate
+# its address here so the wrapper bytes can encode it.
+_AP_BITS_MIRROR_RAM: Final = 0x801BDFF0  # virtual = MainRAM 0x001BDFF0
+_PERM_BEATEN_RAM: Final = 0x801BDFF8     # virtual = MainRAM 0x001BDFF8
+
+# Confirm adjacency — wrapper relies on (PERM_BEATEN - AP_MIRROR == 8)
+# for the conditional-source trick.
+assert _PERM_BEATEN_RAM - _AP_BITS_MIRROR_RAM == 8, (
+    "AP_BITS_MIRROR and PERMANENT_BEATEN must be adjacent 8-byte blocks "
+    "for the changeMap wrapper's conditional-source arithmetic to work",
+)
+
+ROM_CHANGEMAP_WRAPPER_BYTES: Final = b"".join(
+    val.to_bytes(4, "little") for val in (
+        # SIMPLIFIED WRAPPER (Plan A): always copy AP_BITS_MIRROR into
+        # the recruit-block at every screen transition. No city/field
+        # branching — recruit-block now has a single, consistent
+        # semantic ("which Digimon has AP delivered Recruit for"), and
+        # field-spawn suppression is handled by ROM-patching individual
+        # field-spawn scripts to read trigger 720+X (PERM_BEATEN range)
+        # instead of trigger 200+X.
+
+        # Source = AP_BITS_MIRROR (0x801BDFF0)
+        0x3C0B801B,  # lui   $t3, 0x801B
+        0x356BDFF0,  # ori   $t3, $t3, 0xDFF0
+
+        # Dest = recruit-block (0x801BDFE6)
+        0x3C0C801B,  # lui   $t4, 0x801B
+        0x358CDFE6,  # ori   $t4, $t4, 0xDFE6
+
+        # Copy 8 bytes via 4 LHU/SH pairs
+        0x956D0000,  # lhu   $t5, 0($t3)
+        0x00000000,  # nop  (load delay)
+        0xA58D0000,  # sh    $t5, 0($t4)
+        0x956D0002,  # lhu   $t5, 2($t3)
+        0x00000000,  # nop
+        0xA58D0002,  # sh    $t5, 2($t4)
+        0x956D0004,  # lhu   $t5, 4($t3)
+        0x00000000,  # nop
+        0xA58D0004,  # sh    $t5, 4($t4)
+        0x956D0006,  # lhu   $t5, 6($t3)
+        0x00000000,  # nop
+        0xA58D0006,  # sh    $t5, 6($t4)
+
+        # Tail-call vanilla scriptTickChangeMap
+        0x08036399,  # j     0x800D8E64
+        0x00000000,  # nop
+    )
+)
+assert len(ROM_CHANGEMAP_WRAPPER_BYTES) == 72, len(ROM_CHANGEMAP_WRAPPER_BYTES)
+
+
+# City-screens bitmap — 32 bytes covering screen IDs 0..255. Bit (id %
+# 8) of byte (id // 8) is set iff that screen ID is "in city" by our
+# definition. Generated from the same set the client uses (mirrored
+# verbatim from `client.py:CITY_SCREENS`). Sourced from DWAP's full
+# screen->region table.
+
+ROM_CITY_BITMAP_RAM: Final = 0x80095880
+ROM_CITY_BITMAP_OFFSET: Final = 0x14CC0D08
+
+_CITY_SCREENS_FOR_BITMAP: Final[frozenset[int]] = frozenset({
+    *range(168, 209),     # File City Top + Bottom + Jijimon + Birdra + Arena lobby
+    211,                  # Item Keeper
+    *range(213, 219),     # Centar Clinic, Restaurants, Shops, Jijimon Base
+    223,                  # Arena Lobby (with MetalGreymon/Airdramon)
+    236, 237, 238,        # File City Top cutscene variants
+})
+
+def _build_city_bitmap() -> bytes:
+    bm = bytearray(32)
+    for screen in _CITY_SCREENS_FOR_BITMAP:
+        bm[screen >> 3] |= 1 << (screen & 7)
+    return bytes(bm)
+
+ROM_CITY_BITMAP_BYTES: Final = _build_city_bitmap()
+assert len(ROM_CITY_BITMAP_BYTES) == 32, len(ROM_CITY_BITMAP_BYTES)
+
+
+# JAL-replacement at the vanilla call site. Vanilla had
+# JAL 0x800D8E64 (= 0x0C036399) at RAM 0x80105C2C; we replace it with
+# JAL ROM_CHANGEMAP_WRAPPER_RAM (= 0x0C025600).
+
+ROM_CHANGEMAP_PATCH_FORMAT: Final = "<I"
+ROM_CHANGEMAP_PATCH_OFFSET: Final = 0x14D41AB4
+ROM_CHANGEMAP_PATCH_VALUE: Final = (
+    0x0C000000 | ((ROM_CHANGEMAP_WRAPPER_RAM >> 2) & 0x03FFFFFF)
+)
+assert ROM_CHANGEMAP_PATCH_VALUE == 0x0C025600, hex(ROM_CHANGEMAP_PATCH_VALUE)
+
+
+# =============================================================================
+# Field-spawn trigger ID redirects (Plan A — per-Digimon)
+# =============================================================================
+#
+# Vanilla DW1 gates each Digimon's wild-spawn on `if trigger(200+X)`,
+# where X is the digimon's recruit ID. We need the wild-spawn to be
+# suppressed when the player has *beaten* the Digimon (regardless of
+# AP delivery), but we want the *city visibility* and *variant
+# selector* to read AP-delivered status. The recruit-block (which
+# trigger 200+X reads from) is now always AP_MIRROR, so reading
+# trigger 200+X for the field check no longer suppresses respawn.
+#
+# Fix: ROM-patch the trigger-ID bytes inside the script bytecode of
+# each Digimon's wild-spawn `if` to use trigger 720+X (= PERM_BEATEN
+# range, set by the setTrigger wrapper redirect). This makes the
+# field-spawn check read the beaten flag directly.
+#
+# Each entry below is a (BIN offset, original trigger ID, new trigger
+# ID) tuple. Only Betamon for now — once verified, the rest of the 56
+# recruits get added.
+
+ROM_FIELD_SPAWN_TRIGGER_FORMAT: Final = "<H"
+ROM_FIELD_SPAWN_TRIGGER_PATCHES: Final = (
+    # Betamon: Section_15 (his wild encounter screen) line 1978
+    # `if trigger(204) == TRUE then SKIP loadDigimon` → use trigger 724.
+    # info.txt:758 marks this as "Recruitable Betamon".
+    (0x13FD6576, 204, 724),
+)
+
+
+# =============================================================================
+# isTriggerSet wrapper — recruit-bit read redirect (Phase 5 piece D)
+# =============================================================================
+#
+# Vanilla DW1 reads the recruit-block byte at trigger ID ``200 + i`` (i.e.
+# trigger 203..258 for the 56 recruitable Digimon) via ``isTriggerSet``
+# (RAM 0x8010643C). Many vanilla scripts call this — variant selectors
+# at city boundaries, NPC visibility checks, ``recalculatePPandArena``
+# (prosperity), etc.
+#
+# We *want* every vanilla "is X recruited?" query to see the AP-authorized
+# answer (= AP_BITS_MIRROR), regardless of whatever the recruit-block
+# currently holds. The recruit-block is dual-purposed by the changeMap
+# wrapper (writes AP_MIRROR in city, PERM_BEATEN in field) for spawn
+# suppression in field — meaning that during the field-tile-warp script
+# that runs *just before* a city transition, ``isTriggerSet(200+X)``
+# would see the PERM_BEATEN value (X has been beaten) and pick the
+# wrong city variant.
+#
+# The fix is to install a tiny wrapper at the head of vanilla
+# ``isTriggerSet`` that, for trigger IDs in the recruit range 203..258,
+# reads the bit from ``AP_BITS_MIRROR`` (RAM 0x801BDFF0) directly and
+# returns it. For all other trigger IDs, the wrapper falls through to
+# vanilla ``isTriggerSet`` body unchanged.
+#
+# This makes the recruit-bit READ semantics consistent: vanilla always
+# sees AP-delivered status, regardless of what the recruit-block scratch
+# happens to contain at the moment of the call. The recruit-block can
+# now safely double as the field-spawn-suppression scratch (PERM_BEATEN)
+# without poisoning city-variant selection.
+#
+# We replace the first 2 instructions of vanilla ``isTriggerSet`` with
+# ``j wrapper; nop``. The wrapper does its range check without touching
+# the stack, returns directly via ``jr $ra`` for the AP_MIRROR path,
+# and for the fall-through path replicates the two replaced instructions
+# (``addiu $sp, -32``, ``sw $ra, 16($sp)``) before jumping to
+# ``isTriggerSet+8`` (= 0x80106444).
+#
+# Wrapper byte layout (80 bytes / 20 MIPS instructions, all little-endian):
+#
+#   addiu $at, $a0, -203    0x2481FF35    at = a0 - 203
+#   sltiu $t0, $at, 56      0x2C280038    t0 = (at < 56) ? 1 : 0
+#   beq   $t0, $0, +13      0x1100000D    if not in range, jump to ORIG
+#   nop                     0x00000000    delay slot of beq
+#   # AP_MIRROR path:
+#   addiu $at, $at, 3       0x24210003    at = at + 3 = a0 - 200 (= X)
+#   srl   $t1, $at, 3       0x000148C2    t1 = X / 8           (byte offset)
+#   andi  $t2, $at, 7       0x302A0007    t2 = X & 7           (bit index)
+#   lui   $t3, 0x801B       0x3C0B801B
+#   ori   $t3, $t3, 0xDFF0  0x356BDFF0    t3 = AP_BITS_MIRROR base
+#   addu  $t3, $t3, $t1     0x01695821    t3 = &AP_BITS_MIRROR[byte]
+#   lbu   $t3, 0($t3)       0x916B0000    t3 = byte value
+#   nop                     0x00000000    load-delay slot
+#   srlv  $t3, $t3, $t2     0x014B5806    t3 = byte >> bit
+#   andi  $v0, $t3, 1       0x31620001    v0 = (t3 & 1)
+#   jr    $ra               0x03E00008    return
+#   nop                     0x00000000    delay slot of jr
+#   # ORIG path: replicate replaced instructions, jump to vanilla body+8
+#   addiu $sp, $sp, -32     0x27BDFFE0
+#   sw    $ra, 16($sp)      0xAFBF0010
+#   j     0x80106444        0x08041911    isTriggerSet+8
+#   nop                     0x00000000    delay slot of j
+
+ROM_ISTRIGGERSET_WRAPPER_RAM: Final = 0x800958B0
+ROM_ISTRIGGERSET_WRAPPER_OFFSET: Final = 0x14CC0D38
+ROM_ISTRIGGERSET_WRAPPER_BYTES: Final = b"".join(
+    val.to_bytes(4, "little") for val in (
+        # Range check
+        0x2481FF35,  # addiu $at, $a0, -203
+        0x2C280038,  # sltiu $t0, $at, 56
+        0x1100000D,  # beq   $t0, $0, +13   ; ORIG
+        0x00000000,  # nop
+        # AP_MIRROR path
+        0x24210003,  # addiu $at, $at, 3    ; at = a0 - 200
+        0x000148C2,  # srl   $t1, $at, 3
+        0x302A0007,  # andi  $t2, $at, 7
+        0x3C0B801B,  # lui   $t3, 0x801B
+        0x356BDFF0,  # ori   $t3, $t3, 0xDFF0
+        0x01695821,  # addu  $t3, $t3, $t1
+        0x916B0000,  # lbu   $t3, 0($t3)
+        0x00000000,  # nop  (load delay)
+        0x014B5806,  # srlv  $t3, $t3, $t2
+        0x31620001,  # andi  $v0, $t3, 1
+        0x03E00008,  # jr    $ra
+        0x00000000,  # nop  (delay slot)
+        # ORIG path: replicate replaced instructions + jump to body+8
+        0x27BDFFE0,  # addiu $sp, $sp, -32
+        0xAFBF0010,  # sw    $ra, 16($sp)
+        0x08041911,  # j     0x80106444
+        0x00000000,  # nop  (delay slot)
+    )
+)
+assert len(ROM_ISTRIGGERSET_WRAPPER_BYTES) == 80, len(ROM_ISTRIGGERSET_WRAPPER_BYTES)
+
+# Patch site: replace the first 2 instructions of vanilla isTriggerSet
+# (RAM 0x8010643C..0x80106443) with `j wrapper; nop`.
+# Vanilla 0x8010643C: addiu $sp, $sp, -32  (replaced)
+# Vanilla 0x80106440: sw    $ra, 0x10($sp) (replaced)
+# We place these two equivalent instructions inside the wrapper's ORIG
+# path so the original semantics are preserved when the wrapper falls
+# through.
+
+ROM_ISTRIGGERSET_PATCH_FORMAT: Final = "<II"
+ROM_ISTRIGGERSET_PATCH_OFFSET: Final = 0x14D423F4
+ROM_ISTRIGGERSET_PATCH_VALUE: Final = (
+    # j ROM_ISTRIGGERSET_WRAPPER_RAM (delay-slot nop follows)
+    0x08000000 | ((ROM_ISTRIGGERSET_WRAPPER_RAM >> 2) & 0x03FFFFFF),
+    0x00000000,  # nop (delay slot of j)
+)
+assert ROM_ISTRIGGERSET_PATCH_VALUE[0] == 0x0802562C, hex(
+    ROM_ISTRIGGERSET_PATCH_VALUE[0],
+)
+
+
+# =============================================================================
+# Phase 5 polish — QoL options
+# =============================================================================
+# Per-option constants used by ``rom.py`` (patcher-side ROM writes) and
+# ``client.py`` (RAM-side per-tick enforcement). Source attribution and
+# explanations live alongside each block.
+
+# ----- Fast Drimogemon (client-side; mirrors DWAP) --------------------------
+#
+# Source: ``references/DWAP/source/DWAP/App.axaml.cs:417-428`` and
+# ``Addresses.cs:36-39``. Once the player beats Drimogemon (HasBeaten bit
+# set), the client writes three single-byte flags to mark the Lava Cave
+# tunnel as already dug and the dig pile as empty, collapsing the 10-day
+# in-game wait. Idempotent: writes only fire when the current values
+# differ from target.
+
+RAM_HAS_BEATEN_DRIMOGEMON: Final = 0x001BE130        # u8 — read; 1 = beaten
+RAM_MERAMON_TUNNEL_DRIMO_STATE: Final = 0x001BE042   # u8 — write 2 (talked)
+RAM_MERAMON_TUNNEL_STATE: Final = 0x001BE043         # u8 — write 10 (dug)
+RAM_MERAMON_TUNNEL_DIGGING_STATE: Final = 0x001BE04F  # u8 — write 5 (empty)
+
+FAST_DRIMOGEMON_DRIMO_STATE_TARGET: Final = 2
+FAST_DRIMOGEMON_TUNNEL_STATE_TARGET: Final = 10
+FAST_DRIMOGEMON_DIGGING_STATE_TARGET: Final = 5
+
+
+# ----- Easy Monochromon (client-side; mirrors DWAP) --------------------------
+#
+# Source: ``references/DWAP/source/DWAP/App.axaml.cs:413-415``. While the
+# player is on the Monochromon business map (id 49 = 0x31), pin the
+# profit counter to 4000 so the trade resolves immediately. The
+# RAM_MONOCHROME_PROFIT address (0x0013500C) is already declared above.
+
+EASY_MONOCHROMON_MAP_ID: Final = 49           # only act when on this map
+EASY_MONOCHROMON_PROFIT_TARGET: Final = 4000  # u32 LE
+
+
+# ----- Stat Gain Multiplier (client-side; mirrors DWAP) ----------------------
+#
+# Source: ``references/DWAP/source/DWAP/App.axaml.cs:348-355``. Vanilla
+# DW1 stores a stat-gain multiplier and a stat cap in three adjacent
+# fields. Writing all three each tick (and only when option > 1) bumps
+# training speed by the chosen factor.
+#
+# Layout (verified against DWAP's writes):
+#   0x001384AC : 1 byte — stat-cap-unlock flag, set to 63 (0x3F)
+#   0x001384AE : u16 LE — multiplier (DWAP writes ``factor * 10``)
+#   0x001384B0 : u16 LE — stat cap, set to 9999
+
+RAM_STAT_CAP_FLAG: Final = 0x001384AC
+RAM_STAT_GAIN_MULT: Final = 0x001384AE
+RAM_STAT_CAP: Final = 0x001384B0
+STAT_CAP_FLAG_TARGET: Final = 63       # 0x3F
+STAT_CAP_TARGET: Final = 9999          # u16 LE
+
+
+# ----- Skip Intro (ROM-side; mirrors standalone) -----------------------------
+#
+# Source: ``references/digimon_world_randomizer/digimon/handler.py:2576-2591``
+# and ``digimon/data.py:694-698``. Two ``jumpTo`` opcodes inserted at the
+# end of the welcome textbox sequence and the "I invited you here" line,
+# fast-forwarding past the dialogue. Each jumpTo is a 4-byte instruction
+# (``<BxH``: opcode 0x16, padding 0x00, dest u16 LE).
+
+ROM_SKIP_INTRO_OUTSIDE_OFFSET: Final = 0x1407DA20
+ROM_SKIP_INTRO_OUTSIDE_DEST: Final = 2306         # u16
+ROM_SKIP_INTRO_INSIDE_OFFSET: Final = 0x1407E44C
+ROM_SKIP_INTRO_INSIDE_DEST: Final = 5108          # u16
+ROM_SKIP_INTRO_FORMAT: Final = "<BxH"             # opcode 0x16 + pad + dest
+ROM_SKIP_INTRO_OPCODE: Final = 0x16               # vanilla DW1 ``jumpTo`` opcode
+
+
+# ----- Type-Lock Unlocks (ROM-side; mirrors standalone) ----------------------
+#
+# Source: ``references/digimon_world_randomizer/digimon/handler.py:2629-2652``
+# and ``digimon/data.py:752-762``. Three independent patches:
+#
+# * **Greylord's Mansion** — overwrite the type-check jump with a plain
+#   value at one offset.
+# * **Ice Sanctuary** — same idea, two offsets.
+# * **Toy Town** — a 4-byte rewrite at one offset.
+
+ROM_UNLOCK_TYPE_LOCK_FORMAT: Final = "<H"
+
+ROM_UNLOCK_GREYLORD_VALUE: Final = 1226
+ROM_UNLOCK_GREYLORD_OFFSETS: Final = (0x13FF808E,)
+
+ROM_UNLOCK_ICE_VALUE: Final = 60
+ROM_UNLOCK_ICE_OFFSETS: Final = (0x1401D130, 0x1401D2A8)
+
+ROM_UNLOCK_TOY_TOWN_FORMAT: Final = "<I"
+ROM_UNLOCK_TOY_TOWN_VALUE: Final = 0x015D0001
+ROM_UNLOCK_TOY_TOWN_OFFSETS: Final = (0x140479EA,)
+
+
+# ----- Spawn Rate boost (ROM-side; mirrors standalone) -----------------------
+#
+# Source: ``references/digimon_world_randomizer/digimon/handler.py:2520-2559``
+# and ``digimon/data.py:770-774``. Each rare-spawn Digimon's encounter
+# check site stores a single byte that the engine compares against a
+# random roll. Mamemon/Piximon/MetalMamemon use a 0..99 RNG (we write
+# ``percent - 1``); Otamamon uses a 0..2 RNG (we write
+# ``floor(percent / 33)``).
+
+ROM_SPAWN_RATE_FORMAT: Final = "<B"
+ROM_SPAWN_RATE_MAMEMON_OFFSETS: Final = (0x13FD678F, 0x140B790F)
+ROM_SPAWN_RATE_PIXIMON_OFFSETS: Final = (
+    0x13FD64DB, 0x13FDD389, 0x13FE0121, 0x140B765B,
+)
+ROM_SPAWN_RATE_MMAMEMON_OFFSETS: Final = (0x13FD831F, 0x140B949F)
+ROM_SPAWN_RATE_OTAMAMON_OFFSETS: Final = (0x13FD7F47, 0x140B90C7)

@@ -461,6 +461,20 @@ in-game.
 - Web-host considerations (if we want this on archipelago.gg eventually — see Q7).
 - WorldTestBase fuzz tests gated behind an env var per CLAUDE.md guidance.
 
+**Pending logic rework (post-Phase-5 polish):**
+- **Recruit randomization toggle** — design and implement the option that
+  flips between vanilla recruit flow and the AP-driven recruit-item path.
+  Requires two-mode access rules in [`rules.py`](worlds/digimon_world/rules.py)
+  (item-based vs combat-/region-based gating).
+- **`type_lock_unlocks` interaction with logic** — when this option is on,
+  Greylord's Mansion / Ice Sanctuary / Toy Town become reachable without the
+  vanilla type gate. The current rules don't model the type gate as a
+  prerequisite, so removing it has no immediate logic impact, but **once
+  the recruit-randomization rules rework lands**, those rules need to also
+  branch on `type_lock_unlocks` — recruit-derived progression that routes
+  through these regions becomes accessible earlier than the gated rules
+  expect.
+
 ### Phase 6 — Packaging and distribution
 
 - `archipelago.json` with `world_version`, `authors`, `minimum_ap_version`.

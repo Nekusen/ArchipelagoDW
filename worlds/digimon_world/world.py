@@ -101,8 +101,16 @@ class DigimonWorldWorld(World):
         # Per-chest vanilla-grant decisions depend on AP fill outcomes
         # and must be shipped: the client uses the list to suppress
         # redundant bank deliveries for items the chest already handed
-        # to the player in-game.
-        slot_data = dict(self.options.as_dict("goal"))
+        # to the player in-game. The QoL toggles that the client
+        # enforces in RAM (fast Drimogemon, easy Monochromon) also
+        # ride along here; the patcher-side QoL options don't need to
+        # be shipped because their effect is baked into the .apdw1.
+        slot_data = dict(self.options.as_dict(
+            "goal",
+            "fast_drimogemon",
+            "easy_monochromon",
+            "stat_gain_multiplier",
+        ))
         slot_data["vanilla_grant_chests"] = sorted(
             name for name, grant in self.chest_grants.items() if grant.vanilla_grant
         )

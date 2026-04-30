@@ -64,12 +64,19 @@ from .data.addresses import (
     ROM_AP_ITEM_ENTRY_OFFSET,
     ROM_BIN_BYTES,
     ROM_BIN_SHA1,
+    ROM_CHANGEMAP_PATCH_FORMAT,
+    ROM_CHANGEMAP_PATCH_OFFSET,
+    ROM_CHANGEMAP_PATCH_VALUE,
+    ROM_CHANGEMAP_WRAPPER_BYTES,
+    ROM_CHANGEMAP_WRAPPER_OFFSET,
     ROM_CHEST_GIVEITEM_PATCH_FORMAT,
     ROM_CHEST_GIVEITEM_PATCH_OFFSET,
     ROM_CHEST_GIVEITEM_PATCH_VALUE,
     ROM_CHEST_GIVEITEM_WRAPPER_BYTES,
     ROM_CHEST_GIVEITEM_WRAPPER_OFFSET,
     ROM_CHEST_ITEM_FORMAT,
+    ROM_CITY_BITMAP_BYTES,
+    ROM_CITY_BITMAP_OFFSET,
     ROM_FIX_LEO_CAVE_FORMAT,
     ROM_FIX_LEO_CAVE_OFFSETS,
     ROM_FIX_LEO_CAVE_VALUE,
@@ -79,9 +86,16 @@ from .data.addresses import (
     ROM_FIX_ROTATION_FORMAT,
     ROM_FIX_ROTATION_OFFSETS,
     ROM_FIX_ROTATION_VALUE,
+    ROM_FIELD_SPAWN_TRIGGER_FORMAT,
+    ROM_FIELD_SPAWN_TRIGGER_PATCHES,
     ROM_FIX_TOY_TOWN_FORMAT,
     ROM_FIX_TOY_TOWN_OFFSETS,
     ROM_FIX_TOY_TOWN_VALUE,
+    ROM_ISTRIGGERSET_PATCH_FORMAT,
+    ROM_ISTRIGGERSET_PATCH_OFFSET,
+    ROM_ISTRIGGERSET_PATCH_VALUE,
+    ROM_ISTRIGGERSET_WRAPPER_BYTES,
+    ROM_ISTRIGGERSET_WRAPPER_OFFSET,
     ROM_OGREMON_SOFTLOCK_FORMAT,
     ROM_OGREMON_SOFTLOCK_OFFSETS,
     ROM_OGREMON_SOFTLOCK_VALUE,
@@ -95,6 +109,25 @@ from .data.addresses import (
     ROM_SETTRIGGER_PATCH_VALUE,
     ROM_SETTRIGGER_WRAPPER_BYTES,
     ROM_SETTRIGGER_WRAPPER_OFFSET,
+    ROM_SKIP_INTRO_FORMAT,
+    ROM_SKIP_INTRO_INSIDE_DEST,
+    ROM_SKIP_INTRO_INSIDE_OFFSET,
+    ROM_SKIP_INTRO_OPCODE,
+    ROM_SKIP_INTRO_OUTSIDE_DEST,
+    ROM_SKIP_INTRO_OUTSIDE_OFFSET,
+    ROM_SPAWN_RATE_FORMAT,
+    ROM_SPAWN_RATE_MAMEMON_OFFSETS,
+    ROM_SPAWN_RATE_MMAMEMON_OFFSETS,
+    ROM_SPAWN_RATE_OTAMAMON_OFFSETS,
+    ROM_SPAWN_RATE_PIXIMON_OFFSETS,
+    ROM_UNLOCK_GREYLORD_OFFSETS,
+    ROM_UNLOCK_GREYLORD_VALUE,
+    ROM_UNLOCK_ICE_OFFSETS,
+    ROM_UNLOCK_ICE_VALUE,
+    ROM_UNLOCK_TOY_TOWN_FORMAT,
+    ROM_UNLOCK_TOY_TOWN_OFFSETS,
+    ROM_UNLOCK_TOY_TOWN_VALUE,
+    ROM_UNLOCK_TYPE_LOCK_FORMAT,
 )
 
 if TYPE_CHECKING:
@@ -452,6 +485,112 @@ def _write_chest_item_tokens(
     )
 
 
+def _write_changemap_wrapper_tokens(patch: DigimonWorldProcedurePatch) -> None:
+    """Install the changeMap wrapper for race-free city/field bit sync.
+
+    Three writes:
+
+    1. **Wrapper body** at :data:`ROM_CHANGEMAP_WRAPPER_OFFSET` (80 bytes
+       / 20 MIPS instructions in Cave6 free-space). Reads the destination
+       map id from ``$a0``, looks it up in the city bitmap, and copies
+       either the AP-bits mirror (in city) or the permanent-beaten
+       scratch (in field) into the recruit byte block. Then tail-calls
+       vanilla's screen-change function at RAM ``0x800D8E64``.
+    2. **City bitmap** at :data:`ROM_CITY_BITMAP_OFFSET` (32 bytes,
+       immediately after the wrapper). Bit ``i`` of byte ``i//8`` is set
+       iff screen id ``i`` is a city screen.
+    3. **JAL redirect** at :data:`ROM_CHANGEMAP_PATCH_OFFSET` (4 bytes
+       at vanilla RAM ``0x80105C2C``): replace the vanilla
+       ``JAL 0x800D8E64`` with ``JAL ROM_CHANGEMAP_WRAPPER_RAM``.
+
+    Net effect: every screen transition runs our wrapper just before
+    vanilla loads the new map's scripts. Scripts then read recruit
+    bits that already reflect the destination's correct AP/beaten
+    state — no race window like the per-tick client toggle has.
+    """
+
+    patch.write_token(
+        APTokenTypes.WRITE,
+        ROM_CHANGEMAP_WRAPPER_OFFSET,
+        ROM_CHANGEMAP_WRAPPER_BYTES,
+    )
+    patch.write_token(
+        APTokenTypes.WRITE,
+        ROM_CITY_BITMAP_OFFSET,
+        ROM_CITY_BITMAP_BYTES,
+    )
+    patch.write_token(
+        APTokenTypes.WRITE,
+        ROM_CHANGEMAP_PATCH_OFFSET,
+        struct.pack(ROM_CHANGEMAP_PATCH_FORMAT, ROM_CHANGEMAP_PATCH_VALUE),
+    )
+
+
+def _write_field_spawn_trigger_patches(patch: DigimonWorldProcedurePatch) -> None:
+    """Rewrite per-Digimon field-spawn trigger IDs from 200+X to 720+X.
+
+    Vanilla DW1 gates each Digimon's wild-spawn on
+    ``if trigger(200+X) == TRUE then SKIP loadDigimon``, where reading
+    trigger 200+X reads the recruit-block. With the changeMap wrapper
+    now writing AP_MIRROR (only) to the recruit-block, trigger 200+X
+    reflects AP-delivered status, not beaten status — so the field
+    check would let beaten-but-not-AP-delivered Digimon respawn.
+
+    This patch rewrites the 16-bit trigger ID bytes inline in the
+    script bytecode for each Digimon's wild-spawn check, redirecting
+    them to read trigger 720+X (= PERM_BEATEN range, written by the
+    setTrigger wrapper after a recruit-completion event). Net effect:
+    field-spawn suppression is decoupled from city visibility. Each
+    can be driven by its own state.
+    """
+
+    for bin_offset, expected_old, new_trigger in ROM_FIELD_SPAWN_TRIGGER_PATCHES:
+        del expected_old  # documented for review; the new bytes overwrite
+        patch.write_token(
+            APTokenTypes.WRITE,
+            bin_offset,
+            struct.pack(ROM_FIELD_SPAWN_TRIGGER_FORMAT, new_trigger),
+        )
+
+
+def _write_istriggerset_wrapper_tokens(patch: DigimonWorldProcedurePatch) -> None:
+    """Install the isTriggerSet wrapper that redirects recruit-bit reads.
+
+    Two writes:
+
+    1. **Wrapper body** at :data:`ROM_ISTRIGGERSET_WRAPPER_OFFSET` (80
+       bytes / 20 MIPS instructions in Cave6 free-space, immediately
+       after the changeMap wrapper's debug scratch). For trigger IDs
+       in the recruit range 203..258, returns the bit at the matching
+       offset of ``AP_BITS_MIRROR`` (0x801BDFF0). For any other trigger
+       ID, replicates the two replaced instructions (stack-frame setup
+       and ``sw $ra``) and jumps to vanilla ``isTriggerSet+8``.
+    2. **Patch site** at :data:`ROM_ISTRIGGERSET_PATCH_OFFSET` (8 bytes
+       at vanilla ``isTriggerSet`` entry, RAM 0x8010643C): replace the
+       first two instructions with ``j wrapper`` + ``nop``.
+
+    Net effect: every vanilla "is X recruited?" query (variant
+    selectors, NPC visibility checks, prosperity recompute, etc.) sees
+    the AP-authorized answer regardless of the recruit-block scratch
+    contents at the moment of the call. This decouples the recruit-bit
+    READ semantics (= AP-delivered) from the recruit-block scratch use
+    by the changeMap wrapper for field-spawn suppression (= PERM_BEATEN).
+    """
+
+    patch.write_token(
+        APTokenTypes.WRITE,
+        ROM_ISTRIGGERSET_WRAPPER_OFFSET,
+        ROM_ISTRIGGERSET_WRAPPER_BYTES,
+    )
+    patch.write_token(
+        APTokenTypes.WRITE,
+        ROM_ISTRIGGERSET_PATCH_OFFSET,
+        struct.pack(
+            ROM_ISTRIGGERSET_PATCH_FORMAT, *ROM_ISTRIGGERSET_PATCH_VALUE,
+        ),
+    )
+
+
 def _write_softlock_fix_tokens(patch: DigimonWorldProcedurePatch) -> None:
     """Emit the standalone's softlock fix patches.
 
@@ -485,6 +624,92 @@ def _write_softlock_fix_tokens(patch: DigimonWorldProcedurePatch) -> None:
 
 
 # =============================================================================
+# QoL patcher helpers (Phase 5 polish; opt-in via player options)
+# =============================================================================
+
+def _write_skip_intro_tokens(patch: DigimonWorldProcedurePatch) -> None:
+    """Replace two intro-textbox sequences with ``jumpTo`` opcodes.
+
+    Source: ``references/digimon_world_randomizer/digimon/handler.py:2576-2591``.
+    Each ``jumpTo`` is a 4-byte instruction: opcode 0x16, padding 0x00,
+    destination as a little-endian u16. The destinations skip past the
+    bulk of Jijimon's intro dialogue while preserving the title card
+    and partner-pick prompt.
+    """
+
+    outside = struct.pack(
+        ROM_SKIP_INTRO_FORMAT, ROM_SKIP_INTRO_OPCODE, ROM_SKIP_INTRO_OUTSIDE_DEST,
+    )
+    patch.write_token(APTokenTypes.WRITE, ROM_SKIP_INTRO_OUTSIDE_OFFSET, outside)
+
+    inside = struct.pack(
+        ROM_SKIP_INTRO_FORMAT, ROM_SKIP_INTRO_OPCODE, ROM_SKIP_INTRO_INSIDE_DEST,
+    )
+    patch.write_token(APTokenTypes.WRITE, ROM_SKIP_INTRO_INSIDE_OFFSET, inside)
+
+
+def _write_type_lock_unlock_tokens(patch: DigimonWorldProcedurePatch) -> None:
+    """Remove the type-gate checks on Greylord's Mansion, Ice Sanctuary,
+    and Toy Town.
+
+    Source: ``references/digimon_world_randomizer/digimon/handler.py:2629-2652``.
+    Three independent patches, each rewriting the type-check jump with
+    a fall-through value so any partner Digimon can enter.
+
+    NOTE (logic): the AP rules currently don't model these as
+    type-gated regions, so removing the gate has no immediate logic
+    impact. When the recruit-randomization logic rework lands, both
+    the rules and this option's interaction with them need a second
+    look — with this option on, recruit-derived progression that
+    currently routes through the gated regions becomes accessible
+    earlier than the rules expect.
+    """
+
+    greylord = struct.pack(ROM_UNLOCK_TYPE_LOCK_FORMAT, ROM_UNLOCK_GREYLORD_VALUE)
+    for offset in ROM_UNLOCK_GREYLORD_OFFSETS:
+        patch.write_token(APTokenTypes.WRITE, offset, greylord)
+
+    ice = struct.pack(ROM_UNLOCK_TYPE_LOCK_FORMAT, ROM_UNLOCK_ICE_VALUE)
+    for offset in ROM_UNLOCK_ICE_OFFSETS:
+        patch.write_token(APTokenTypes.WRITE, offset, ice)
+
+    toy_town = struct.pack(ROM_UNLOCK_TOY_TOWN_FORMAT, ROM_UNLOCK_TOY_TOWN_VALUE)
+    for offset in ROM_UNLOCK_TOY_TOWN_OFFSETS:
+        patch.write_token(APTokenTypes.WRITE, offset, toy_town)
+
+
+def _write_spawn_rate_boost_tokens(
+    patch: DigimonWorldProcedurePatch, percent: int,
+) -> None:
+    """Boost the encounter chance for Mamemon, Piximon, MetalMamemon,
+    and Otamamon.
+
+    Source: ``references/digimon_world_randomizer/digimon/handler.py:2520-2559``.
+    The first three Digimon use a 0..99 RNG comparison — write
+    ``percent - 1`` so that ``rng < value`` is true ``percent``% of the
+    time. Otamamon uses a 0..2 RNG — write ``floor(percent / 33)`` to
+    map the same percentage onto its smaller scale.
+    """
+
+    percent = max(1, min(100, percent))
+    large = percent - 1
+    small = percent // 33
+
+    large_bytes = struct.pack(ROM_SPAWN_RATE_FORMAT, large)
+    for offsets in (
+        ROM_SPAWN_RATE_MAMEMON_OFFSETS,
+        ROM_SPAWN_RATE_PIXIMON_OFFSETS,
+        ROM_SPAWN_RATE_MMAMEMON_OFFSETS,
+    ):
+        for offset in offsets:
+            patch.write_token(APTokenTypes.WRITE, offset, large_bytes)
+
+    small_bytes = struct.pack(ROM_SPAWN_RATE_FORMAT, small)
+    for offset in ROM_SPAWN_RATE_OTAMAMON_OFFSETS:
+        patch.write_token(APTokenTypes.WRITE, offset, small_bytes)
+
+
+# =============================================================================
 # Generation-time helper (called from world.py:generate_output)
 # =============================================================================
 
@@ -501,6 +726,10 @@ def write_patch(world: DigimonWorldWorld, output_directory: str) -> None:
       pickup ``jal`` redirect (Phase 5 piece A).
     * setTrigger wrapper installation + entry redirect (Phase 5
       piece C — splits "fight completed" from "Digimon joined city").
+    * Option-gated QoL patches (skip intro, type-lock unlocks, spawn
+      rate boost). The two RAM-side QoL options (fast Drimogemon, easy
+      Monochromon) are enforced by the client via slot_data flags;
+      they do not write tokens here.
     """
 
     patch = DigimonWorldProcedurePatch(
@@ -513,11 +742,25 @@ def write_patch(world: DigimonWorldWorld, output_directory: str) -> None:
     assert len(volume_id) == VOLUME_ID_LENGTH, (len(volume_id), VOLUME_ID_LENGTH)
     patch.write_token(APTokenTypes.WRITE, VOLUME_ID_OFFSET, volume_id)
 
-    _write_settrigger_wrapper_tokens(patch)
+    # Plan A revised (per user observation):
+    #   - Cutscene end → bit 200+X = 1 (vanilla; we don't redirect).
+    #   - AP delivery → bit 720+X = 1 (client writes BEATEN_BLOCK).
+    #   - Per-Digimon city-visibility ROM patches make the city gate
+    #     read trigger 720+X instead of 200+X. So city is gated on
+    #     "AP delivered", wild is gated on "cutscene completed".
+    # The setTrigger wrapper and changeMap wrapper are no longer needed.
     _write_recruit_trigger_redirect_tokens(patch)
     _write_pp_calc_patch_tokens(patch)
     _write_softlock_fix_tokens(patch)
     _write_chest_item_tokens(patch, world)
+    _write_field_spawn_trigger_patches(patch)  # Plan A: per-Digimon
+
+    options = world.options
+    if options.skip_intro:
+        _write_skip_intro_tokens(patch)
+    if options.type_lock_unlocks:
+        _write_type_lock_unlock_tokens(patch)
+    _write_spawn_rate_boost_tokens(patch, int(options.spawn_rate_boost.value))
 
     patch.write_file("token_data.bin", patch.get_token_binary())
 

@@ -21,6 +21,7 @@ What is covered:
 from __future__ import annotations
 
 import hashlib
+import unittest
 import zipfile
 from typing import Any, ClassVar
 from unittest import mock
@@ -202,20 +203,15 @@ class TestGenerateOutput(DigimonWorldTestBase):
         self.assertTrue(first_data.startswith(rom_module.VOLUME_ID_PREFIX))
         self.assertEqual(len(first_data), rom_module.VOLUME_ID_LENGTH)
 
-        # Phase 5 piece C: setTrigger wrapper installation. The 32-byte
-        # wrapper sits in Cave6 right after the chest-pickup wrapper, and
-        # the 8-byte patch at the setTrigger entry redirects through it.
-        self.assertIn(
-            (ROM_SETTRIGGER_WRAPPER_OFFSET, ROM_SETTRIGGER_WRAPPER_BYTES),
-            observed,
-        )
-        expected_settrigger_patch_bytes = struct.pack(
-            ROM_SETTRIGGER_PATCH_FORMAT, *ROM_SETTRIGGER_PATCH_VALUE,
-        )
-        self.assertIn(
-            (ROM_SETTRIGGER_PATCH_OFFSET, expected_settrigger_patch_bytes),
-            observed,
-        )
+        # Plan A revised: the setTrigger wrapper is no longer installed.
+        # Vanilla setTrigger(200+X) sets bit 200+X directly (cutscene
+        # completion); AP delivery writes bit 720+X via the recruit
+        # deliverer. Per-Digimon city-script ROM patches gate city
+        # visibility on bit 720+X. The wrapper bytes / patch site stay
+        # defined in addresses.py for now (in case we revive them).
+        observed_offsets = {off for off, _ in observed}
+        self.assertNotIn(ROM_SETTRIGGER_WRAPPER_OFFSET, observed_offsets)
+        self.assertNotIn(ROM_SETTRIGGER_PATCH_OFFSET, observed_offsets)
 
         # PP-calc patch token.
         expected_pp_bytes = b"".join(
@@ -285,6 +281,224 @@ class TestGenerateOutput(DigimonWorldTestBase):
             (ROM_CHEST_GIVEITEM_PATCH_OFFSET, expected_jal_bytes),
             observed,
         )
+
+
+# =============================================================================
+# QoL option-gated tokens (Phase 5 polish)
+# =============================================================================
+
+
+def _capture_tokens(world: Any) -> set[tuple[int, bytes]]:
+    """Run ``generate_output`` against an in-memory patch capture and
+    return the resulting (offset, data) set for assertions."""
+    import struct  # noqa: F401  (kept for parity with TestGenerateOutput)
+
+    captured: dict[str, bytes] = {}
+
+    def fake_write(self_patch: Any, target: str) -> None:
+        with zipfile.ZipFile(target, "w") as _:
+            pass
+        captured.update(self_patch.files)
+
+    with mock.patch.object(
+        rom_module.DigimonWorldProcedurePatch, "write", fake_write,
+    ):
+        world.generate_output(".")
+
+    blob = captured["token_data.bin"]
+    token_count = int.from_bytes(blob[:4], "little")
+    tokens: list[tuple[int, int, int, bytes]] = []
+    bpr = 4
+    for _ in range(token_count):
+        ttype = blob[bpr]
+        off = int.from_bytes(blob[bpr + 1:bpr + 5], "little")
+        size = int.from_bytes(blob[bpr + 5:bpr + 9], "little")
+        data = blob[bpr + 9:bpr + 9 + size]
+        tokens.append((ttype, off, size, data))
+        bpr += 9 + size
+    return {(off, data) for _t, off, _s, data in tokens}
+
+
+class TestQoLPatcherOptionsOn(DigimonWorldTestBase):
+    """All QoL toggles ON: skip-intro / type-unlocks bytecode + spawn-rate
+    boost should land in the token blob."""
+
+    options: ClassVar[dict[str, Any]] = {
+        "skip_intro": 1,
+        "type_lock_unlocks": 1,
+        "spawn_rate_boost": 50,
+    }
+
+    def test_skip_intro_tokens_present(self) -> None:
+        import struct
+
+        from ..data.addresses import (
+            ROM_SKIP_INTRO_FORMAT,
+            ROM_SKIP_INTRO_INSIDE_DEST,
+            ROM_SKIP_INTRO_INSIDE_OFFSET,
+            ROM_SKIP_INTRO_OPCODE,
+            ROM_SKIP_INTRO_OUTSIDE_DEST,
+            ROM_SKIP_INTRO_OUTSIDE_OFFSET,
+        )
+        observed = _capture_tokens(self.world)
+        outside = struct.pack(
+            ROM_SKIP_INTRO_FORMAT, ROM_SKIP_INTRO_OPCODE, ROM_SKIP_INTRO_OUTSIDE_DEST,
+        )
+        inside = struct.pack(
+            ROM_SKIP_INTRO_FORMAT, ROM_SKIP_INTRO_OPCODE, ROM_SKIP_INTRO_INSIDE_DEST,
+        )
+        self.assertIn((ROM_SKIP_INTRO_OUTSIDE_OFFSET, outside), observed)
+        self.assertIn((ROM_SKIP_INTRO_INSIDE_OFFSET, inside), observed)
+
+    def test_type_lock_unlock_tokens_present(self) -> None:
+        import struct
+
+        from ..data.addresses import (
+            ROM_UNLOCK_GREYLORD_OFFSETS,
+            ROM_UNLOCK_GREYLORD_VALUE,
+            ROM_UNLOCK_ICE_OFFSETS,
+            ROM_UNLOCK_ICE_VALUE,
+            ROM_UNLOCK_TOY_TOWN_FORMAT,
+            ROM_UNLOCK_TOY_TOWN_OFFSETS,
+            ROM_UNLOCK_TOY_TOWN_VALUE,
+            ROM_UNLOCK_TYPE_LOCK_FORMAT,
+        )
+        observed = _capture_tokens(self.world)
+        greylord = struct.pack(ROM_UNLOCK_TYPE_LOCK_FORMAT, ROM_UNLOCK_GREYLORD_VALUE)
+        for off in ROM_UNLOCK_GREYLORD_OFFSETS:
+            self.assertIn((off, greylord), observed)
+        ice = struct.pack(ROM_UNLOCK_TYPE_LOCK_FORMAT, ROM_UNLOCK_ICE_VALUE)
+        for off in ROM_UNLOCK_ICE_OFFSETS:
+            self.assertIn((off, ice), observed)
+        toy_town = struct.pack(ROM_UNLOCK_TOY_TOWN_FORMAT, ROM_UNLOCK_TOY_TOWN_VALUE)
+        for off in ROM_UNLOCK_TOY_TOWN_OFFSETS:
+            self.assertIn((off, toy_town), observed)
+
+    def test_spawn_rate_boost_tokens_present(self) -> None:
+        import struct
+
+        from ..data.addresses import (
+            ROM_SPAWN_RATE_FORMAT,
+            ROM_SPAWN_RATE_MAMEMON_OFFSETS,
+            ROM_SPAWN_RATE_MMAMEMON_OFFSETS,
+            ROM_SPAWN_RATE_OTAMAMON_OFFSETS,
+            ROM_SPAWN_RATE_PIXIMON_OFFSETS,
+        )
+        observed = _capture_tokens(self.world)
+        # spawn_rate_boost = 50 → large = 49, small = 50 // 33 = 1
+        large_bytes = struct.pack(ROM_SPAWN_RATE_FORMAT, 49)
+        small_bytes = struct.pack(ROM_SPAWN_RATE_FORMAT, 1)
+        for offsets in (
+            ROM_SPAWN_RATE_MAMEMON_OFFSETS,
+            ROM_SPAWN_RATE_PIXIMON_OFFSETS,
+            ROM_SPAWN_RATE_MMAMEMON_OFFSETS,
+        ):
+            for off in offsets:
+                self.assertIn((off, large_bytes), observed)
+        for off in ROM_SPAWN_RATE_OTAMAMON_OFFSETS:
+            self.assertIn((off, small_bytes), observed)
+
+
+class TestQoLPatcherOptionsOff(DigimonWorldTestBase):
+    """Skip-intro and type-unlocks OFF: their tokens should NOT appear.
+    Spawn-rate-boost is a Range and always writes (the option just
+    controls the value); set to 1 to assert vanilla rate (large=0)."""
+
+    options: ClassVar[dict[str, Any]] = {
+        "skip_intro": 0,
+        "type_lock_unlocks": 0,
+        "spawn_rate_boost": 1,
+    }
+
+    def test_skip_intro_tokens_absent(self) -> None:
+        from ..data.addresses import (
+            ROM_SKIP_INTRO_INSIDE_OFFSET,
+            ROM_SKIP_INTRO_OUTSIDE_OFFSET,
+        )
+        observed_offsets = {off for off, _ in _capture_tokens(self.world)}
+        self.assertNotIn(ROM_SKIP_INTRO_OUTSIDE_OFFSET, observed_offsets)
+        self.assertNotIn(ROM_SKIP_INTRO_INSIDE_OFFSET, observed_offsets)
+
+    def test_type_lock_unlock_tokens_absent(self) -> None:
+        from ..data.addresses import (
+            ROM_UNLOCK_GREYLORD_OFFSETS,
+            ROM_UNLOCK_ICE_OFFSETS,
+            ROM_UNLOCK_TOY_TOWN_OFFSETS,
+        )
+        observed_offsets = {off for off, _ in _capture_tokens(self.world)}
+        for off in (
+            *ROM_UNLOCK_GREYLORD_OFFSETS,
+            *ROM_UNLOCK_ICE_OFFSETS,
+            *ROM_UNLOCK_TOY_TOWN_OFFSETS,
+        ):
+            self.assertNotIn(off, observed_offsets)
+
+    def test_spawn_rate_minimum_writes_vanilla_value(self) -> None:
+        import struct
+
+        from ..data.addresses import (
+            ROM_SPAWN_RATE_FORMAT,
+            ROM_SPAWN_RATE_MAMEMON_OFFSETS,
+            ROM_SPAWN_RATE_OTAMAMON_OFFSETS,
+        )
+        observed = _capture_tokens(self.world)
+        # spawn_rate_boost = 1 → large = 0, small = 0
+        zero_byte = struct.pack(ROM_SPAWN_RATE_FORMAT, 0)
+        for off in ROM_SPAWN_RATE_MAMEMON_OFFSETS:
+            self.assertIn((off, zero_byte), observed)
+        for off in ROM_SPAWN_RATE_OTAMAMON_OFFSETS:
+            self.assertIn((off, zero_byte), observed)
+
+
+@unittest.skip("changeMap wrapper temporarily disabled for live bisect")
+class TestChangeMapWrapper(DigimonWorldTestBase):
+    """Phase 5 polish: race-free changeMap hook for city/field bit sync."""
+
+    options: ClassVar[dict[str, Any]] = {}
+
+    def test_changemap_wrapper_tokens_present(self) -> None:
+        import struct
+
+        from ..data.addresses import (
+            ROM_CHANGEMAP_PATCH_FORMAT,
+            ROM_CHANGEMAP_PATCH_OFFSET,
+            ROM_CHANGEMAP_PATCH_VALUE,
+            ROM_CHANGEMAP_WRAPPER_BYTES,
+            ROM_CHANGEMAP_WRAPPER_OFFSET,
+            ROM_CITY_BITMAP_BYTES,
+            ROM_CITY_BITMAP_OFFSET,
+        )
+        observed = _capture_tokens(self.world)
+        # 80-byte wrapper at Cave6 offset.
+        self.assertIn(
+            (ROM_CHANGEMAP_WRAPPER_OFFSET, ROM_CHANGEMAP_WRAPPER_BYTES),
+            observed,
+        )
+        # 32-byte city bitmap immediately after.
+        self.assertIn(
+            (ROM_CITY_BITMAP_OFFSET, ROM_CITY_BITMAP_BYTES),
+            observed,
+        )
+        # 4-byte JAL redirect at vanilla call site.
+        expected_jal = struct.pack(
+            ROM_CHANGEMAP_PATCH_FORMAT, ROM_CHANGEMAP_PATCH_VALUE,
+        )
+        self.assertIn((ROM_CHANGEMAP_PATCH_OFFSET, expected_jal), observed)
+
+
+class TestQoLSlotData(DigimonWorldTestBase):
+    """Client-side QoL flags must round-trip via fill_slot_data so the
+    BizHawk client can act on them at runtime."""
+
+    options: ClassVar[dict[str, Any]] = {
+        "fast_drimogemon": 1,
+        "easy_monochromon": 0,
+    }
+
+    def test_qol_flags_in_slot_data(self) -> None:
+        slot_data = self.world.fill_slot_data()
+        self.assertEqual(slot_data["fast_drimogemon"], 1)
+        self.assertEqual(slot_data["easy_monochromon"], 0)
 
 
 # =============================================================================

@@ -110,15 +110,17 @@ class TestRecruitDispatch(DigimonWorldTestBase):
         for recruit_name in RECRUIT_NAMES:
             self.assertIn(recruit_name, LOCATION_RAM_BITS)
 
-    def test_recruit_dispatch_uses_beaten_bits(self) -> None:
-        """Phase 5 piece C: detection moved from vanilla recruit bits to
-        the redirected ``beaten`` bits installed by the setTrigger
-        wrapper — the recruit bits never light up post-wrapper."""
+    def test_recruit_dispatch_uses_recruit_bits(self) -> None:
+        """Plan A revised: AP location detection polls the vanilla
+        recruit bits (200+X). Cutscene completion sets bit 200+X
+        directly (no setTrigger redirect), so the AP location fires
+        when the cutscene ends. AP delivery writes bit 720+X (handled
+        by the recruit deliverer)."""
 
         for recruit_name in RECRUIT_NAMES:
             self.assertEqual(
                 LOCATION_RAM_BITS[recruit_name],
-                BEATEN_RAM_BITS[recruit_name],
+                RECRUIT_RAM_BITS[recruit_name],
             )
 
 
