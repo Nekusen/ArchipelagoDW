@@ -188,6 +188,17 @@ RAM_MERAMON_TUNNEL_DRIMOGEMON_STATE: Final = 0x001BE042
 RAM_MERAMON_TUNNEL_STATE: Final = 0x001BE043
 RAM_MERAMON_TUNNEL_DIGGING_STATE: Final = 0x001BE04F
 
+# Story-event trigger bits (single bits inside the unified trigger
+# bit-array; see :data:`AP_TRIGGER_ARRAY_BASE`). Format: ``(byte_addr, bit)``.
+#
+# Tropical Jungle bridge: starts broken; once Coelamon's cutscene + the
+# Tropical-Jungle-side scene fire, this bit flips and the bridge becomes
+# permanently usable in both directions. Discovered 2026-04-30 via a
+# 5-snapshot RAM diff and user-confirmed by RAM-watch poke (forcing the
+# bit to 1 from a save before the cutscene immediately enables the bridge).
+# Trigger ID 185 under the array's standard formula.
+RAM_TROPICAL_JUNGLE_BRIDGE_FIXED: Final = (0x001BDFE4, 1)
+
 # ----- Per-Digimon technique tables (full-roster learned-tech tables) -------
 
 RAM_TECHNIQUE_TABLE_BASE: Final = 0x0012623C
@@ -1737,6 +1748,37 @@ ROM_PP_CALC_PATCH_VALUE: Final = (
 # Verified 2026-04-28 by decoding 8 recruit bits in :data:`RECRUIT_RAM_BITS`
 # from their trigger IDs (203..258).
 #
+# Sub-table layout within the array (``0x001BDFCD..0x001BE040``):
+#
+# * ``0x001BDFCD..0x001BDFE5`` — **gap A** (25 bytes, 200 bits). Story-event
+#   trigger bits live here. Confirmed entries:
+#   :data:`RAM_TROPICAL_JUNGLE_BRIDGE_FIXED` at ``(0x001BDFE4, 1)``.
+# * ``0x001BDFE6..0x001BDFED`` — :data:`RECRUIT_RAM_BITS` (50 bits over
+#   8 bytes; bits 0-2 of ``0x001BDFE6`` and bits 5-6 of ``0x001BDFED``
+#   are unassigned).
+# * ``0x001BDFEE..0x001BE01D`` — **gap B** (48 bytes, 384 bits). Likely
+#   contains many more story-event trigger bits, plus byte-valued state
+#   such as :data:`RAM_CHART_BASE` (``0x001BE00D``).
+# * ``0x001BE01E..0x001BE026`` — :data:`DWAP_CHEST_RAM_BITS` (65 bits
+#   over 9 bytes; the 8 bit gaps in this range are mirrored from DWAP
+#   and may be reserved or correspond to chests DWAP missed — see the
+#   ``DWAP_CHEST_RAM_BITS`` block above).
+# * ``0x001BE027..0x001BE02E`` — :data:`BEATEN_RAM_BITS` (50 bits over
+#   8 bytes; same per-Digimon ordering as :data:`RECRUIT_RAM_BITS`).
+# * ``0x001BE02F..0x001BE040`` — **gap C** (18 bytes). Contains
+#   byte-valued progression state including :data:`RAM_PROSPERITY_POINTS`
+#   (``0x001BE032``); residual bits may also be story triggers.
+#
+# **Methodology for finding new area-unlock flags**: dump the array span
+# before and after the gating event using
+# ``worlds/digimon_world/tools/dw1_ram_snapshot.lua``, then diff. A
+# single-bit 0->1 flip inside one of the gap regions, sticky across map
+# transitions, is the signature of a story-event trigger. Cross-check
+# the bit isn't already used by chest/recruit/beaten tables before
+# trusting the result. Pattern validated on the Tropical Jungle bridge
+# (2026-04-30): 5-snapshot diff produced exactly one such candidate,
+# user-confirmed by RAM-watch poke.
+#
 # We don't use this constant directly anywhere in the patcher today, but
 # it documents the relationship for future RE work.
 
@@ -2302,6 +2344,47 @@ ROM_FIELD_SPAWN_TRIGGER_PATCHES: Final = (
 
 
 # =============================================================================
+# getFileCityTopMap trigger redirects (Plan A revised — Top City variants)
+# =============================================================================
+#
+# Vanilla DW1's ``getFileCityTopMap`` (RAM 0x800D97DC) is a C function
+# that picks which File City Top variant (screen IDs 168..179, 204) to
+# load when the player enters File City Top. It branches on
+# ``isTriggerSet(200+X)`` for several recruits: Angemon (220),
+# Monzaemon (214), Birdramon (221), Vegimon (225), Palmon (246).
+# (Identified via the user — works the same way Palmon does.)
+#
+# Without patching, after a recruit's vanilla cutscene completes
+# (200+X = 1) the function picks a variant that *includes* that
+# Digimon at the plaza — independent of AP delivery. To gate Top
+# City visibility on AP delivery instead, we rewrite the trigger ID
+# embedded in each ``addiu r4, r0, <trigger_id>`` instruction (the
+# 16-bit immediate field) from ``200+X`` to ``720+X``. After patching,
+# each ``isTriggerSet`` call reads the corresponding bit of
+# BEATEN_BLOCK (= AP-delivered) instead of the recruit-block.
+#
+# Each entry: (BIN offset of the ``addiu`` instruction's lower-16-bit
+# immediate, original trigger ID, redirected trigger ID). We patch
+# the bottom 2 bytes (the immediate field, stored LE) at each offset.
+
+ROM_GETTOPCITY_TRIGGER_FORMAT: Final = "<H"
+ROM_GETTOPCITY_TRIGGER_PATCHES: Final = (
+    (0x14D0ECC0, 220, 740),  # Angemon
+    (0x14D0ECD0, 214, 734),  # Monzaemon
+    (0x14D0EE10, 221, 741),  # Birdramon (1st check)
+    (0x14D0EE20, 225, 745),  # Vegimon (1st check)
+    (0x14D0EE38, 246, 766),  # Palmon (1st check)
+    (0x14D0EE58, 225, 745),  # Vegimon (2nd check)
+    (0x14D0EE70, 246, 766),  # Palmon (2nd check)
+    (0x14D0EE90, 221, 741),  # Birdramon (2nd check)
+    (0x14D0EEA0, 225, 745),  # Vegimon (3rd check)
+    (0x14D0EEB8, 246, 766),  # Palmon (3rd check)
+    (0x14D0EED8, 225, 745),  # Vegimon (4th check)
+    (0x14D0EEF0, 246, 766),  # Palmon (4th check)
+)
+
+
+# =============================================================================
 # isTriggerSet wrapper — recruit-bit read redirect (Phase 5 piece D)
 # =============================================================================
 #
@@ -2412,6 +2495,158 @@ ROM_ISTRIGGERSET_PATCH_VALUE: Final = (
 )
 assert ROM_ISTRIGGERSET_PATCH_VALUE[0] == 0x0802562C, hex(
     ROM_ISTRIGGERSET_PATCH_VALUE[0],
+)
+
+
+# =============================================================================
+# Combat stat multiplier — three Cave6 trampolines (Phase 5 polish)
+# =============================================================================
+#
+# Source: ``references/DW1-Code/battleStatsGainsAndDrops.asm``. Vanilla
+# DW1's end-of-combat stat-gain function (RAM 0x000ECEE8) writes per-stat
+# gains to a 6-entry u16 table at RAM 0x13D468..0x13D473 from three sites:
+#
+#   * RAM 0x000ED014..0x000ED018 — main computed gain (statGain = 1 +
+#     (enemyStat * enemyCountFactor - 1) / partnerStatFactor). The store
+#     ``sh r3, 0(r2)`` at 0x000ED018 sits in the delay slot of an
+#     unconditional ``beq r0, r0, 0x000ED07C`` at 0x000ED014.
+#   * RAM 0x000ED078 — chance-based "got 1 stat point" floor in the
+#     primary block. r3 is set to literal 1 by 0x000ED070 just before.
+#   * RAM 0x000ED204 — same shape as site 2, in the extra-conditions
+#     block (HP-loss / attacks-done chance rolls).
+#
+# We install three small trampolines in Cave6 free-space (immediately
+# after the isTriggerSet wrapper, RAM 0x80095900 / BIN 0x14CC0D88 — all
+# within sector 148,349). The factor is baked in at patch time from the
+# CombatStatMultiplier option. Site 1 needs a multiply (gain * factor);
+# sites 2 and 3 always store r3=1, so the trampoline simplifies to
+# "store factor".
+#
+# Patch sites (BIN offsets derived from RAM via the changeMap +
+# setTrigger anchors at sector 148,573 / 148,574; battleStats sites land
+# in sector 148,524 udpos 20/120/516):
+#
+#   Site 1 BIN 0x14D2546C  — 8 bytes overwriting beq + sh-delay-slot:
+#                            ``j tr1; nop`` (we kill the original
+#                            delay-slot store; the trampoline stores
+#                            after multiplying).
+#   Site 2 BIN 0x14D254D0  — 4 bytes overwriting sh: ``j tr2``. The
+#                            trampoline returns to RAM 0x800ED080
+#                            (after the natural delay-slot inc which
+#                            executes once before the jump fires).
+#   Site 3 BIN 0x14D2565C  — same shape as site 2, returning to RAM
+#                            0x800ED20C.
+#
+# Trampoline RAM/BIN slots inside Cave6 sector 148,349:
+#   tr1: RAM 0x80095900, BIN 0x14CC0D88, 28 bytes
+#   tr2: RAM 0x8009591C, BIN 0x14CC0DA4, 16 bytes
+#   tr3: RAM 0x8009592C, BIN 0x14CC0DB4, 16 bytes
+#   total 60 bytes; sector 148,349 has ~1.7KB free after isTriggerSet.
+
+ROM_COMBAT_TR1_RAM: Final = 0x80095900
+ROM_COMBAT_TR1_OFFSET: Final = 0x14CC0D88
+ROM_COMBAT_TR2_RAM: Final = 0x8009591C
+ROM_COMBAT_TR2_OFFSET: Final = 0x14CC0DA4
+ROM_COMBAT_TR3_RAM: Final = 0x8009592C
+ROM_COMBAT_TR3_OFFSET: Final = 0x14CC0DB4
+
+ROM_COMBAT_SITE1_OFFSET: Final = 0x14D2546C  # RAM 0x000ED014 (beq + sh)
+ROM_COMBAT_SITE1_FORMAT: Final = "<II"        # j tr1 + nop
+ROM_COMBAT_SITE2_OFFSET: Final = 0x14D254D0  # RAM 0x000ED078 (sh)
+ROM_COMBAT_SITE2_FORMAT: Final = "<I"         # j tr2
+ROM_COMBAT_SITE3_OFFSET: Final = 0x14D2565C  # RAM 0x000ED204 (sh)
+ROM_COMBAT_SITE3_FORMAT: Final = "<I"         # j tr3
+
+# Site 1 patch value: ``j ROM_COMBAT_TR1_RAM; nop`` (replaces beq + sh).
+# Site 2/3 patch value: ``j tr_X`` (replaces sh; the natural next
+# instruction at site 2/3 becomes the j's delay slot — addi for the
+# loop counter — which executes exactly once, same as the vanilla
+# fall-through it replaces).
+ROM_COMBAT_SITE1_VALUE: Final = (
+    0x08000000 | ((ROM_COMBAT_TR1_RAM >> 2) & 0x03FFFFFF),
+    0x00000000,
+)
+assert ROM_COMBAT_SITE1_VALUE[0] == 0x08025640, hex(ROM_COMBAT_SITE1_VALUE[0])
+ROM_COMBAT_SITE2_VALUE: Final = (
+    0x08000000 | ((ROM_COMBAT_TR2_RAM >> 2) & 0x03FFFFFF),
+)
+assert ROM_COMBAT_SITE2_VALUE[0] == 0x08025647, hex(ROM_COMBAT_SITE2_VALUE[0])
+ROM_COMBAT_SITE3_VALUE: Final = (
+    0x08000000 | ((ROM_COMBAT_TR3_RAM >> 2) & 0x03FFFFFF),
+)
+assert ROM_COMBAT_SITE3_VALUE[0] == 0x0802564B, hex(ROM_COMBAT_SITE3_VALUE[0])
+
+# Trampoline return targets (RAM addresses of the instruction the
+# trampoline ``j``s back to after storing).
+_COMBAT_TR1_RETURN_RAM: Final = 0x800ED07C  # site 1's original beq target
+_COMBAT_TR2_RETURN_RAM: Final = 0x800ED080  # one past site 2's delay slot
+_COMBAT_TR3_RETURN_RAM: Final = 0x800ED20C  # one past site 3's delay slot
+
+
+def _build_combat_tr1_bytes(factor: int) -> bytes:
+    """Site-1 trampoline: r3 = r3 * factor; sh r3, 0(r2); j back; nop.
+
+    Uses unsigned multiply via ``$t1`` (gain is non-negative and we only
+    keep the low 16 bits for the ``sh`` store, so signed/unsigned would
+    be equivalent on the bottom-half output anyway). One nop between
+    ``multu`` and ``mflo`` for emulator-defensive R3000A spacing — the
+    PSX hardware interlocks but older HLE cores have been known to
+    elide the stall.
+    """
+
+    if not 1 <= factor <= 100:
+        raise ValueError(f"Combat multiplier factor must be 1..100, got {factor}")
+    j_back = 0x08000000 | ((_COMBAT_TR1_RETURN_RAM >> 2) & 0x03FFFFFF)
+    return b"".join(
+        val.to_bytes(4, "little") for val in (
+            0x34090000 | (factor & 0xFFFF),  # ori   $t1, $0, factor
+            0x01230019,                       # multu $t1, $v1
+            0x00000000,                       # nop  (mflo defensive spacing)
+            0x00001812,                       # mflo  $v1
+            0xA4430000,                       # sh    $v1, 0($v0)
+            j_back,                            # j     0x800ED07C
+            0x00000000,                       # nop  (delay slot of j)
+        )
+    )
+
+
+def _build_combat_tr_literal_bytes(factor: int, return_ram: int) -> bytes:
+    """Sites 2/3 trampoline: r3 = factor; sh r3, 0(r2); j back; nop.
+
+    The vanilla code at sites 2 and 3 sets r3 = 1 just before the
+    store. Multiplying 1 by ``factor`` is the same as overwriting r3
+    with ``factor``, so the trampoline skips the multiply entirely.
+    """
+
+    if not 1 <= factor <= 100:
+        raise ValueError(f"Combat multiplier factor must be 1..100, got {factor}")
+    j_back = 0x08000000 | ((return_ram >> 2) & 0x03FFFFFF)
+    return b"".join(
+        val.to_bytes(4, "little") for val in (
+            0x34030000 | (factor & 0xFFFF),  # ori   $v1, $0, factor
+            0xA4430000,                       # sh    $v1, 0($v0)
+            j_back,                            # j     return_ram
+            0x00000000,                       # nop  (delay slot of j)
+        )
+    )
+
+
+def build_combat_multiplier_trampolines(factor: int) -> tuple[bytes, bytes, bytes]:
+    """Build (tr1, tr2, tr3) trampoline blobs for the combat multiplier."""
+
+    return (
+        _build_combat_tr1_bytes(factor),
+        _build_combat_tr_literal_bytes(factor, _COMBAT_TR2_RETURN_RAM),
+        _build_combat_tr_literal_bytes(factor, _COMBAT_TR3_RETURN_RAM),
+    )
+
+
+# Sanity-check at module load: tr1 is 28 bytes, tr2/tr3 are 16 bytes,
+# and all three fit in the 1.7KB free tail of Cave6 sector 148,349.
+assert len(_build_combat_tr1_bytes(1)) == 28
+assert len(_build_combat_tr_literal_bytes(1, _COMBAT_TR2_RETURN_RAM)) == 16
+assert ROM_COMBAT_TR3_OFFSET + 16 < ROM_COMBAT_TR1_OFFSET + 0x800, (
+    "Combat trampolines spill out of Cave6 sector 148,349"
 )
 
 

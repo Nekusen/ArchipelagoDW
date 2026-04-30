@@ -135,7 +135,12 @@
       "Bash(awk '/triggers:$/{name=$1} /Recruitable / {print name, $0}' references/digimon_world_randomizer/info.txt)",
       "Bash(awk '/triggers:$/{name=$1; print \"----\", name, \"----\"} /^[ \\\\t]+[0-9]+ +\\(Recruitable|Wild|Spawn|hangin|Rumor|Coelamon|Betamon|Wild\\)/ {print \"  \", $0}' references/digimon_world_randomizer/info.txt)",
       "Bash(awk 'NR>=2257 && NR<=2400' references/digimon_world_randomizer/script/DW1Script.txt)",
-      "Bash(python -m pytest worlds/digimon_world/test/ --tb=short)"
+      "Bash(python -m pytest worlds/digimon_world/test/ --tb=short)",
+      "Bash(python -c \"from worlds.digimon_world.data import addresses; print\\('OK; bridge =', addresses.RAM_TROPICAL_JUNGLE_BRIDGE_FIXED\\)\")",
+      "Bash(awk 'NR>=74720 && NR<=74900' references/DW1-Code/SLUS.asm)",
+      "Bash(python -c \"from worlds.digimon_world.data import addresses; print\\('module imports OK'\\); print\\('site1 j-encoded:', hex\\(addresses.ROM_COMBAT_SITE1_VALUE[0]\\)\\); print\\('tr1@10 length:', len\\(addresses._build_combat_tr1_bytes\\(10\\)\\)\\); print\\('tr1@10 first 4 bytes:', addresses._build_combat_tr1_bytes\\(10\\)[:4].hex\\(\\)\\); print\\('tr1@100 first 4 bytes:', addresses._build_combat_tr1_bytes\\(100\\)[:4].hex\\(\\)\\)\")",
+      "Bash(python -m pytest worlds/digimon_world/test -x --tb=short)",
+      "Bash(python -m pytest worlds/digimon_world/test/test_patcher.py -k \"qol or multiplier or stat or QoL\" -v --tb=short)"
     ]
   }
 }

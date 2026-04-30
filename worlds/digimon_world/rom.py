@@ -77,6 +77,20 @@ from .data.addresses import (
     ROM_CHEST_ITEM_FORMAT,
     ROM_CITY_BITMAP_BYTES,
     ROM_CITY_BITMAP_OFFSET,
+    ROM_COMBAT_SITE1_FORMAT,
+    ROM_COMBAT_SITE1_OFFSET,
+    ROM_COMBAT_SITE1_VALUE,
+    ROM_COMBAT_SITE2_FORMAT,
+    ROM_COMBAT_SITE2_OFFSET,
+    ROM_COMBAT_SITE2_VALUE,
+    ROM_COMBAT_SITE3_FORMAT,
+    ROM_COMBAT_SITE3_OFFSET,
+    ROM_COMBAT_SITE3_VALUE,
+    ROM_COMBAT_TR1_OFFSET,
+    ROM_COMBAT_TR2_OFFSET,
+    ROM_COMBAT_TR3_OFFSET,
+    ROM_FIELD_SPAWN_TRIGGER_FORMAT,
+    ROM_FIELD_SPAWN_TRIGGER_PATCHES,
     ROM_FIX_LEO_CAVE_FORMAT,
     ROM_FIX_LEO_CAVE_OFFSETS,
     ROM_FIX_LEO_CAVE_VALUE,
@@ -86,11 +100,11 @@ from .data.addresses import (
     ROM_FIX_ROTATION_FORMAT,
     ROM_FIX_ROTATION_OFFSETS,
     ROM_FIX_ROTATION_VALUE,
-    ROM_FIELD_SPAWN_TRIGGER_FORMAT,
-    ROM_FIELD_SPAWN_TRIGGER_PATCHES,
     ROM_FIX_TOY_TOWN_FORMAT,
     ROM_FIX_TOY_TOWN_OFFSETS,
     ROM_FIX_TOY_TOWN_VALUE,
+    ROM_GETTOPCITY_TRIGGER_FORMAT,
+    ROM_GETTOPCITY_TRIGGER_PATCHES,
     ROM_ISTRIGGERSET_PATCH_FORMAT,
     ROM_ISTRIGGERSET_PATCH_OFFSET,
     ROM_ISTRIGGERSET_PATCH_VALUE,
@@ -128,6 +142,7 @@ from .data.addresses import (
     ROM_UNLOCK_TOY_TOWN_OFFSETS,
     ROM_UNLOCK_TOY_TOWN_VALUE,
     ROM_UNLOCK_TYPE_LOCK_FORMAT,
+    build_combat_multiplier_trampolines,
 )
 
 if TYPE_CHECKING:
@@ -526,6 +541,27 @@ def _write_changemap_wrapper_tokens(patch: DigimonWorldProcedurePatch) -> None:
     )
 
 
+def _write_gettopcity_trigger_patches(patch: DigimonWorldProcedurePatch) -> None:
+    """Rewrite trigger IDs inside vanilla ``getFileCityTopMap``.
+
+    The function (RAM 0x800D97DC) chooses which File City Top variant
+    to load based on which Digimon are recruited. Without patching,
+    cutscene-completed Digimon (bit 200+X = 1) get added to the plaza
+    regardless of AP delivery. Each call reads
+    ``isTriggerSet(200+X)`` via an ``addiu r4, r0, <trigger_id>``
+    delay-slot instruction; we rewrite the 16-bit immediate field
+    from ``200+X`` to ``720+X`` so the C function reads the
+    AP-delivered bit instead of the recruit bit.
+    """
+
+    for bin_offset, _expected_old, new_trigger in ROM_GETTOPCITY_TRIGGER_PATCHES:
+        patch.write_token(
+            APTokenTypes.WRITE,
+            bin_offset,
+            struct.pack(ROM_GETTOPCITY_TRIGGER_FORMAT, new_trigger),
+        )
+
+
 def _write_field_spawn_trigger_patches(patch: DigimonWorldProcedurePatch) -> None:
     """Rewrite per-Digimon field-spawn trigger IDs from 200+X to 720+X.
 
@@ -709,6 +745,43 @@ def _write_spawn_rate_boost_tokens(
         patch.write_token(APTokenTypes.WRITE, offset, small_bytes)
 
 
+def _write_combat_multiplier_tokens(
+    patch: DigimonWorldProcedurePatch, factor: int,
+) -> None:
+    """Install the combat stat-gain trampolines and patch the three sites.
+
+    No-op when ``factor <= 1`` — vanilla behavior. Otherwise: writes
+    three small trampoline blobs into Cave6 free-space (immediately
+    after the isTriggerSet wrapper) and rewrites the three ``sh`` /
+    ``beq+sh`` sites in vanilla ``battleStatsGainsAndDrops`` to
+    ``j <trampoline>``. See the block comment in ``addresses.py`` for
+    the full address derivation.
+    """
+
+    if factor <= 1:
+        return
+
+    tr1, tr2, tr3 = build_combat_multiplier_trampolines(factor)
+    patch.write_token(APTokenTypes.WRITE, ROM_COMBAT_TR1_OFFSET, tr1)
+    patch.write_token(APTokenTypes.WRITE, ROM_COMBAT_TR2_OFFSET, tr2)
+    patch.write_token(APTokenTypes.WRITE, ROM_COMBAT_TR3_OFFSET, tr3)
+    patch.write_token(
+        APTokenTypes.WRITE,
+        ROM_COMBAT_SITE1_OFFSET,
+        struct.pack(ROM_COMBAT_SITE1_FORMAT, *ROM_COMBAT_SITE1_VALUE),
+    )
+    patch.write_token(
+        APTokenTypes.WRITE,
+        ROM_COMBAT_SITE2_OFFSET,
+        struct.pack(ROM_COMBAT_SITE2_FORMAT, *ROM_COMBAT_SITE2_VALUE),
+    )
+    patch.write_token(
+        APTokenTypes.WRITE,
+        ROM_COMBAT_SITE3_OFFSET,
+        struct.pack(ROM_COMBAT_SITE3_FORMAT, *ROM_COMBAT_SITE3_VALUE),
+    )
+
+
 # =============================================================================
 # Generation-time helper (called from world.py:generate_output)
 # =============================================================================
@@ -754,6 +827,7 @@ def write_patch(world: DigimonWorldWorld, output_directory: str) -> None:
     _write_softlock_fix_tokens(patch)
     _write_chest_item_tokens(patch, world)
     _write_field_spawn_trigger_patches(patch)  # Plan A: per-Digimon
+    _write_gettopcity_trigger_patches(patch)  # Plan A: Top City variants
 
     options = world.options
     if options.skip_intro:
@@ -761,6 +835,9 @@ def write_patch(world: DigimonWorldWorld, output_directory: str) -> None:
     if options.type_lock_unlocks:
         _write_type_lock_unlock_tokens(patch)
     _write_spawn_rate_boost_tokens(patch, int(options.spawn_rate_boost.value))
+    _write_combat_multiplier_tokens(
+        patch, int(options.combat_stat_multiplier.value),
+    )
 
     patch.write_file("token_data.bin", patch.get_token_binary())
 

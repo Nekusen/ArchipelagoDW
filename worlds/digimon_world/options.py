@@ -103,6 +103,32 @@ class StatGainMultiplier(Range):
     default = 1
 
 
+class CombatStatMultiplier(Range):
+    """Multiply combat stat-gain by this value (1 = vanilla rate).
+
+    DW1's ``battleStatsGainsAndDrops`` writes per-stat gains to a
+    6-entry table at RAM ``0x13D468`` at the end of each combat. This
+    option installs three small ROM trampolines in the Cave6
+    free-space region that scale each table write by the chosen factor
+    before the game applies the gain to the partner. Independent from
+    :class:`StatGainMultiplier` (which only affects training; the
+    training-boost flags at ``0x001384AC..0x001384B0`` aren't read by
+    combat code).
+
+    Default 1 (vanilla rate). Values around 100 give stat explosions
+    on most fights — useful for testing recruitment/progression
+    without grinding combat. If gains appear to plateau, the partner's
+    natural per-stat cap may be clamping them; raise
+    :class:`StatGainMultiplier` too (it pins the training cap-unlock
+    flag, which some downstream code paths consult).
+    """
+
+    display_name = "Combat Stat Multiplier"
+    range_start = 1
+    range_end = 100
+    default = 1
+
+
 class SpawnRateBoost(Range):
     """Encounter percentage for the four rare-spawn Digimon (Mamemon,
     Piximon, MetalMamemon, Otamamon).
@@ -135,6 +161,7 @@ class DigimonWorldOptions(PerGameCommonOptions):
     type_lock_unlocks: TypeLockUnlocks
     spawn_rate_boost: SpawnRateBoost
     stat_gain_multiplier: StatGainMultiplier
+    combat_stat_multiplier: CombatStatMultiplier
 
 
 option_groups: list[OptionGroup] = [
@@ -143,7 +170,7 @@ option_groups: list[OptionGroup] = [
         "Quality of Life",
         [
             FastDrimogemon, EasyMonochromon, SkipIntro, TypeLockUnlocks,
-            SpawnRateBoost, StatGainMultiplier,
+            SpawnRateBoost, StatGainMultiplier, CombatStatMultiplier,
         ],
     ),
 ]
