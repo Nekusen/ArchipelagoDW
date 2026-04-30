@@ -131,7 +131,11 @@
       "Bash(awk 'NR>=119310 && NR<=119395' references/DW1-Code/SLUS.asm)",
       "Bash(awk '/^== Script ID 0 /{flag=1;next} flag && /^== Script ID/{exit} flag && /trigger\\\\\\(204\\\\\\)/ {print NR\": \"$0}' references/digimon_world_randomizer/script/DW1Script.txt)",
       "Bash(awk '/^== Script ID/{sid=$4} /^Section_/ {sec=$1} /trigger\\\\\\(204\\\\\\)/ {print \"Script \"sid\": \"sec\" line \"NR\": \"$0}' references/digimon_world_randomizer/script/DW1Script.txt)",
-      "Bash(awk '/^== Script ID/{sid=$4} /^Section_/ {sec=$1} /loadDigimon 128/ {print \"Script \"sid\": \"sec\" line \"NR\": \"$0}' references/digimon_world_randomizer/script/DW1Script.txt)"
+      "Bash(awk '/^== Script ID/{sid=$4} /^Section_/ {sec=$1} /loadDigimon 128/ {print \"Script \"sid\": \"sec\" line \"NR\": \"$0}' references/digimon_world_randomizer/script/DW1Script.txt)",
+      "Bash(awk '/triggers:$/{name=$1} /Recruitable / {print name, $0}' references/digimon_world_randomizer/info.txt)",
+      "Bash(awk '/triggers:$/{name=$1; print \"----\", name, \"----\"} /^[ \\\\t]+[0-9]+ +\\(Recruitable|Wild|Spawn|hangin|Rumor|Coelamon|Betamon|Wild\\)/ {print \"  \", $0}' references/digimon_world_randomizer/info.txt)",
+      "Bash(awk 'NR>=2257 && NR<=2400' references/digimon_world_randomizer/script/DW1Script.txt)",
+      "Bash(python -m pytest worlds/digimon_world/test/ --tb=short)"
     ]
   }
 }

@@ -2257,11 +2257,47 @@ assert ROM_CHANGEMAP_PATCH_VALUE == 0x0C025600, hex(ROM_CHANGEMAP_PATCH_VALUE)
 # recruits get added.
 
 ROM_FIELD_SPAWN_TRIGGER_FORMAT: Final = "<H"
+# Each entry: (BIN offset of trigger-ID bytes, original ID, redirected ID).
+# Original = 200+X (vanilla "X recruited" gate). Redirected = 720+X
+# (= our beaten-block bit, set only when AP delivers ``<X> Recruit``).
+# After patching: city-visibility scripts read bit 720+X, so the city
+# only shows X after AP delivery — independent of cutscene completion.
+#
+# All offsets verified against the source BIN: each starts with the
+# original trigger ID (LE 2 bytes) followed by ``18 00`` opcode bytes.
+# Pattern source: ``Section_X`` of various scripts, where the script
+# binds the recruit dialog (``setScript dialog X``) then gates the
+# load via ``if trigger(200+id) == TRUE then SKIP loadDigimon model``.
 ROM_FIELD_SPAWN_TRIGGER_PATCHES: Final = (
-    # Betamon: Section_15 (his wild encounter screen) line 1978
-    # `if trigger(204) == TRUE then SKIP loadDigimon` → use trigger 724.
-    # info.txt:758 marks this as "Recruitable Betamon".
-    (0x13FD6576, 204, 724),
+    (0x13FD627A, 232, 752),  # Kunemon (script 0 byte 1214)
+    (0x13FD62D6, 246, 766),  # Palmon (script 0 byte 1306)
+    (0x13FD630C, 242, 762),  # Etemon (script 0 byte 1360)
+    (0x13FD6576, 204, 724),  # Betamon (script 0 byte 1978) — verified working
+    (0x13FD696A, 209, 729),  # Meramon (script 0 byte 2686)
+    (0x13FD6998, 209, 729),  # Meramon (script 0 byte 2732, 2nd gate)
+    (0x13FD69B8, 238, 758),  # Drimogemon (script 0 byte 2764)
+    (0x13FD6A34, 237, 757),  # Bakemon (script 0 byte 2888)
+    (0x13FD6D70, 247, 767),  # Monochromon (script 0 byte 3716)
+    (0x13FD7106, 218, 738),  # Elecmon (script 0 byte 4330)
+    (0x13FD715E, 231, 751),  # Patamon (script 0 byte 4418)
+    (0x13FD71AC, 245, 765),  # Biyomon (script 0 byte 4496)
+    (0x13FD797E, 219, 739),  # Kabuterimon (script 0 byte 6194)
+    (0x13FD79A8, 251, 771),  # Kuwagamon (script 0 byte 6236)
+    (0x13FD7C5A, 217, 737),  # Gabumon (script 0 byte 6926)
+    (0x13FD7E36, 257, 777),  # Penguinmon (script 0 byte 7402)
+    (0x13FD7EE2, 223, 743),  # Frigimon (script 0 byte 7574)
+    (0x13FD84B8, 241, 761),  # Giromon (script 0 byte 8764)
+    (0x13FE9764, 236, 756),  # Centarumon (script 17 byte 328)
+    (0x13FF44D8, 209, 729),  # Meramon (script 30 byte 44, 3rd gate)
+    (0x13FFFC7C, 247, 767),  # Monochromon (script 49 byte 16, 2nd gate)
+    (0x1403F85C, 257, 777),  # Penguinmon (script 131 byte 32, 2nd gate)
+    (0x14043B3A, 205, 725),  # Greymon (script 135 byte 4782)
+    (0x14057792, 239, 759),  # Sukamon (script 159 byte 5798)
+    (0x14059D20, 250, 770),  # Kokatorimon (script 162 byte 1908)
+    (0x1405ACB0, 246, 766),  # Palmon (script 162 byte 5284, 2nd gate)
+    (0x1405AF5A, 225, 745),  # Vegiemon (script 162 byte 5966)
+    (0x1405B1FE, 224, 744),  # Whamon (script 162 byte 6338)
+    (0x1405E4C6, 232, 752),  # Kunemon (script 163 byte 7578, 2nd gate)
 )
 
 
