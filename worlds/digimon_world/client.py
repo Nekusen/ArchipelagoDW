@@ -97,6 +97,7 @@ from .data.addresses import (
     RAM_STAT_CAP,
     RAM_STAT_CAP_FLAG,
     RAM_STAT_GAIN_MULT,
+    RAM_TROPICAL_JUNGLE_BRIDGE_FIXED,
     RECRUIT_RAM_BITS,
     STAT_CAP_FLAG_TARGET,
     STAT_CAP_TARGET,
@@ -495,24 +496,42 @@ ITEM_DELIVERY_ROUTES: dict[str, ItemDeliverer] = _build_item_delivery_routes()
 # =============================================================================
 # items_received counter
 # =============================================================================
-# A 2-byte little-endian counter at ``0x001BDFEE..0x001BDFEF`` that the
-# client owns and increments after each successful delivery. The
-# counter is checked at the start of :meth:`_deliver_items` against
-# ``len(ctx.items_received)`` to skip already-delivered items on
-# reconnect — without it, additive deliveries (bank quantities, money)
-# would duplicate every reconnect.
+# 3 bytes at ``0x001BDFA9..0x001BDFAB`` — bank slots 125, 126, 127
+# (last three bytes of the bank region). The counter is checked at the
+# start of :meth:`_deliver_items` against ``len(ctx.items_received)`` to
+# skip already-delivered items on reconnect — without it, additive
+# deliveries (bank quantities, money) would duplicate every reconnect.
 #
-# Why this address: the bytes lie in the gap between the recruit-flag
-# region (ends at 0x001BDFED) and the next region of interest. They
-# stayed at 0 across **40 markers** of live play covering walking,
-# fighting, menus, item use, stat training, save-to-memory-card,
-# bank deposits/withdrawals, and multiple recruit/chest events. No
-# observed write by DW1 itself. Verified 2026-04-28.
+# Layout:
+#   * byte 0 (0x001BDFA9): magic = 0xA5 (corruption sentinel).
+#   * byte 1 (0x001BDFAA): counter low byte.
+#   * byte 2 (0x001BDFAB): counter high byte.
 #
-# 2 bytes = 65536 max items_received per slot, well above any
-# realistic seed size.
+# On read: if magic byte != 0xA5, treat counter as 0 (corrupted /
+# uninitialized). On write: always write all 3 bytes atomically so
+# magic is re-established with every delivery.
+#
+# Why this address: bank slots 125, 126, 127 correspond to item codes
+# 2125, 2126, 2127 — none of which exist in the AP item pool (max is
+# 2124). DW1 only writes to a bank slot when the player obtains the
+# item with the matching dw_code, so these bytes are guaranteed
+# untouched by gameplay.
+#
+# Previous address ``0x001BDFEE`` (gap B) was abandoned 2026-05-01:
+# the bytes at 0x001BDFEE / 0x001BDFEF correspond to triggers 264-279
+# in the trigger array, and the game sets ``trigger 274`` after every
+# scripted battle in scripts 1/2/101/105 (post-battle setTrigger),
+# which clobbered our counter HIGH byte to 0x04 mid-playthrough. The
+# magic sentinel below detects any future regression of the same kind.
 
-ITEMS_RECEIVED_COUNTER: tuple[int, int] | None = (0x001BDFEE, 2)
+ITEMS_RECEIVED_COUNTER_ADDR: int = 0x001BDFA9
+ITEMS_RECEIVED_COUNTER_SIZE: int = 3
+ITEMS_RECEIVED_COUNTER_MAGIC: int = 0xA5
+
+# Kept for back-compat — points at the full 3-byte block (magic + counter).
+ITEMS_RECEIVED_COUNTER: tuple[int, int] | None = (
+    ITEMS_RECEIVED_COUNTER_ADDR, ITEMS_RECEIVED_COUNTER_SIZE,
+)
 
 
 # =============================================================================
@@ -557,6 +576,10 @@ class DigimonWorldClient(BizHawkClient):
         # Stat-gain multiplier (1..10). 1 = vanilla rate, no enforcer
         # writes. Driven by slot_data.
         self._stat_gain_multiplier: int | None = None
+        # Tropical Jungle bridge: True = pin the bridge-fixed bit so
+        # the bridge is open from the start; False (vanilla) = leave
+        # the bit alone and let the in-game cutscene set it.
+        self._bridge_always_open: bool | None = None
     # ------------------------------------------------------------------
     # validate_rom
     # ------------------------------------------------------------------
@@ -627,6 +650,11 @@ class DigimonWorldClient(BizHawkClient):
             self._stat_gain_multiplier = int(
                 ctx.slot_data.get("stat_gain_multiplier", 1),
             )
+        if self._bridge_always_open is None and ctx.slot_data is not None:
+            # BridgeUnlock: 0 = always_open (default), 1 = vanilla.
+            self._bridge_always_open = (
+                int(ctx.slot_data.get("bridge_unlock", 0)) == 0
+            )
 
         try:
             await self._check_locations(ctx)
@@ -641,6 +669,8 @@ class DigimonWorldClient(BizHawkClient):
                 await self._enforce_stat_gain_multiplier(ctx)
             await self._enforce_prosperity(ctx)
             await self._enforce_agumon_recruited(ctx)
+            if self._bridge_always_open:
+                await self._enforce_bridge_always_open(ctx)
             await self._check_goal(ctx)
         except bizhawk.RequestFailedError:
             # Lua connector failed to respond; exit the handler and
@@ -816,6 +846,30 @@ class DigimonWorldClient(BizHawkClient):
             ))
         if writes:
             await bizhawk.write(ctx.bizhawk_ctx, writes)
+
+    async def _enforce_bridge_always_open(self, ctx: BizHawkClientContext) -> None:
+        """Pin the Tropical Jungle bridge-fixed trigger bit.
+
+        Mirrors :meth:`_enforce_agumon_recruited`: read the byte, OR in
+        the target bit if it's not already set, write back. The bit is
+        sticky in the save file once set, so this is effectively a
+        one-time write per save load. Cheap: one byte read, at most
+        one byte write per tick.
+        """
+
+        byte_addr, bit_index = RAM_TROPICAL_JUNGLE_BRIDGE_FIXED
+        bit_mask = 1 << bit_index
+        current = (await bizhawk.read(
+            ctx.bizhawk_ctx, [(byte_addr, 1, DOMAIN_MAIN_RAM)],
+        ))[0]
+        if not current:
+            return
+        if current[0] & bit_mask:
+            return  # already set
+        await bizhawk.write(
+            ctx.bizhawk_ctx,
+            [(byte_addr, [current[0] | bit_mask], DOMAIN_MAIN_RAM)],
+        )
 
     async def _enforce_easy_monochromon(self, ctx: BizHawkClientContext) -> None:
         """Auto-resolve the Monochromon meat-trade minigame.
@@ -1002,21 +1056,33 @@ class DigimonWorldClient(BizHawkClient):
         if not ITEM_DELIVERY_ROUTES or ITEMS_RECEIVED_COUNTER is None:
             return
 
-        counter_address, counter_size = ITEMS_RECEIVED_COUNTER
+        # Read the 3-byte counter block: [magic, counter_lo, counter_hi].
+        # Treat a missing/wrong magic byte as "counter == 0" so a fresh
+        # save (block all zeros) starts delivery from item 0, and any
+        # accidental clobber is automatically self-healing on next write.
         counter_data = (await bizhawk.read(
             ctx.bizhawk_ctx,
-            [(counter_address, counter_size, DOMAIN_MAIN_RAM)],
+            [(ITEMS_RECEIVED_COUNTER_ADDR,
+              ITEMS_RECEIVED_COUNTER_SIZE, DOMAIN_MAIN_RAM)],
         ))[0]
-        applied = int.from_bytes(counter_data, "little")
+        if counter_data[0] == ITEMS_RECEIVED_COUNTER_MAGIC:
+            applied = int.from_bytes(counter_data[1:3], "little")
+        else:
+            applied = 0  # uninitialized or clobbered — start over
         if applied >= len(ctx.items_received):
             return  # nothing pending
 
         next_item = ctx.items_received[applied]
         item_name = ctx.item_names.lookup_in_game(next_item.item, ctx.game)
 
+        next_counter = applied + 1
         counter_advance: list[RamWrite] = [(
-            counter_address,
-            list((applied + 1).to_bytes(counter_size, "little")),
+            ITEMS_RECEIVED_COUNTER_ADDR,
+            [
+                ITEMS_RECEIVED_COUNTER_MAGIC,
+                next_counter & 0xFF,
+                (next_counter >> 8) & 0xFF,
+            ],
             DOMAIN_MAIN_RAM,
         )]
 
@@ -1083,6 +1149,9 @@ class DigimonWorldClient(BizHawkClient):
 __all__ = [
     "DOMAIN_MAIN_RAM",
     "ITEMS_RECEIVED_COUNTER",
+    "ITEMS_RECEIVED_COUNTER_ADDR",
+    "ITEMS_RECEIVED_COUNTER_SIZE",
+    "ITEMS_RECEIVED_COUNTER_MAGIC",
     "ITEM_DELIVERY_ROUTES",
     "LOCATION_RAM_BITS",
     "PROSPERITY_RAM_CAP",

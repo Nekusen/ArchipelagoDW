@@ -140,7 +140,15 @@
       "Bash(awk 'NR>=74720 && NR<=74900' references/DW1-Code/SLUS.asm)",
       "Bash(python -c \"from worlds.digimon_world.data import addresses; print\\('module imports OK'\\); print\\('site1 j-encoded:', hex\\(addresses.ROM_COMBAT_SITE1_VALUE[0]\\)\\); print\\('tr1@10 length:', len\\(addresses._build_combat_tr1_bytes\\(10\\)\\)\\); print\\('tr1@10 first 4 bytes:', addresses._build_combat_tr1_bytes\\(10\\)[:4].hex\\(\\)\\); print\\('tr1@100 first 4 bytes:', addresses._build_combat_tr1_bytes\\(100\\)[:4].hex\\(\\)\\)\")",
       "Bash(python -m pytest worlds/digimon_world/test -x --tb=short)",
-      "Bash(python -m pytest worlds/digimon_world/test/test_patcher.py -k \"qol or multiplier or stat or QoL\" -v --tb=short)"
+      "Bash(python -m pytest worlds/digimon_world/test/test_patcher.py -k \"qol or multiplier or stat or QoL\" -v --tb=short)",
+      "Bash(awk -F: '{print $1, $3}')",
+      "Bash(awk -F: '{if \\(NR <= 1 || \\($1 > 4350\\)\\) {if \\($1 <= 4350\\) prev=$0; else {print prev; print $0; exit}}}')",
+      "Bash(venv/Scripts/python.exe -m pytest worlds/digimon_world/test -q)",
+      "Bash(venv/Scripts/python.exe tools/generate_recruit_visibility_patches.py)",
+      "Bash(venv/Scripts/python.exe -m ruff check worlds/digimon_world/data/addresses.py)",
+      "Bash(venv/Scripts/python.exe tools/generate_recruit_patches_from_infotxt.py)",
+      "Bash(venv/Scripts/python.exe -m pytest worlds/digimon_world/test/test_client.py -q)",
+      "Bash(venv/Scripts/python.exe -m ruff check worlds/digimon_world/)"
     ]
   }
 }

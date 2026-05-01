@@ -65,6 +65,26 @@ class SkipIntro(DefaultOnToggle):
     display_name = "Skip Intro"
 
 
+class BridgeUnlock(Choice):
+    """Tropical Jungle bridge unlock state.
+
+    Vanilla DW1 keeps the bridge from Native Forest to Tropical Jungle
+    broken until the player triggers a cutscene by walking near it on
+    the Tropical Jungle side (which they can only reach after Coelamon
+    brings them across the first time).
+
+    * ``always_open`` — the bridge is open from the start (default).
+      The client pins bit 1 of :data:`RAM_TROPICAL_JUNGLE_BRIDGE_FIXED`
+      so the bit is always 1, even on a fresh save.
+    * ``vanilla`` — the unlock cutscene must trigger the bit organically.
+    """
+
+    display_name = "Tropical Jungle Bridge"
+    option_always_open = 0
+    option_vanilla = 1
+    default = option_always_open
+
+
 class TypeLockUnlocks(DefaultOnToggle):
     """Remove the Vaccine/Data/Virus/Monzaemon type gates on Greylord's
     Mansion, Ice Sanctuary, and Toy Town.
@@ -159,6 +179,7 @@ class DigimonWorldOptions(PerGameCommonOptions):
     easy_monochromon: EasyMonochromon
     skip_intro: SkipIntro
     type_lock_unlocks: TypeLockUnlocks
+    bridge_unlock: BridgeUnlock
     spawn_rate_boost: SpawnRateBoost
     stat_gain_multiplier: StatGainMultiplier
     combat_stat_multiplier: CombatStatMultiplier
@@ -170,7 +191,7 @@ option_groups: list[OptionGroup] = [
         "Quality of Life",
         [
             FastDrimogemon, EasyMonochromon, SkipIntro, TypeLockUnlocks,
-            SpawnRateBoost, StatGainMultiplier, CombatStatMultiplier,
+            BridgeUnlock, SpawnRateBoost, StatGainMultiplier, CombatStatMultiplier,
         ],
     ),
 ]

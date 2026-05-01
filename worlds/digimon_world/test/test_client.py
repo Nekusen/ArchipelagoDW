@@ -235,21 +235,39 @@ class TestItemsReceivedCounter(DigimonWorldTestBase):
         self.assertGreaterEqual(size, 1)
         self.assertLessEqual(size, 4)
 
-    def test_counter_outside_known_used_regions(self) -> None:
+    def test_counter_does_not_collide_with_location_bits(self) -> None:
         assert ITEMS_RECEIVED_COUNTER is not None
         counter_addr, counter_size = ITEMS_RECEIVED_COUNTER
         counter_range = range(counter_addr, counter_addr + counter_size)
-
-        used_addrs: set[int] = set()
-        for addr, _bit in LOCATION_RAM_BITS.values():
-            used_addrs.add(addr)
-        from ..data.addresses import RAM_ITEM_BANK_BASE, RAM_ITEM_BANK_SIZE
-        used_addrs.update(range(
-            RAM_ITEM_BANK_BASE,
-            RAM_ITEM_BANK_BASE + RAM_ITEM_BANK_SIZE,
-        ))
+        location_addrs: set[int] = {
+            addr for addr, _bit in LOCATION_RAM_BITS.values()
+        }
         for byte_addr in counter_range:
-            self.assertNotIn(byte_addr, used_addrs)
+            self.assertNotIn(byte_addr, location_addrs)
+
+    def test_counter_uses_unused_bank_slots(self) -> None:
+        # Counter lives in the bank region but in slots beyond the
+        # highest assigned item dw_code, so DW1's bank-deposit code
+        # never writes to these bytes during normal play.
+        from ..data.addresses import RAM_ITEM_BANK_BASE
+        from ..items import ITEM_NAME_TO_ID, ITEM_ID_BASE
+        assert ITEMS_RECEIVED_COUNTER is not None
+        counter_addr, counter_size = ITEMS_RECEIVED_COUNTER
+        # Compute the set of slots actually used by AP items.
+        used_slots: set[int] = set()
+        for ap_id in ITEM_NAME_TO_ID.values():
+            dw_code = ap_id - ITEM_ID_BASE
+            if 2000 <= dw_code <= 2127:
+                used_slots.add(dw_code - 2000)
+        for byte_addr in range(counter_addr, counter_addr + counter_size):
+            slot = byte_addr - RAM_ITEM_BANK_BASE
+            self.assertGreaterEqual(slot, 0,
+                f"counter byte 0x{byte_addr:08X} is below bank base")
+            self.assertLess(slot, 128,
+                f"counter byte 0x{byte_addr:08X} is past bank end (slot 128)")
+            self.assertNotIn(slot, used_slots,
+                f"counter byte 0x{byte_addr:08X} (slot {slot}) "
+                f"collides with an AP item")
 
 
 # =============================================================================

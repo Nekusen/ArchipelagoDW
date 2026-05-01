@@ -2311,35 +2311,426 @@ ROM_FIELD_SPAWN_TRIGGER_FORMAT: Final = "<H"
 # binds the recruit dialog (``setScript dialog X``) then gates the
 # load via ``if trigger(200+id) == TRUE then SKIP loadDigimon model``.
 ROM_FIELD_SPAWN_TRIGGER_PATCHES: Final = (
-    (0x13FD627A, 232, 752),  # Kunemon (script 0 byte 1214)
-    (0x13FD62D6, 246, 766),  # Palmon (script 0 byte 1306)
-    (0x13FD630C, 242, 762),  # Etemon (script 0 byte 1360)
-    (0x13FD6576, 204, 724),  # Betamon (script 0 byte 1978) — verified working
-    (0x13FD696A, 209, 729),  # Meramon (script 0 byte 2686)
-    (0x13FD6998, 209, 729),  # Meramon (script 0 byte 2732, 2nd gate)
-    (0x13FD69B8, 238, 758),  # Drimogemon (script 0 byte 2764)
-    (0x13FD6A34, 237, 757),  # Bakemon (script 0 byte 2888)
-    (0x13FD6D70, 247, 767),  # Monochromon (script 0 byte 3716)
-    (0x13FD7106, 218, 738),  # Elecmon (script 0 byte 4330)
-    (0x13FD715E, 231, 751),  # Patamon (script 0 byte 4418)
-    (0x13FD71AC, 245, 765),  # Biyomon (script 0 byte 4496)
-    (0x13FD797E, 219, 739),  # Kabuterimon (script 0 byte 6194)
-    (0x13FD79A8, 251, 771),  # Kuwagamon (script 0 byte 6236)
-    (0x13FD7C5A, 217, 737),  # Gabumon (script 0 byte 6926)
-    (0x13FD7E36, 257, 777),  # Penguinmon (script 0 byte 7402)
-    (0x13FD7EE2, 223, 743),  # Frigimon (script 0 byte 7574)
-    (0x13FD84B8, 241, 761),  # Giromon (script 0 byte 8764)
-    (0x13FE9764, 236, 756),  # Centarumon (script 17 byte 328)
-    (0x13FF44D8, 209, 729),  # Meramon (script 30 byte 44, 3rd gate)
-    (0x13FFFC7C, 247, 767),  # Monochromon (script 49 byte 16, 2nd gate)
-    (0x1403F85C, 257, 777),  # Penguinmon (script 131 byte 32, 2nd gate)
-    (0x14043B3A, 205, 725),  # Greymon (script 135 byte 4782)
-    (0x14057792, 239, 759),  # Sukamon (script 159 byte 5798)
-    (0x14059D20, 250, 770),  # Kokatorimon (script 162 byte 1908)
-    (0x1405ACB0, 246, 766),  # Palmon (script 162 byte 5284, 2nd gate)
-    (0x1405AF5A, 225, 745),  # Vegiemon (script 162 byte 5966)
-    (0x1405B1FE, 224, 744),  # Whamon (script 162 byte 6338)
-    (0x1405E4C6, 232, 752),  # Kunemon (script 163 byte 7578, 2nd gate)
+    # ====================================================================
+    # info.txt MUST-CHANGE — 298 entries across 37 recruits.
+    # Wild-spawn / cutscene / story-flow gates (info.txt NO TOUCH list)
+    # are NEVER patched — those would softlock recruits with chained
+    # quest progression. See memory dw1_wild_spawn_gates_no_patch.md.
+    # ====================================================================
+    # ----- Betamon (21 sites) -----
+    (0x13FD893A, 204, 724),  # 09918   Spawn shop
+    (0x13FD8A4A, 204, 724),  # 10190   Spawn shop
+    (0x13FE503A, 204, 724),  # 02974   Spawn shop
+    (0x13FE581A, 204, 724),  # 00590   Spawn shop
+    (0x1402BBE6, 204, 724),  # 01338   Spawn shop
+    (0x14059A40, 204, 724),  # 01172   Spawn shop
+    (0x1405C40A, 204, 724),  # 00110   Spawn some objects?
+    (0x1405C6A2, 204, 724),  # 00774   More shop stuff
+    (0x1405CA20, 204, 724),  # 01668   Coelamon intro check
+    (0x1405CB42, 204, 724),  # 01958   Coelamon + Betamon intro together
+    (0x1405CD5C, 204, 724),  # 02192   Set shop items buyable
+    (0x1405E044, 204, 724),  # 06416   Coelamon intro check
+    (0x1405E222, 204, 724),  # 06902   Betamon intro
+    (0x1405E344, 204, 724),  # 07192   Coelamon + Betamon intro together
+    (0x1405E420, 204, 724),  # 07412   Set shop items buyable
+    (0x1405E9B0, 204, 724),  # 00340   Spawn shop
+    (0x14063CE2, 204, 724),  # 02518   Spawn shop
+    (0x1406AB0A, 204, 724),  # 02494   Spawn shop
+    (0x1406BC52, 204, 724),  # 02214   Spawn shop
+    (0x1406D050, 204, 724),  # 02628   Spawn shop
+    (0x1406D7E6, 204, 724),  # 00170   Spawn shop
+    # ----- Devimon (6 sites) -----
+    (0x13FD9634, 206, 726),  # 12632   Devimon intro
+    (0x13FD9718, 206, 726),  # 12860   Devimon hangin out
+    (0x13FE44A2, 206, 726),  # 00310   Spawn secret shop
+    (0x1406D75C, 206, 726),  # 00032   Spawn secret shop
+    (0x1406FE82, 206, 726),  # 02694   Devimon shop intro
+    (0x140701D2, 206, 726),  # 03542   Devimon shop intro
+    # ----- Tyrannomon (9 sites) -----
+    (0x13FD8FF6, 208, 728),  # _214    11338   Tyrannomon intro
+    (0x13FD9120, 208, 728),  # _214    11636   Tyrannomon hangin out
+    (0x13FD9198, 208, 728),  # _215    11756   Tyrannomon intro
+    (0x13FD92C2, 208, 728),  # _215    12056   Tyrannomon hangin out
+    (0x1406B3DE, 208, 728),  # _254    00354   Tyrannomon intro as chef
+    (0x1406B784, 208, 728),  # _254    01288   Tyrannomon intro as chef alternate
+    (0x1406C646, 208, 728),  # _81     00362   Tyrannomon intro as chef
+    (0x1406C9E6, 208, 728),  # _81     01290   Tyrannomon intro as chef alternate
+    (0x140AD37A, 208, 728),  # _51     00110   Restaurant dialog
+    # ----- Meramon (42 sites) -----
+    (0x140BA15A, 209, 729),  # _214    11310   Meramon intro
+    (0x140BA288, 209, 729),  # _214    11612   Meramon hangin out
+    (0x13FD917C, 209, 729),  # _215    11728   Meramon intro
+    (0x13FD92AA, 209, 729),  # _215    12030   Meramon hangin out
+    (0x13FE5056, 209, 729),  # _52     03002   Show restaurant
+    (0x13FE513A, 209, 729),  # _52     03230   Show restaurant
+    (0x13FE521E, 209, 729),  # _52     03458   Show restaurant
+    (0x13FE5836, 209, 729),  # _52     00618   Show restaurant
+    (0x13FE591A, 209, 729),  # _52     00846   Show restaurant
+    (0x13FE59FE, 209, 729),  # _52     01074   Show restaurant
+    (0x13FE5D4E, 209, 729),  # _51     01366   Show restaurant
+    (0x1402BC02, 209, 729),  # _51     01594   Show restaurant
+    (0x1402BCE6, 209, 729),  # _51     01822   Show restaurant
+    (0x1402BDCA, 209, 729),  # _81     00390   Show restaurant
+    (0x1402C5CA, 209, 729),  # _254    00756   Show restaurant
+    (0x1402C6AE, 209, 729),  # _51     01200   Show restaurant
+    (0x1402C792, 209, 729),  # _51     01428   Show restaurant
+    (0x14051FC2, 209, 729),  # _51     01656   Show restaurant
+    (0x14052186, 209, 729),  # _254    00534   Show restaurant
+    (0x140598A0, 209, 729),  # _51     00368   Show restaurant
+    (0x14059A5C, 209, 729),  # _51     00596   Show restaurant
+    (0x14059B40, 209, 729),  # _51     00824   Show restaurant
+    (0x14059C24, 209, 729),  # _52     02546   Show restaurant
+    (0x1405BFAA, 209, 729),  # _52     02774   Show restaurant
+    (0x1405C166, 209, 729),  # _52     03002   Show restaurant
+    (0x1405C24A, 209, 729),  # _51     02522   Show restaurant
+    (0x1405C5B2, 209, 729),  # _51     02750   Show restaurant
+    (0x1405E9CC, 209, 729),  # _51     02978   Show restaurant
+    (0x1406B2B2, 209, 729),  # _81     00054   Meramon intro as chef
+    (0x1406B6C2, 209, 729),  # _81     01094   Meramon intro as chef alternate
+    (0x1405EAB0, 209, 729),  # _51     02242   Show restaurant
+    (0x1405EB94, 209, 729),  # _51     02470   Show restaurant
+    (0x140608AC, 209, 729),  # _51     02698   Show restaurant
+    (0x1406C516, 209, 729),  # _81     00058   Meramon intro as chef
+    (0x1406C910, 209, 729),  # _81     01076   Meramon intro as chef alternate
+    (0x14060990, 209, 729),  # _51     02656   Show restaurant
+    (0x14060A74, 209, 729),  # _51     02884   Show restaurant
+    (0x14063CFE, 209, 729),  # _51     03114   Show restaurant
+    (0x14063DE2, 209, 729),  # _51     00198   Show restaurant
+    (0x14063EC6, 209, 729),  # _51     00426   Show restaurant
+    (0x1406AB26, 209, 729),  # _51     00654   Show restaurant
+    (0x140AD31A, 209, 729),  # _51     00014   Restaurant dialog
+    # ----- Numemon (6 sites) -----
+    (0x13FD95E0, 211, 731),  # 12548   Numemon intro
+    (0x13FD96D0, 211, 731),  # 12788   Numemon hangin out
+    (0x13FE44A6, 211, 731),  # 00310   Spawn secret shop       19000000CE004000D3004000FC00
+    (0x1406D760, 211, 731),  # 00032   Spawn secret shop       19000000CE004000D3004000D500
+    (0x1406FC62, 211, 731),  # 02150   Numemon intro
+    (0x1406FFC8, 211, 731),  # 03020   Numemon intro
+    # ----- Mamemon (6 sites) -----
+    (0x13FD9618, 213, 733),  # 12604   Mamemon intro
+    (0x13FD9700, 213, 733),  # 12836   Mamemon hangin out
+    (0x13FE44AE, 213, 733),  # 00310   Spawn secret shop
+    (0x1406D764, 213, 733),  # 00032   Spawn secret shop
+    (0x1406FDDC, 213, 733),  # 02528   Mamemon shop intro
+    (0x1407012E, 213, 733),  # 03378   Mamemon shop intro
+    # ----- Gabumon (3 sites) -----
+    (0x13FD8F0C, 217, 737),  # 11104   Gabumon at treasure hunt
+    (0x140672CE, 217, 737),  # 02210   Gabumon treasure hunt results
+    (0x14067588, 217, 737),  # 02908   Gabumon treasure hunt results
+    # ----- Elecmon (8 sites) -----
+    (0x13FD89F0, 218, 738),  # _192    10096   Elecmon intro
+    (0x13FD8C72, 218, 738),  # _192    10438   Show elecmon hanging out
+    (0x1405997A, 218, 738),  # _162    00974   Show objects (lights?)
+    (0x1405C4E6, 218, 738),  # _163    00330   some other object shared with shellmon
+    (0x1405C556, 218, 738),  # _163    00442   more objects (night only)
+    (0x1405C56A, 218, 738),  # _163    00462   more objects
+    (0x1405C596, 218, 738),  # _163    00506   more objetcs (night only)
+    (0x1405C5E2, 218, 738),  # _163    00582   more objects
+    # ----- Kabuterimon (7 sites) -----
+    (0x13FD7A70, 219, 739),  # 06436   Kabuterimon hangin out
+    (0x1402DBAC, 219, 739),  # 00064   Revised HP training sign
+    (0x1402DE34, 219, 739),  # 00712   Revised MP training sign
+    (0x1402E090, 219, 739),  # 01316   Revised OFF training sign
+    (0x1402E308, 219, 739),  # 01948   Revised DEF training sign
+    (0x1402E6BE, 219, 739),  # 02594   Revised SPD training sign
+    (0x1402E900, 219, 739),  # 03172   Revised BRN training sign
+    # ----- Garurumon (9 sites) -----
+    (0x13FD9012, 222, 742),  # _214    11366   Garurumon intro
+    (0x13FD9138, 222, 742),  # _214    11660   Garurumon hangin out
+    (0x13FD91B4, 222, 742),  # _215    11784   Garurumon intro
+    (0x13FD92DA, 222, 742),  # _215    12078   Garurumon hangin out
+    (0x1406B4DA, 222, 742),  # _81     00606   Garurumon intro as chef
+    (0x1406B880, 222, 742),  # _81     01540   Garurumon intro as chef alternate
+    (0x1406C742, 222, 742),  # _81     00614   Garurumon intro as chef
+    (0x1406CADA, 222, 742),  # _81     01534   Garurumon intro as chef alternate
+    (0x140AD3C6, 222, 742),  # _51     00186   Restaurant dialog
+    # ----- Frigimon (9 sites) -----
+    (0x13FD902E, 223, 743),  # _214    11394   Frigimon intro
+    (0x13FD9150, 223, 743),  # _214    11684   Frigimon hangin out
+    (0x13FD91D0, 223, 743),  # _215    11812   Frigimon intro
+    (0x13FD92F2, 223, 743),  # _215    12102   Frigimon hangin out
+    (0x1406B5E0, 223, 743),  # _81     00868   Frigimon intro as chef
+    (0x1406B99A, 223, 743),  # _81     01822   Frigimon intro as chef alternate
+    (0x1406C844, 223, 743),  # _81     00872   Frigimon intro as chef
+    (0x1406CC16, 223, 743),  # _81     01850   Frigimon intro as chef alternate
+    (0x140AEEAA, 223, 743),  # _51     00014   Restaurant dialog
+    # ----- Whamon (3 sites) -----
+    (0x13FD86FC, 224, 744),  # 09344   Whamon hangin out
+    (0x1405986C, 224, 744),  # 00704   Whamon's dock?
+    (0x1405B1FE, 224, 744),  # 06338   Whamon service
+    # ----- MetalMamemon (1 sites) -----
+    (0x13FD9982, 227, 747),  # 13478   MetalMamemon hangin out in curling
+    # ----- Vademon (3 sites) -----
+    (0x13FD904E, 228, 748),  # 11426   20% chance Vademon shows up in top (new house)
+    (0x13FD91F0, 228, 748),  # 11844   20% chance Vademon shows up in top (new house + palm
+    (0x140AEEEA, 228, 748),  # 00078   Restaurant dialog
+    # ----- Patamon (23 sites) -----
+    (0x13FD8946, 231, 751),  # 09930   Spawn shop
+    (0x13FD8A56, 231, 751),  # 10202   Spawn shop
+    (0x13FD8FA2, 231, 751),  # 11254   Spawn shop
+    (0x13FD931E, 231, 751),  # 12146   In the item shop
+    (0x13FD9560, 231, 751),  # 12420   In the item shop
+    (0x13FE5016, 231, 751),  # 02938   Spawn shop
+    (0x13FE57F6, 231, 751),  # 00554   Spawn shop
+    (0x1402BBC2, 231, 751),  # 01302   Spawn shop
+    (0x140598D8, 231, 751),  # 00812   Spawn shop
+    (0x14059A1C, 231, 751),  # 01136   Spawn shop
+    (0x1405C3EA, 231, 751),  # 00078   Spawn shop
+    (0x1405C6B0, 231, 751),  # 00788   Spawn shop
+    (0x1405C972, 231, 751),  # 01494   Spawn shop
+    (0x1405E98C, 231, 751),  # 00304   Spawn shop
+    (0x14063CBE, 231, 751),  # 02482   Spawn shop
+    (0x1406AAE6, 231, 751),  # 02458   Spawn shop
+    (0x1406BC2E, 231, 751),  # 02178   Spawn shop
+    (0x1406D02C, 231, 751),  # 02592   Spawn shop
+    (0x1406D7C2, 231, 751),  # 00134   Spawn shop
+    (0x1406DADE, 231, 751),  # 00930   Patamon intro (makes the shop)
+    (0x1406E176, 231, 751),  # 02314   Patamon intro (joins the shop)
+    (0x1407056C, 231, 751),  # 00064   Spawn shop
+    (0x14072670, 231, 751),  # 07604   Spawn shop
+    # ----- Kunemon (8 sites) -----
+    (0x13FD89B2, 232, 752),  # 10034   Kunemon hangin out
+    (0x13FD8CAE, 232, 752),  # 10498   Kunemon intro
+    (0x13FE438C, 232, 752),  # 00032   Remove wall at digimon bridge?
+    (0x13FE43B0, 232, 752),  # 00068   Other objects?
+    (0x13FE55F0, 232, 752),  # 00036   More objects
+    (0x13FE5614, 232, 752),  # 00072   More objects
+    (0x1405C50E, 232, 752),  # 00370   More objects
+    (0x1405E4C6, 232, 752),  # 07578   Warp between bridge and file city
+    # ----- Unimon (23 sites) -----
+    (0x13FD894E, 233, 753),  # 09930   Spawn shop
+    (0x13FD8A5E, 233, 753),  # 10202   Spawn shop
+    (0x13FD8FAA, 233, 753),  # 11254   Spawn shop
+    (0x13FD9356, 233, 753),  # 12202   In the item shop
+    (0x13FD9590, 233, 753),  # 12468   In the item shop
+    (0x13FE501E, 233, 753),  # 02938   Spawn shop
+    (0x13FE57FE, 233, 753),  # 00554   Spawn shop
+    (0x1402BBCA, 233, 753),  # 01302   Spawn shop
+    (0x140598E0, 233, 753),  # 00812   Spawn shop
+    (0x14059A24, 233, 753),  # 01136   Spawn shop
+    (0x1405C3F2, 233, 753),  # 00078   Spawn shop
+    (0x1405C6B8, 233, 753),  # 00788   Spawn shop
+    (0x1405C97A, 233, 753),  # 01494   Spawn shop
+    (0x1405E994, 233, 753),  # 00304   Spawn shop
+    (0x14063CC6, 233, 753),  # 02482   Spawn shop
+    (0x1406AAEE, 233, 753),  # 02458   Spawn shop
+    (0x1406BC36, 233, 753),  # 02178   Spawn shop
+    (0x1406D034, 233, 753),  # 02592   Spawn shop
+    (0x1406D7CA, 233, 753),  # 00134   Spawn shop
+    (0x1406DDC2, 233, 753),  # 01670   Unimon intro (makes the shop)
+    (0x1406E30A, 233, 753),  # 02718   Unimon intro (joins the shop)
+    (0x14070574, 233, 753),  # 00064   Spawn shop
+    (0x14072678, 233, 753),  # 07604   Spawn shop
+    # ----- Ogremon (1 sites) -----
+    (0x13FD8BD2, 234, 754),  # 10278   Ogremon chillin
+    # ----- Shellmon (6 sites) -----
+    (0x13FD898A, 235, 755),  # 09994   Shellmon hangin out
+    (0x13FD8BBE, 235, 755),  # 10254   Shellmon intro
+    (0x13FD8BF6, 235, 755),  # 10314   Shellmon intro
+    (0x1405C496, 235, 755),  # 00250   Show objects
+    (0x1405C4EA, 235, 755),  # 00330   Show objects
+    (0x1405E4A4, 235, 755),  # 07544   Shellmon news stuff
+    # ----- Bakemon (2 sites) -----
+    (0x13FD8970, 237, 757),  # 09968   Bakemon intro
+    (0x13FD8C4A, 237, 757),  # 10398   Bakemon chillin
+    # ----- Drimogemon (2 sites) -----
+    (0x14059854, 238, 758),  # 00680   Show some objects
+    (0x1405B1E4, 238, 758),  # 06312   Treasure cave
+    # ----- Sukamon (1 sites) -----
+    (0x13FD87F6, 239, 759),  # 140B9976  09594   Sukamon hangin out
+    # ----- Andromon (1 sites) -----
+    (0x13FD8780, 240, 760),  # 09476   Andromon chillin
+    # ----- Giromon (1 sites) -----
+    (0x1405E514, 241, 761),  # 07656   Spawn jukebox
+    # ----- Etemon (1 sites) -----
+    (0x13FD63CA, 242, 762),  # 01550   Etemon hangin out
+    # ----- Biyomon (23 sites) -----
+    (0x13FD894A, 245, 765),  # 09930   Spawn shop
+    (0x13FD8A5A, 245, 765),  # 10202   Spawn shop
+    (0x13FD8FA6, 245, 765),  # 11254   Spawn shop
+    (0x13FD933A, 245, 765),  # 12174   In the item shop
+    (0x13FD9578, 245, 765),  # 12444   In the item shop
+    (0x13FE501A, 245, 765),  # 02938   Spawn shop
+    (0x13FE57FA, 245, 765),  # 00554   Spawn shop
+    (0x1402BBC6, 245, 765),  # 01302   Spawn shop
+    (0x140598DC, 245, 765),  # 00812   Spawn shop
+    (0x14059A20, 245, 765),  # 01136   Spawn shop
+    (0x1405C3EE, 245, 765),  # 00078   Spawn shop
+    (0x1405C6B4, 245, 765),  # 00788   Spawn shop
+    (0x1405C976, 245, 765),  # 01494   Spawn shop
+    (0x1405E990, 245, 765),  # 00304   Spawn shop
+    (0x14063CC2, 245, 765),  # 02482   Spawn shop
+    (0x1406AAEA, 245, 765),  # 02458   Spawn shop
+    (0x1406BC32, 245, 765),  # 02178   Spawn shop
+    (0x1406D030, 245, 765),  # 02592   Spawn shop
+    (0x1406D7C6, 245, 765),  # 00134   Spawn shop
+    (0x1406DC52, 245, 765),  # 01302   Biyomon intro (makes the shop)
+    (0x1406E240, 245, 765),  # 02516   Biyomon intro (joins the shop)
+    (0x14070570, 245, 765),  # 00064   Spawn shop
+    (0x14072674, 245, 765),  # 07604   Spawn shop
+    # ----- Monochromon (23 sites) -----
+    (0x13FD8952, 247, 767),  # 09930   Spawn shop
+    (0x13FD8A62, 247, 767),  # 10202   Spawn shop
+    (0x13FD8FAE, 247, 767),  # 11254   Spawn shop
+    (0x13FD9372, 247, 767),  # 12230   In the item shop
+    (0x13FD95A8, 247, 767),  # 12492   In the item shop
+    (0x13FE5022, 247, 767),  # 02938   Spawn shop
+    (0x13FE5802, 247, 767),  # 00554   Spawn shop
+    (0x1402BBCE, 247, 767),  # 01302   Spawn shop
+    (0x140598E4, 247, 767),  # 00812   Spawn shop
+    (0x14059A28, 247, 767),  # 01136   Spawn shop
+    (0x1405C3F6, 247, 767),  # 00078   Spawn shop
+    (0x1405C6BC, 247, 767),  # 00788   Spawn shop
+    (0x1405C97E, 247, 767),  # 01494   Spawn shop
+    (0x1405E998, 247, 767),  # 00304   Spawn shop
+    (0x14063CCA, 247, 767),  # 02482   Spawn shop
+    (0x1406AAF2, 247, 767),  # 02458   Spawn shop
+    (0x1406BC3A, 247, 767),  # 02178   Spawn shop
+    (0x1406D038, 247, 767),  # 02592   Spawn shop
+    (0x1406D7CE, 247, 767),  # 00134   Spawn shop
+    (0x1406DF30, 247, 767),  # 02036   Monochromon intro (makes the shop)
+    (0x1406E3BE, 247, 767),  # 02898   Monochromon intro (joins the shop)
+    (0x14070578, 247, 767),  # 00064   Spawn shop
+    (0x1407267C, 247, 767),  # 07604   Spawn shop
+    # ----- Leomon (1 sites) -----
+    (0x13FD8ED2, 248, 768),  # 11046   Leomon hangin out (birdra room)
+    # ----- Coelamon (27 sites) -----
+    (0x13FD8FBA, 249, 769),  # 11278   Coelamon hangin out
+    (0x13FE503E, 249, 769),  # 02974   Spawn shop
+    (0x13FE581E, 249, 769),  # 00590   Spawn shop
+    (0x1402BBEA, 249, 769),  # 01338   Spawn shop
+    (0x14059A44, 249, 769),  # 01172   Spawn shop
+    (0x1405C5FE, 249, 769),  # 00610   Shop stuff...?  In file city
+    (0x1405C612, 249, 769),  # 00630    "          "
+    (0x1405C626, 249, 769),  # 00650    "          "
+    (0x1405C63A, 249, 769),  # 00670    "          "
+    (0x1405C64E, 249, 769),  # 00690    "          "
+    (0x1405C662, 249, 769),  # 00710    "          "
+    (0x1405C676, 249, 769),  # 00730    "          "
+    (0x1405C68A, 249, 769),  # 00750    "          "
+    (0x1405CA28, 249, 769),  # 01668   Coelamon intro check
+    (0x1405CB46, 249, 769),  # 01958   Coelamon + Betamon intro together
+    (0x1405CD60, 249, 769),  # 02192   Set shop items buyable
+    (0x1405E03C, 249, 769),  # 06416   Coelamon intro check
+    (0x1405E22A, 249, 769),  # 06902   Betamon intro
+    (0x1405E348, 249, 769),  # 07192   Coelamon + Betamon intro together
+    (0x1405E424, 249, 769),  # 07412   Set shop items buyable
+    (0x1405E47C, 249, 769),  # 07504   Something to do with the shop
+    (0x1405E9B4, 249, 769),  # 00340   Spawn shop
+    (0x14063CE6, 249, 769),  # 02518   Spawn shop
+    (0x1406AB0E, 249, 769),  # 02494   Spawn shop
+    (0x1406BC56, 249, 769),  # 02214   Spawn shop
+    (0x1406D054, 249, 769),  # 02628   Spawn shop
+    (0x1406D7EA, 249, 769),  # 00170   Spawn shop
+    # ----- Kokatorimon (4 sites) -----
+    (0x13FD873A, 250, 770),  # 09402   Kokatorimon intro
+    (0x13FD87C6, 250, 770),  # 09546   Kokatorimon hangin out
+    (0x14059908, 250, 770),  # 00860   Spwan some objects
+    (0x1405994A, 250, 770),  # 00926   More objects
+    # ----- Kuwagamon (1 sites) -----
+    (0x13FD7A82, 251, 771),  # 01375   Kuwagamon in Green Gym
+    # ----- Mojyamon (6 sites) -----
+    (0x13FD95FC, 252, 772),  # 12576   Mojyamon intro
+    (0x13FD96E8, 252, 772),  # 12812   Mojyamon hangin out
+    (0x13FE44AA, 252, 772),  # 00310   Spawn secret shop
+    (0x1406D768, 252, 772),  # 00032   Spawn secret shop
+    (0x1406FD28, 252, 772),  # 02348   Mojyamon shop intro
+    (0x1407006E, 252, 772),  # 03186   Mojyamon shop intro
+    # ----- Nanimon (1 sites) -----
+    (0x13FD8F5A, 253, 773),  # 11182   Nanimon hangin out
+    # ----- Piximon (1 sites) -----
+    (0x13FD9396, 255, 775),  # 12266   Piximon hangin out
+    # ----- Digitamamon (3 sites) -----
+    (0x13FD906E, 256, 776),  # 11458   Digitamamon hangin out
+    (0x13FD9210, 256, 776),  # 11876   Digitamamon hangin out (with jukebox)
+    (0x140AEF36, 256, 776),  # 00154   Restaurant dialog
+    # ----- Penguinmon (5 sites) -----
+    (0x13FD999E, 257, 777),  # 13506   Penguinmon hangin out (in file city curling arena)
+    (0x14063218, 257, 777),  # 00060   Spawn curling arena
+    (0x14063250, 257, 777),  # 00116   Some objects in arena
+    (0x14095A7E, 257, 777),  # 00134   Some objects in arena
+    (0x140632A4, 257, 777),  # 00200   Warp to curling?
+    # ----- Ninjamon (1 sites) -----
+    (0x13FD95CE, 258, 778),  # 12530   Ninjamon hangin out
+    # ====================================================================
+    # Palmon — 72-site full sweep (no info.txt block; user-validated 2026-04-30).
+    # The standalone randomizer never randomized Palmon, so info.txt has
+    # no MUST-CHANGE block; we enumerated all trigger(246) reads via the
+    # script tool and verified each. Palmon is quest-recruited (no fight
+    # gate), so the full sweep is safe.
+    # ====================================================================
+    (0x13FD62D6, 246, 766),
+    (0x13FDCA08, 246, 766),
+    (0x13FDCA2C, 246, 766),
+    (0x13FDCA68, 246, 766),
+    (0x13FDCA8C, 246, 766),
+    (0x13FFEE66, 246, 766),
+    (0x13FFEE8A, 246, 766),
+    (0x13FFEEC6, 246, 766),
+    (0x13FFEEEA, 246, 766),
+    (0x1400ABFE, 246, 766),
+    (0x1400AC22, 246, 766),
+    (0x1400AC5E, 246, 766),
+    (0x1400AC82, 246, 766),
+    (0x14024B3C, 246, 766),
+    (0x14024B60, 246, 766),
+    (0x14024B9C, 246, 766),
+    (0x14024BC0, 246, 766),
+    (0x1402FBDC, 246, 766),
+    (0x1402FC00, 246, 766),
+    (0x1402FC3C, 246, 766),
+    (0x1402FC60, 246, 766),
+    (0x1403AB50, 246, 766),
+    (0x1403AB74, 246, 766),
+    (0x1403ABB0, 246, 766),
+    (0x1403ABD4, 246, 766),
+    (0x1404518C, 246, 766),
+    (0x140451B0, 246, 766),
+    (0x140451EC, 246, 766),
+    (0x14045210, 246, 766),
+    (0x1404C436, 246, 766),
+    (0x1404C45A, 246, 766),
+    (0x1404C496, 246, 766),
+    (0x1404C4BA, 246, 766),
+    (0x140583EC, 246, 766),
+    (0x14058410, 246, 766),
+    (0x1405844C, 246, 766),
+    (0x14058470, 246, 766),
+    (0x1405999A, 246, 766),
+    (0x140599C2, 246, 766),
+    (0x1405ACB0, 246, 766),
+    (0x1405AFAC, 246, 766),
+    (0x1405E5B8, 246, 766),
+    (0x1405E5DC, 246, 766),
+    (0x1405E618, 246, 766),
+    (0x1405E63C, 246, 766),
+    (0x14061B76, 246, 766),
+    (0x14061B9A, 246, 766),
+    (0x14061BD6, 246, 766),
+    (0x14061BFA, 246, 766),
+    (0x140620E0, 246, 766),
+    (0x14062104, 246, 766),
+    (0x14062140, 246, 766),
+    (0x14062164, 246, 766),
+    (0x14062C50, 246, 766),
+    (0x14062C74, 246, 766),
+    (0x14062CB0, 246, 766),
+    (0x14062CD4, 246, 766),
+    (0x14067954, 246, 766),
+    (0x14067978, 246, 766),
+    (0x140679B4, 246, 766),
+    (0x140679D8, 246, 766),
+    (0x140692A4, 246, 766),
+    (0x140692C8, 246, 766),
+    (0x14069304, 246, 766),
+    (0x14069328, 246, 766),
+    (0x14072A2E, 246, 766),
+    (0x14072A52, 246, 766),
+    (0x14072A8E, 246, 766),
+    (0x14072AB2, 246, 766),
+    (0x14097F3A, 246, 766),
+    (0x1409F97E, 246, 766),
+    (0x140B4266, 246, 766),
 )
 
 
