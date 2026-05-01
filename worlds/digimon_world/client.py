@@ -80,6 +80,10 @@ from .data.addresses import (
     FAST_DRIMOGEMON_DRIMO_STATE_TARGET,
     FAST_DRIMOGEMON_TUNNEL_STATE_TARGET,
     RAM_CURRENT_BITS,
+    RAM_CURRENT_BRAINS,
+    RAM_CURRENT_DEFENSE,
+    RAM_CURRENT_OFFENSE,
+    RAM_CURRENT_SPEED,
     RAM_HAS_BEATEN_DRIMOGEMON,
     RAM_INVENTORY_EMPTY_SLOT_ID,
     RAM_INVENTORY_ITEM_IDS_BASE,
@@ -87,12 +91,12 @@ from .data.addresses import (
     RAM_INVENTORY_SLOT_COUNT,
     RAM_ITEM_BANK_BASE,
     RAM_ITEM_BANK_SIZE,
+    RAM_MAX_HP,
+    RAM_MAX_MP,
     RAM_MERAMON_TUNNEL_DIGGING_STATE,
     RAM_MERAMON_TUNNEL_DRIMO_STATE,
     RAM_MERAMON_TUNNEL_STATE,
     RAM_MONOCHROME_PROFIT,
-    RAM_PERMANENT_BEATEN_SCRATCH_BASE,
-    RAM_PERMANENT_BEATEN_SCRATCH_SIZE,
     RAM_PROSPERITY_POINTS,
     RAM_STAT_CAP,
     RAM_STAT_CAP_FLAG,
@@ -580,6 +584,9 @@ class DigimonWorldClient(BizHawkClient):
         # the bridge is open from the start; False (vanilla) = leave
         # the bit alone and let the in-game cutscene set it.
         self._bridge_always_open: bool | None = None
+        # God Mode: when True, partner stats are pinned to near-max each
+        # tick. Testing-only.
+        self._god_mode: bool | None = None
     # ------------------------------------------------------------------
     # validate_rom
     # ------------------------------------------------------------------
@@ -655,6 +662,8 @@ class DigimonWorldClient(BizHawkClient):
             self._bridge_always_open = (
                 int(ctx.slot_data.get("bridge_unlock", 0)) == 0
             )
+        if self._god_mode is None and ctx.slot_data is not None:
+            self._god_mode = bool(ctx.slot_data.get("god_mode", 0))
 
         try:
             await self._check_locations(ctx)
@@ -671,6 +680,8 @@ class DigimonWorldClient(BizHawkClient):
             await self._enforce_agumon_recruited(ctx)
             if self._bridge_always_open:
                 await self._enforce_bridge_always_open(ctx)
+            if self._god_mode:
+                await self._enforce_god_mode(ctx)
             await self._check_goal(ctx)
         except bizhawk.RequestFailedError:
             # Lua connector failed to respond; exit the handler and
@@ -959,6 +970,45 @@ class DigimonWorldClient(BizHawkClient):
         if writes:
             await bizhawk.write(ctx.bizhawk_ctx, writes)
 
+    async def _enforce_god_mode(self, ctx: BizHawkClientContext) -> None:
+        """Pin partner stats to max while the GodMode option is on.
+
+        Writes ``999`` to Offense/Defense/Speed/Brain (each u16 LE) and
+        ``9999`` to Max HP / Max MP (each u16 LE). Only writes the
+        bytes that drift, so steady-state cost is one read per tick.
+
+        Testing aid only — see :class:`worlds.digimon_world.options.GodMode`.
+        """
+
+        stat_target = 999
+        max_hp_mp_target = 9999
+        targets: list[tuple[int, int]] = [
+            (RAM_CURRENT_OFFENSE, stat_target),
+            (RAM_CURRENT_DEFENSE, stat_target),
+            (RAM_CURRENT_SPEED, stat_target),
+            (RAM_CURRENT_BRAINS, stat_target),
+            (RAM_MAX_HP, max_hp_mp_target),
+            (RAM_MAX_MP, max_hp_mp_target),
+        ]
+        try:
+            blocks = await bizhawk.read(
+                ctx.bizhawk_ctx,
+                [(addr, 2, DOMAIN_MAIN_RAM) for addr, _ in targets],
+            )
+        except bizhawk.RequestFailedError:
+            return
+        if len(blocks) != len(targets) or any(len(b) != 2 for b in blocks):
+            return
+        writes: list[RamWrite] = []
+        for (addr, target), block in zip(targets, blocks, strict=True):
+            current = int.from_bytes(block, "little")
+            if current != target:
+                writes.append((
+                    addr, list(target.to_bytes(2, "little")), DOMAIN_MAIN_RAM,
+                ))
+        if writes:
+            await bizhawk.write(ctx.bizhawk_ctx, writes)
+
     async def _enforce_prosperity(self, ctx: BizHawkClientContext) -> None:
         """Pin the in-game prosperity byte to the AP-controlled value.
 
@@ -1150,8 +1200,8 @@ __all__ = [
     "DOMAIN_MAIN_RAM",
     "ITEMS_RECEIVED_COUNTER",
     "ITEMS_RECEIVED_COUNTER_ADDR",
-    "ITEMS_RECEIVED_COUNTER_SIZE",
     "ITEMS_RECEIVED_COUNTER_MAGIC",
+    "ITEMS_RECEIVED_COUNTER_SIZE",
     "ITEM_DELIVERY_ROUTES",
     "LOCATION_RAM_BITS",
     "PROSPERITY_RAM_CAP",

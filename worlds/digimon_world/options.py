@@ -12,7 +12,7 @@ plumbing it correctly is a Phase 4+ topic.
 
 from dataclasses import dataclass
 
-from Options import Choice, DefaultOnToggle, OptionGroup, PerGameCommonOptions, Range
+from Options import Choice, DefaultOnToggle, OptionGroup, PerGameCommonOptions, Range, Toggle
 
 
 class Goal(Choice):
@@ -172,6 +172,24 @@ class SpawnRateBoost(Range):
     default = 50
 
 
+class GodMode(Toggle):
+    """Pin partner Digimon's combat stats to max each client tick.
+
+    When on, the client writes the following values into the partner's
+    stat block at ``0x001557E0..0x001557F3`` every game watcher iteration
+    (only when any value drifts; cheap):
+
+    * Offense, Defense, Speed, Brain: ``999`` (in-game cap)
+    * Max HP, Max MP: ``9999``
+
+    Strictly a testing aid — leaves AP item placement and progression
+    logic untouched. **Do not enable for normal playthroughs**: with
+    god mode on, the combat-difficulty curve is meaningless.
+    """
+
+    display_name = "God Mode"
+
+
 @dataclass
 class DigimonWorldOptions(PerGameCommonOptions):
     goal: Goal
@@ -183,6 +201,7 @@ class DigimonWorldOptions(PerGameCommonOptions):
     spawn_rate_boost: SpawnRateBoost
     stat_gain_multiplier: StatGainMultiplier
     combat_stat_multiplier: CombatStatMultiplier
+    god_mode: GodMode
 
 
 option_groups: list[OptionGroup] = [
@@ -194,4 +213,5 @@ option_groups: list[OptionGroup] = [
             BridgeUnlock, SpawnRateBoost, StatGainMultiplier, CombatStatMultiplier,
         ],
     ),
+    OptionGroup("Testing", [GodMode]),
 ]

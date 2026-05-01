@@ -148,7 +148,11 @@
       "Bash(venv/Scripts/python.exe -m ruff check worlds/digimon_world/data/addresses.py)",
       "Bash(venv/Scripts/python.exe tools/generate_recruit_patches_from_infotxt.py)",
       "Bash(venv/Scripts/python.exe -m pytest worlds/digimon_world/test/test_client.py -q)",
-      "Bash(venv/Scripts/python.exe -m ruff check worlds/digimon_world/)"
+      "Bash(venv/Scripts/python.exe -m ruff check worlds/digimon_world/)",
+      "Bash(venv/Scripts/python.exe -m ruff check worlds/digimon_world/options.py worlds/digimon_world/world.py worlds/digimon_world/client.py)",
+      "Bash(venv/Scripts/python.exe -m ruff check --fix worlds/digimon_world/client.py worlds/digimon_world/options.py worlds/digimon_world/world.py)",
+      "Bash(venv/Scripts/python.exe -m ruff check worlds/digimon_world/client.py)",
+      "Bash(venv/Scripts/python.exe -m ruff check worlds/digimon_world/client.py worlds/digimon_world/options.py worlds/digimon_world/world.py)"
     ]
   }
 }
