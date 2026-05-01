@@ -168,7 +168,9 @@
       "Bash(python -m ruff check worlds/digimon_world/data/addresses.py)",
       "Bash(python -m ruff check worlds/digimon_world/client.py)",
       "Bash(python -m ruff check --diff worlds/digimon_world/client.py)",
-      "Bash(python -m ruff check worlds/digimon_world/client.py worlds/digimon_world/locations.py worlds/digimon_world/regions.py)"
+      "Bash(python -m ruff check worlds/digimon_world/client.py worlds/digimon_world/locations.py worlds/digimon_world/regions.py)",
+      "Read(//c/Users/Sergio/.claude/projects/c--opt-dev-AP-ArchipelagoDW/memory/**)",
+      "Bash(grep -l \"dw1_dump_state\\\\|dw1_giveitem_trace\\\\|ram_logger\\\\|parse_ram_log\\\\|RE_WORKFLOW\\\\|tools/dw1_\" *.md)"
     ]
   }
 }

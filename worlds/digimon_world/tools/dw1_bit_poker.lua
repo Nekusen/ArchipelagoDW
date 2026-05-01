@@ -1,4 +1,4 @@
--- DW1 Bit Poker (BizHawk + Nymashock)
+-- DW1 Bit Poker (BizHawk; Nymashock OR Octoshock)
 --
 -- Toggles specific story-event bits in MainRAM to test hypotheses about
 -- what unlocks what. Designed for the workflow: load a save before the
@@ -31,7 +31,25 @@
 -- If none of those open the gate, the hypothesis is wrong (or the gate
 -- is on a different flag that we still need to find).
 
-local DOMAIN = "MainRAM"
+-- Auto-detect RAM domain (Nymashock "MainRAM" vs Octoshock "System Bus"
+-- with kuseg prefix). Mirrors `dw1_ram_snapshot.lua`'s pick_ram_domain.
+local function pick_ram_domain()
+    local list = memory.getmemorydomainlist()
+    for _, d in ipairs(list) do
+        local lower = string.lower(tostring(d))
+        if lower == "mainram" or lower == "main ram" then
+            return d, 0x00000000
+        end
+    end
+    for _, d in ipairs(list) do
+        if tostring(d) == "System Bus" then
+            return d, 0x80000000
+        end
+    end
+    error("[dw1-poke] no usable RAM domain in: " .. table.concat(list, ", "))
+end
+
+local DOMAIN, ADDR_PREFIX = pick_ram_domain()
 
 local bits = {
     { name = "Meramon BEATEN",  addr = 0x001BE028, bit = 1, key = "B" },
@@ -41,17 +59,18 @@ local bits = {
 -- ----------------------------------------------------------------------------
 
 local function read_bit(b)
-    local v = memory.read_u8(b.addr, DOMAIN)
+    local v = memory.read_u8(b.addr + ADDR_PREFIX, DOMAIN)
     return bit.band(v, bit.lshift(1, b.bit)) ~= 0, v
 end
 
 local function write_bit(b, set)
-    local v = memory.read_u8(b.addr, DOMAIN)
+    local addr = b.addr + ADDR_PREFIX
+    local v = memory.read_u8(addr, DOMAIN)
     local mask = bit.lshift(1, b.bit)
     if set then
-        memory.write_u8(b.addr, bit.bor(v, mask), DOMAIN)
+        memory.write_u8(addr, bit.bor(v, mask), DOMAIN)
     else
-        memory.write_u8(b.addr, bit.band(v, bit.bnot(mask)), DOMAIN)
+        memory.write_u8(addr, bit.band(v, bit.bnot(mask)), DOMAIN)
     end
 end
 

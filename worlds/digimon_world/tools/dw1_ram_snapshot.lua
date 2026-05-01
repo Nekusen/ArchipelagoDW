@@ -1,24 +1,48 @@
--- DW1 RAM Snapshot Tool (BizHawk + Nymashock)
+-- DW1 RAM Snapshot Tool (BizHawk; Nymashock OR Octoshock)
 --
--- Dumps the DW1 progression-flag RAM region so two snapshots can be diffed
--- to locate the bit/byte that flipped during an in-game event (e.g. the
--- Tropical Jungle bridge becoming permanently usable).
+-- **Canonical RE/discovery tool.** When you need to find what RAM byte/bit
+-- changes during an in-game event (NPC give, area unlock, cutscene, ...),
+-- this is the go-to: take a snapshot before, trigger the event, take
+-- another snapshot, then diff with `dw1_ram_diff.py` (sibling file).
+-- See `README.md` in this directory for the canonical workflow.
 --
 -- Usage:
---   1. Load BizHawk with the Nymashock PSX core and the running DW1 ISO.
+--   1. Boot BizHawk with the running DW1 ISO. Either PSX core works.
 --   2. Tools > Lua Console > Open Script > pick this file.
 --   3. Position the player just before the state-changing event.
 --      Press P (in the emulator window, NOT the Lua console) -> snapshot 01.
 --   4. Trigger the event (cross the bridge, talk to the NPC, etc.).
 --      Press P again -> snapshot 02.
 --   5. Diff the two output files. Bytes/bits that differ are candidates
---      for the area-unlock flag.
+--      for the gate / flag / state.
 --
 -- Output: dw1_ram_snapshot_NN.txt in OUTPUT_DIR (configurable below).
 -- Format: 16 bytes per line as both hex and MSB-first binary, so single-bit
--- flips are visible by eye in the binary column.
+-- flips are visible by eye in the binary column. Format matches what
+-- dw1_ram_diff.py expects.
 
-local DOMAIN     = "MainRAM"             -- PS1 main RAM under Nymashock
+-- Auto-detect the right RAM domain. PSX cores expose this differently:
+--   * Nymashock: "MainRAM" — 2 MiB at offset 0; bare RAM offsets work.
+--   * Octoshock: no Main RAM domain at all; main RAM only addressable via
+--     "System Bus" with the 0x80000000 kuseg mirror prefix.
+-- See memory note `nymashock_memory_domain.md`.
+local function pick_ram_domain()
+    local list = memory.getmemorydomainlist()
+    for _, d in ipairs(list) do
+        local lower = string.lower(tostring(d))
+        if lower == "mainram" or lower == "main ram" then
+            return d, 0x00000000
+        end
+    end
+    for _, d in ipairs(list) do
+        if tostring(d) == "System Bus" then
+            return d, 0x80000000
+        end
+    end
+    error("[dw1-snapshot] no usable RAM domain in: " .. table.concat(list, ", "))
+end
+
+local DOMAIN, ADDR_PREFIX = pick_ram_domain()
 local START_ADDR = 0x001BDE00            -- ~512 B before known progression cluster
 local END_ADDR   = 0x001BE300            -- ~512 B after the boss/area-flag area
 local HOTKEY     = "P"                   -- press in the emulator window
@@ -57,7 +81,7 @@ local function dump()
         for i = 0, 15 do
             local addr = base + i
             if addr <= END_ADDR then
-                local b = memory.read_u8(addr, DOMAIN)
+                local b = memory.read_u8(addr + ADDR_PREFIX, DOMAIN)
                 hex_parts[#hex_parts + 1] = string.format("%02X", b)
                 bin_parts[#bin_parts + 1] = byte_to_bits(b)
             end
