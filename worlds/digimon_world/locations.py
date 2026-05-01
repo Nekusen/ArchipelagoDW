@@ -335,6 +335,19 @@ _STARTER_LOCATION: Final[dict[str, LocationEntry]] = {
 
 
 # =============================================================================
+# Key-item pickups
+# =============================================================================
+# v1: just the Old Fishrod (Trash Mountain in Gear Savanna). Future
+# additions (Mansion Key, Blue Flute, Amazing Rod, Leomonstone, ...) will
+# go here once their flag addresses are verified the same way the rod's
+# was — the CE-table values are unreliable, see memory note
+# `dw1_keyitem_flag_block.md`.
+_KEYITEM_LOCATIONS: Final[dict[str, LocationEntry]] = {
+    "Old Fishrod Pickup": LocationEntry(69_004_000, "Gear Savanna"),
+}
+
+
+# =============================================================================
 # Final assembled location table
 # =============================================================================
 
@@ -343,6 +356,7 @@ _LOCATION_TABLE: Final[dict[str, LocationEntry]] = {
     **{name: LocationEntry(_RECRUIT_DW_IDS[name], _RECRUIT_REGIONS[name])
        for name in RECRUIT_NAMES},
     **_CHEST_LOCATIONS,
+    **_KEYITEM_LOCATIONS,
 }
 
 LOCATION_NAME_TO_ID: Final[dict[str, int]] = {
@@ -353,6 +367,7 @@ LOCATION_NAME_GROUPS: Final[dict[str, set[str]]] = {
     "Recruits": set(RECRUIT_NAMES),
     "Chests": set(_CHEST_LOCATIONS),
     "Starter": set(_STARTER_LOCATION),
+    "Key Items": set(_KEYITEM_LOCATIONS),
 }
 
 

@@ -71,6 +71,7 @@ REGION_NAMES: Final[tuple[str, ...]] = (
     "Big Store",
     "Tower",
     "Overdell",
+    "Gear Savanna",
 )
 
 
@@ -106,6 +107,11 @@ _EDGES: Final[tuple[tuple[str, str], ...]] = (
     ("Mt. Infinity", "Tower"),
     # Overdell Cemetery & Grey Lord's Mansion (SkullGreymon area).
     ("File City", "Overdell"),
+    # Gear Savanna (west of File City) — Trash Mountain sub-area is
+    # where the Old Fishrod is found in vanilla DW1. No gating from the
+    # hub; rod is the prerequisite for Greatlake (Seadramon), not the
+    # other way around.
+    ("File City", "Gear Savanna"),
 )
 
 

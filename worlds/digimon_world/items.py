@@ -60,7 +60,7 @@ class ItemEntry(NamedTuple):
 # =============================================================================
 # Progression keys
 # =============================================================================
-# Mansion Key, Gear, Frig Key, AS Decoder, Blue Flute, old fishrod, Amazing rod,
+# Mansion Key, Gear, Frig Key, AS Decoder, Blue Flute, Old Fishrod, Amazing rod,
 # Rain Plant — eight items the v1 logic in :mod:`.rules` actually gates on.
 # DV codes mirror DWAP where the item exists there.
 
@@ -70,7 +70,7 @@ _KEY_ITEMS: Final[dict[str, ItemEntry]] = {
     "Frig Key":    ItemEntry(2123, ItemClassification.progression),
     "AS Decoder":  ItemEntry(2124, ItemClassification.progression),
     "Blue Flute":  ItemEntry(2115, ItemClassification.progression),
-    "old fishrod": ItemEntry(2116, ItemClassification.progression),
+    "Old Fishrod": ItemEntry(2116, ItemClassification.progression),
     "Amazing rod": ItemEntry(2117, ItemClassification.progression | ItemClassification.useful),
     "Rain Plant":  ItemEntry(2121, ItemClassification.progression),
 }

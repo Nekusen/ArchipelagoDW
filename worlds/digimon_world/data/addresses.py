@@ -199,6 +199,51 @@ RAM_MERAMON_TUNNEL_DIGGING_STATE: Final = 0x001BE04F
 # Trigger ID 185 under the array's standard formula.
 RAM_TROPICAL_JUNGLE_BRIDGE_FIXED: Final = (0x001BDFE4, 1)
 
+# Great Canyon bridge: closed until the player has 6 prosperity AND walks
+# onto the unlock spot, which fires a cutscene that flips this bit. Once
+# set the bridge stays usable. Discovered 2026-05-01 via a 4-snapshot RAM
+# diff (before / after-cutscene / after-leave / after-return). Trigger ID
+# 103. Same byte holds at least one other story-event flag (bit 0 fires
+# on first entry to Tropical Jungle), so writes must be bit-OR not byte.
+RAM_GREAT_CANYON_BRIDGE_UNLOCKED: Final = (0x001BDFD9, 7)
+
+# ----- Key-item flags (trigger-array bits, NOT inventory) -------------------
+#
+# Some "key items" in DW1 are stored as bits in the trigger array, not as
+# entries in the on-hand inventory or the bank. Verified via setTrigger
+# bytecode + live snapshot diff 2026-05-01 (see memory note
+# `dw1_old_fishrod_flag.md`). The CE-table claim that these live as bytes
+# at 0x001BDF20.. is **wrong** for the rod and likely for the other key
+# items too — verify each individually before adding to this table.
+#
+# Bit layout follows the standard trigger formula
+# (`mem[0x001BDFCD + N/8] |= 1 << (N % 8)`; see memory note
+# `dw1_settrigger_formula.md`). Each entry is `(byte_addr, bit_index)`.
+#
+# **OLD_FISHROD_FLAG** — trigger 320, set by the rod-give cutscene's
+# `setTrigger 320` at script offset 006820 in the Trash Mountain section
+# (Section_51 of the Gear Savanna script per
+# `references/digimon_world_randomizer/script/DW1Script.txt:23931`).
+# **OLD_FISHROD_GATE** — trigger 45, the cutscene's section gate. Flips
+# in the same instruction window. AP polls this as the location-check
+# signal for "player completed the rod cutscene".
+OLD_FISHROD_FLAG: Final[tuple[int, int]] = (0x001BDFF5, 0)
+OLD_FISHROD_GATE: Final[tuple[int, int]] = (0x001BDFD2, 5)
+
+# Per-AP-location bits for the key-item AP locations. Mirrors the shape
+# of `RECRUIT_RAM_BITS` / `DWAP_CHEST_RAM_BITS`; consumed by the client
+# via `LOCATION_RAM_BITS`.
+KEYITEM_LOCATION_RAM_BITS: Final[dict[str, tuple[int, int]]] = {
+    "Old Fishrod Pickup": OLD_FISHROD_GATE,
+}
+
+# Per-AP-item delivery flags for AP-side delivery of key items. Mirrors
+# the recruit deliverer pattern: when AP delivers the matching item, set
+# this bit in RAM.
+KEYITEM_DELIVERY_RAM_BITS: Final[dict[str, tuple[int, int]]] = {
+    "Old Fishrod": OLD_FISHROD_FLAG,
+}
+
 # ----- Per-Digimon technique tables (full-roster learned-tech tables) -------
 
 RAM_TECHNIQUE_TABLE_BASE: Final = 0x0012623C
@@ -1752,7 +1797,11 @@ ROM_PP_CALC_PATCH_VALUE: Final = (
 #
 # * ``0x001BDFCD..0x001BDFE5`` — **gap A** (25 bytes, 200 bits). Story-event
 #   trigger bits live here. Confirmed entries:
-#   :data:`RAM_TROPICAL_JUNGLE_BRIDGE_FIXED` at ``(0x001BDFE4, 1)``.
+#   :data:`RAM_TROPICAL_JUNGLE_BRIDGE_FIXED` at ``(0x001BDFE4, 1)``,
+#   :data:`RAM_GREAT_CANYON_BRIDGE_UNLOCKED` at ``(0x001BDFD9, 7)``.
+#   Note that ``0x001BDFD9`` also holds an unrelated story-event flag
+#   in bit 0 (sets on first entry to Tropical Jungle), so multiple
+#   independent bits per byte is the norm.
 # * ``0x001BDFE6..0x001BDFED`` — :data:`RECRUIT_RAM_BITS` (50 bits over
 #   8 bytes; bits 0-2 of ``0x001BDFE6`` and bits 5-6 of ``0x001BDFED``
 #   are unassigned).
@@ -2653,6 +2702,48 @@ ROM_FIELD_SPAWN_TRIGGER_PATCHES: Final = (
     # ----- Ninjamon (1 sites) -----
     (0x13FD95CE, 258, 778),  # 12530   Ninjamon hangin out
     # ====================================================================
+    # Birdramon — 32-site full sweep (no info.txt block; user reported
+    # 2026-05-01 that Birdramon's building / NPC didn't appear post-AP
+    # delivery despite the getFileCityTopMap C-function patches. Each
+    # File-City-Top variant script also has its own ``if trigger(221)``
+    # NPC-load gates that needed redirecting. Enumerated all
+    # ``trigger(221)`` reads in DW1Script.txt and excluded the 3 reads
+    # in script 124 (which also contains ``setTrigger 221`` — cutscene
+    # flow, must remain bound to bit 221).
+    # ====================================================================
+    (0x13FDC9E0, 221, 741),  # script 0
+    (0x13FDCA40, 221, 741),  # script 0
+    (0x13FFEE3E, 221, 741),  # script 47
+    (0x13FFEE9E, 221, 741),  # script 47
+    (0x1400ABD6, 221, 741),  # script 63
+    (0x1400AC36, 221, 741),  # script 63
+    (0x14024B14, 221, 741),  # script 100
+    (0x14024B74, 221, 741),  # script 100
+    (0x1402FBB4, 221, 741),  # script 108
+    (0x1402FC14, 221, 741),  # script 108
+    (0x14045164, 221, 741),  # script 136
+    (0x140451C4, 221, 741),  # script 136
+    (0x1404C40E, 221, 741),  # script 146
+    (0x1404C46E, 221, 741),  # script 146
+    (0x140583C4, 221, 741),  # script 160
+    (0x14058424, 221, 741),  # script 160
+    (0x1405E590, 221, 741),  # script 163
+    (0x1405E5F0, 221, 741),  # script 163
+    (0x14061B4E, 221, 741),  # script 165
+    (0x14061BAE, 221, 741),  # script 165
+    (0x140620B8, 221, 741),  # script 166
+    (0x14062118, 221, 741),  # script 166
+    (0x14062C28, 221, 741),  # script 167
+    (0x14062C88, 221, 741),  # script 167
+    (0x1406792C, 221, 741),  # script 169
+    (0x1406798C, 221, 741),  # script 169
+    (0x1406927C, 221, 741),  # script 171
+    (0x140692DC, 221, 741),  # script 171
+    (0x14072A06, 221, 741),  # script 178
+    (0x14072A66, 221, 741),  # script 178
+    (0x140A0306, 221, 741),  # script 211
+    (0x140B4BCE, 221, 741),  # script 221
+    # ====================================================================
     # Palmon — 72-site full sweep (no info.txt block; user-validated 2026-04-30).
     # The standalone randomizer never randomized Palmon, so info.txt has
     # no MUST-CHANGE block; we enumerated all trigger(246) reads via the
@@ -2731,6 +2822,479 @@ ROM_FIELD_SPAWN_TRIGGER_PATCHES: Final = (
     (0x14097F3A, 246, 766),
     (0x1409F97E, 246, 766),
     (0x140B4266, 246, 766),
+    # ====================================================================
+    # ROM_RECRUITMENT-derived additional in-town behavior patches.
+    # User reported 2026-05-01 that recruits like Kuwagamon weren't
+    # appearing in their city slots even after AP delivery; the
+    # standalone randomizer's RecruitmentEntry catalog has many more
+    # in-town trigger sites than info.txt's MUST-CHANGE block.
+    # Verified per-byte against the vanilla BIN.
+    # ====================================================================
+    # ----- Betamon (9 sites) -----
+    (0x13FE5D32, 204, 724),
+    (0x1402C5AE, 204, 724),
+    (0x1405C14A, 204, 724),
+    (0x1405E6C2, 204, 724),
+    (0x14060890, 204, 724),
+    (0x1406F12E, 204, 724),
+    (0x140B4572, 204, 724),
+    (0x140B9ABA, 204, 724),
+    (0x140B9BCA, 204, 724),
+    # ----- Devimon (5 sites) -----
+    (0x13FE543A, 206, 726),
+    (0x1406F0A4, 206, 726),
+    (0x140B6668, 206, 726),
+    (0x140BA7B4, 206, 726),
+    (0x140BA898, 206, 726),
+    # ----- Tyrannomon (53 sites) -----
+    (0x13FE505A, 208, 728),
+    (0x13FE513E, 208, 728),
+    (0x13FE5222, 208, 728),
+    (0x13FE583A, 208, 728),
+    (0x13FE591E, 208, 728),
+    (0x13FE5A02, 208, 728),
+    (0x13FE5D52, 208, 728),
+    (0x1402BC06, 208, 728),
+    (0x1402BCEA, 208, 728),
+    (0x1402BDCE, 208, 728),
+    (0x1402C5CE, 208, 728),
+    (0x1402C6B2, 208, 728),
+    (0x1402C796, 208, 728),
+    (0x14051FC6, 208, 728),
+    (0x1405218A, 208, 728),
+    (0x140598A4, 208, 728),
+    (0x14059A60, 208, 728),
+    (0x14059B44, 208, 728),
+    (0x14059C28, 208, 728),
+    (0x1405BFAE, 208, 728),
+    (0x1405C16A, 208, 728),
+    (0x1405C24E, 208, 728),
+    (0x1405C5B6, 208, 728),
+    (0x1405E9D0, 208, 728),
+    (0x1405EAB4, 208, 728),
+    (0x1405EB98, 208, 728),
+    (0x140608B0, 208, 728),
+    (0x14060994, 208, 728),
+    (0x14060A78, 208, 728),
+    (0x14063D02, 208, 728),
+    (0x14063DE6, 208, 728),
+    (0x14063ECA, 208, 728),
+    (0x1406AB2A, 208, 728),
+    (0x1406AC0E, 208, 728),
+    (0x1406ACF2, 208, 728),
+    (0x1406BC72, 208, 728),
+    (0x1406BD56, 208, 728),
+    (0x1406BE3A, 208, 728),
+    (0x1406C07E, 208, 728),
+    (0x1406D070, 208, 728),
+    (0x1406D154, 208, 728),
+    (0x1406D238, 208, 728),
+    (0x1406D484, 208, 728),
+    (0x1406D806, 208, 728),
+    (0x1406D8EA, 208, 728),
+    (0x1406D9CE, 208, 728),
+    (0x1406F14E, 208, 728),
+    (0x140AEBE2, 208, 728),
+    (0x140B47C0, 208, 728),
+    (0x140BA176, 208, 728),
+    (0x140BA2A0, 208, 728),
+    (0x140BA318, 208, 728),
+    (0x140BA442, 208, 728),
+    # ----- Meramon (21 sites) -----
+    (0x13FD8FDA, 209, 729),
+    (0x13FD9108, 209, 729),
+    (0x1406AC0A, 209, 729),
+    (0x1406ACEE, 209, 729),
+    (0x1406BC6E, 209, 729),
+    (0x1406BD52, 209, 729),
+    (0x1406BE36, 209, 729),
+    (0x1406BF52, 209, 729),
+    (0x1406C362, 209, 729),
+    (0x1406D06C, 209, 729),
+    (0x1406D150, 209, 729),
+    (0x1406D234, 209, 729),
+    (0x1406D354, 209, 729),
+    (0x1406D802, 209, 729),
+    (0x1406D8E6, 209, 729),
+    (0x1406D9CA, 209, 729),
+    (0x1406F14A, 209, 729),
+    (0x140AEB82, 209, 729),
+    (0x140B4880, 209, 729),
+    (0x140BA2FC, 209, 729),
+    (0x140BA42A, 209, 729),
+    # ----- Numemon (5 sites) -----
+    (0x13FE543E, 211, 731),
+    (0x1406F0A8, 211, 731),
+    (0x140B5A62, 211, 731),
+    (0x140BA760, 211, 731),
+    (0x140BA850, 211, 731),
+    # ----- Mamemon (5 sites) -----
+    (0x13FE5446, 213, 733),
+    (0x1406F0AC, 213, 733),
+    (0x140B598E, 213, 733),
+    (0x140BA798, 213, 733),
+    (0x140BA880, 213, 733),
+    # ----- Gabumon (2 sites) -----
+    (0x140B563C, 217, 737),
+    (0x140BA08C, 217, 737),
+    # ----- Elecmon (4 sites) -----
+    (0x1405C084, 218, 738),
+    (0x140B4D44, 218, 738),
+    (0x140B9B70, 218, 738),
+    (0x140B9DF2, 218, 738),
+    # ----- Kabuterimon (6 sites) -----
+    (0x1402FECC, 219, 739),
+    (0x14030F06, 219, 739),
+    (0x140319C6, 219, 739),
+    (0x14032398, 219, 739),
+    (0x140B5B3A, 219, 739),
+    (0x140B8BF0, 219, 739),
+    # ----- Garurumon (53 sites) -----
+    (0x13FE505E, 222, 742),
+    (0x13FE5142, 222, 742),
+    (0x13FE5226, 222, 742),
+    (0x13FE583E, 222, 742),
+    (0x13FE5922, 222, 742),
+    (0x13FE5A06, 222, 742),
+    (0x13FE5D56, 222, 742),
+    (0x1402BC0A, 222, 742),
+    (0x1402BCEE, 222, 742),
+    (0x1402BDD2, 222, 742),
+    (0x1402C5D2, 222, 742),
+    (0x1402C6B6, 222, 742),
+    (0x1402C79A, 222, 742),
+    (0x14051FCA, 222, 742),
+    (0x1405218E, 222, 742),
+    (0x140598A8, 222, 742),
+    (0x14059A64, 222, 742),
+    (0x14059B48, 222, 742),
+    (0x14059C2C, 222, 742),
+    (0x1405BFB2, 222, 742),
+    (0x1405C16E, 222, 742),
+    (0x1405C252, 222, 742),
+    (0x1405C5BA, 222, 742),
+    (0x1405E9D4, 222, 742),
+    (0x1405EAB8, 222, 742),
+    (0x1405EB9C, 222, 742),
+    (0x140608B4, 222, 742),
+    (0x14060998, 222, 742),
+    (0x14060A7C, 222, 742),
+    (0x14063D06, 222, 742),
+    (0x14063DEA, 222, 742),
+    (0x14063ECE, 222, 742),
+    (0x1406AB2E, 222, 742),
+    (0x1406AC12, 222, 742),
+    (0x1406ACF6, 222, 742),
+    (0x1406BC76, 222, 742),
+    (0x1406BD5A, 222, 742),
+    (0x1406BE3E, 222, 742),
+    (0x1406C17A, 222, 742),
+    (0x1406D074, 222, 742),
+    (0x1406D158, 222, 742),
+    (0x1406D23C, 222, 742),
+    (0x1406D580, 222, 742),
+    (0x1406D80A, 222, 742),
+    (0x1406D8EE, 222, 742),
+    (0x1406D9D2, 222, 742),
+    (0x1406F152, 222, 742),
+    (0x140AEC2E, 222, 742),
+    (0x140B4B26, 222, 742),
+    (0x140BA192, 222, 742),
+    (0x140BA2B8, 222, 742),
+    (0x140BA334, 222, 742),
+    (0x140BA45A, 222, 742),
+    # ----- Frigimon (52 sites) -----
+    (0x13FE5062, 223, 743),
+    (0x13FE5146, 223, 743),
+    (0x13FE522A, 223, 743),
+    (0x13FE5842, 223, 743),
+    (0x13FE5926, 223, 743),
+    (0x13FE5A0A, 223, 743),
+    (0x13FE5D5A, 223, 743),
+    (0x1402BC0E, 223, 743),
+    (0x1402BCF2, 223, 743),
+    (0x1402BDD6, 223, 743),
+    (0x1402C5D6, 223, 743),
+    (0x1402C6BA, 223, 743),
+    (0x1402C79E, 223, 743),
+    (0x14051FCE, 223, 743),
+    (0x14052192, 223, 743),
+    (0x140598AC, 223, 743),
+    (0x14059A68, 223, 743),
+    (0x14059B4C, 223, 743),
+    (0x14059C30, 223, 743),
+    (0x1405BFB6, 223, 743),
+    (0x1405C172, 223, 743),
+    (0x1405C256, 223, 743),
+    (0x1405C5BE, 223, 743),
+    (0x1405E9D8, 223, 743),
+    (0x1405EABC, 223, 743),
+    (0x1405EBA0, 223, 743),
+    (0x140608B8, 223, 743),
+    (0x1406099C, 223, 743),
+    (0x14060A80, 223, 743),
+    (0x14063D0A, 223, 743),
+    (0x14063DEE, 223, 743),
+    (0x14063ED2, 223, 743),
+    (0x1406AB32, 223, 743),
+    (0x1406AC16, 223, 743),
+    (0x1406ACFA, 223, 743),
+    (0x1406BC7A, 223, 743),
+    (0x1406BD5E, 223, 743),
+    (0x1406BE42, 223, 743),
+    (0x1406C280, 223, 743),
+    (0x1406D078, 223, 743),
+    (0x1406D15C, 223, 743),
+    (0x1406D240, 223, 743),
+    (0x1406D80E, 223, 743),
+    (0x1406D8F2, 223, 743),
+    (0x1406D9D6, 223, 743),
+    (0x1406F156, 223, 743),
+    (0x140B118C, 223, 743),
+    (0x140B4A80, 223, 743),
+    (0x140BA1AE, 223, 743),
+    (0x140BA2D0, 223, 743),
+    (0x140BA350, 223, 743),
+    (0x140BA472, 223, 743),
+    # ----- Whamon (3 sites) -----
+    (0x1405BF76, 224, 744),
+    (0x140B57F4, 224, 744),
+    (0x140B987C, 224, 744),
+    # ----- SkullGreymon (1 sites) -----
+    (0x140B68BE, 226, 746),
+    # ----- MetalMamemon (2 sites) -----
+    (0x140B617C, 227, 747),
+    (0x140BAB02, 227, 747),
+    # ----- Vademon (4 sites) -----
+    (0x140B11CC, 228, 748),
+    (0x140B626E, 228, 748),
+    (0x140BA1CE, 228, 748),
+    (0x140BA370, 228, 748),
+    # ----- Patamon (14 sites) -----
+    (0x13FE5D0E, 231, 751),
+    (0x1402C58A, 231, 751),
+    (0x1405BFE2, 231, 751),
+    (0x1405C126, 231, 751),
+    (0x1405E6A2, 231, 751),
+    (0x1406086C, 231, 751),
+    (0x1406F10A, 231, 751),
+    (0x14072B0A, 231, 751),
+    (0x140B507C, 231, 751),
+    (0x140B9AC6, 231, 751),
+    (0x140B9BD6, 231, 751),
+    (0x140BA122, 231, 751),
+    (0x140BA49E, 231, 751),
+    (0x140BA6E0, 231, 751),
+    # ----- Kunemon (8 sites) -----
+    (0x13FE5324, 232, 752),
+    (0x13FE5348, 232, 752),
+    (0x13FE5B08, 232, 752),
+    (0x13FE5B2C, 232, 752),
+    (0x140B432E, 232, 752),
+    (0x140B6C4A, 232, 752),
+    (0x140B9B32, 232, 752),
+    (0x140B9E2E, 232, 752),
+    # ----- Unimon (14 sites) -----
+    (0x13FE5D16, 233, 753),
+    (0x1402C592, 233, 753),
+    (0x1405BFEA, 233, 753),
+    (0x1405C12E, 233, 753),
+    (0x1405E6AA, 233, 753),
+    (0x14060874, 233, 753),
+    (0x1406F112, 233, 753),
+    (0x14072B12, 233, 753),
+    (0x140B4FB8, 233, 753),
+    (0x140B9ACE, 233, 753),
+    (0x140B9BDE, 233, 753),
+    (0x140BA12A, 233, 753),
+    (0x140BA4D6, 233, 753),
+    (0x140BA710, 233, 753),
+    # ----- Ogremon (2 sites) -----
+    (0x140B5E82, 234, 754),
+    (0x140B9D52, 234, 754),
+    # ----- Shellmon (4 sites) -----
+    (0x140B4C64, 235, 755),
+    (0x140B9B0A, 235, 755),
+    (0x140B9D3E, 235, 755),
+    (0x140B9D76, 235, 755),
+    # ----- Bakemon (3 sites) -----
+    (0x140B462E, 237, 757),
+    (0x140B9AF0, 237, 757),
+    (0x140B9DCA, 237, 757),
+    # ----- Drimogemon (2 sites) -----
+    (0x1405BF5E, 238, 758),
+    (0x140B5568, 238, 758),
+    # ----- Sukamon (1 sites) -----
+    (0x140B9976, 239, 759),
+    # ----- Andromon (2 sites) -----
+    (0x140B6990, 240, 760),
+    (0x140B9900, 240, 760),
+    # ----- Giromon (1 sites) -----
+    (0x140B5DE0, 241, 761),
+    # ----- Etemon (4 sites) -----
+    (0x13FDD278, 242, 762),
+    (0x13FE0010, 242, 762),
+    (0x140B60CE, 242, 762),
+    (0x140B754A, 242, 762),
+    # ----- Biyomon (14 sites) -----
+    (0x13FE5D12, 245, 765),
+    (0x1402C58E, 245, 765),
+    (0x1405BFE6, 245, 765),
+    (0x1405C12A, 245, 765),
+    (0x1405E6A6, 245, 765),
+    (0x14060870, 245, 765),
+    (0x1406F10E, 245, 765),
+    (0x14072B0E, 245, 765),
+    (0x140B5132, 245, 765),
+    (0x140B9ACA, 245, 765),
+    (0x140B9BDA, 245, 765),
+    (0x140BA126, 245, 765),
+    (0x140BA4BA, 245, 765),
+    (0x140BA6F8, 245, 765),
+    # ----- Monochromon (14 sites) -----
+    (0x13FE5D1A, 247, 767),
+    (0x1402C596, 247, 767),
+    (0x1405BFEE, 247, 767),
+    (0x1405C132, 247, 767),
+    (0x1405E6AE, 247, 767),
+    (0x14060878, 247, 767),
+    (0x1406F116, 247, 767),
+    (0x14072B16, 247, 767),
+    (0x140B4ED0, 247, 767),
+    (0x140B9AD2, 247, 767),
+    (0x140B9BE2, 247, 767),
+    (0x140BA12E, 247, 767),
+    (0x140BA4F2, 247, 767),
+    (0x140BA728, 247, 767),
+    # ----- Leomon (2 sites) -----
+    (0x140B5F30, 248, 768),
+    (0x140BA052, 248, 768),
+    # ----- Coelamon (8 sites) -----
+    (0x13FE5D36, 249, 769),
+    (0x1402C5B2, 249, 769),
+    (0x1405C14E, 249, 769),
+    (0x14060894, 249, 769),
+    (0x1406F132, 249, 769),
+    (0x140B44C0, 249, 769),
+    (0x140B6DDC, 249, 769),
+    (0x140BA13A, 249, 769),
+    # ----- Kokatorimon (5 sites) -----
+    (0x1405C012, 250, 770),
+    (0x1405C054, 250, 770),
+    (0x140B4E06, 250, 770),
+    (0x140B98BA, 250, 770),
+    (0x140B9946, 250, 770),
+    # ----- Kuwagamon (2 sites) -----
+    (0x140B5D3C, 251, 771),
+    (0x140B8C02, 251, 771),
+    # ----- Mojyamon (5 sites) -----
+    (0x13FE5442, 252, 772),
+    (0x1406F0B0, 252, 772),
+    (0x140B58A4, 252, 772),
+    (0x140BA77C, 252, 772),
+    (0x140BA868, 252, 772),
+    # ----- Nanimon (2 sites) -----
+    (0x140B63C6, 253, 773),
+    (0x140BA0DA, 253, 773),
+    # ----- Piximon (2 sites) -----
+    (0x140B600A, 255, 775),
+    (0x140BA516, 255, 775),
+    # ----- Digitamamon (3 sites) -----
+    (0x140B67EE, 256, 776),
+    (0x140BA1EE, 256, 776),
+    (0x140BA390, 256, 776),
+    # ----- Penguinmon (6 sites) -----
+    (0x14066374, 257, 777),
+    (0x140663AC, 257, 777),
+    (0x14066400, 257, 777),
+    (0x1409761C, 257, 777),
+    (0x140B53E6, 257, 777),
+    (0x140BAB1E, 257, 777),
+    # ----- Ninjamon (2 sites) -----
+    (0x140B573A, 258, 778),
+    (0x140BA74E, 258, 778),
+    # ====================================================================
+    # Vegiemon � 71-site full sweep (no info.txt block; standalone
+    # randomizer omitted Vegiemon, so ROM_RECRUITMENT has no entry).
+    # User reported 2026-05-01 that Vegiemon was missing from plaza
+    # despite AP delivery (and that no screen has Vegiemon without
+    # Palmon also recruited). Enumerated all trigger(225) reads in
+    # DW1Script.txt; excluded the 2 reads in script 15 (which
+    # contains setTrigger 225 � cutscene flow). Each is a 2-byte
+    # rewrite of trigger 225 -> 745, verified per-byte against
+    # vanilla BIN.
+    # ====================================================================
+    (0x13FDC9F8, 225, 745),  # script 0
+    (0x13FDCA1C, 225, 745),  # script 0
+    (0x13FDCA58, 225, 745),  # script 0
+    (0x13FDCA7C, 225, 745),  # script 0
+    (0x13FFEE56, 225, 745),  # script 47
+    (0x13FFEE7A, 225, 745),  # script 47
+    (0x13FFEEB6, 225, 745),  # script 47
+    (0x13FFEEDA, 225, 745),  # script 47
+    (0x1400ABEE, 225, 745),  # script 63
+    (0x1400AC12, 225, 745),  # script 63
+    (0x1400AC4E, 225, 745),  # script 63
+    (0x1400AC72, 225, 745),  # script 63
+    (0x14024B2C, 225, 745),  # script 100
+    (0x14024B50, 225, 745),  # script 100
+    (0x14024B8C, 225, 745),  # script 100
+    (0x14024BB0, 225, 745),  # script 100
+    (0x1402FBCC, 225, 745),  # script 108
+    (0x1402FBF0, 225, 745),  # script 108
+    (0x1402FC2C, 225, 745),  # script 108
+    (0x1402FC50, 225, 745),  # script 108
+    (0x1403AB40, 225, 745),  # script 124
+    (0x1403AB64, 225, 745),  # script 124
+    (0x1403ABA0, 225, 745),  # script 124
+    (0x1403ABC4, 225, 745),  # script 124
+    (0x1404517C, 225, 745),  # script 136
+    (0x140451A0, 225, 745),  # script 136
+    (0x140451DC, 225, 745),  # script 136
+    (0x14045200, 225, 745),  # script 136
+    (0x1404C426, 225, 745),  # script 146
+    (0x1404C44A, 225, 745),  # script 146
+    (0x1404C486, 225, 745),  # script 146
+    (0x1404C4AA, 225, 745),  # script 146
+    (0x140583DC, 225, 745),  # script 160
+    (0x14058400, 225, 745),  # script 160
+    (0x1405843C, 225, 745),  # script 160
+    (0x14058460, 225, 745),  # script 160
+    (0x140599B2, 225, 745),  # script 162
+    (0x1405ACC8, 225, 745),  # script 162
+    (0x1405AD10, 225, 745),  # script 162
+    (0x1405AF5A, 225, 745),  # script 162
+    (0x1405E5A8, 225, 745),  # script 163
+    (0x1405E5CC, 225, 745),  # script 163
+    (0x1405E608, 225, 745),  # script 163
+    (0x1405E62C, 225, 745),  # script 163
+    (0x14061B66, 225, 745),  # script 165
+    (0x14061B8A, 225, 745),  # script 165
+    (0x14061BC6, 225, 745),  # script 165
+    (0x14061BEA, 225, 745),  # script 165
+    (0x140620D0, 225, 745),  # script 166
+    (0x140620F4, 225, 745),  # script 166
+    (0x14062130, 225, 745),  # script 166
+    (0x14062154, 225, 745),  # script 166
+    (0x14062C40, 225, 745),  # script 167
+    (0x14062C64, 225, 745),  # script 167
+    (0x14062CA0, 225, 745),  # script 167
+    (0x14062CC4, 225, 745),  # script 167
+    (0x14067944, 225, 745),  # script 169
+    (0x14067968, 225, 745),  # script 169
+    (0x140679A4, 225, 745),  # script 169
+    (0x140679C8, 225, 745),  # script 169
+    (0x14069294, 225, 745),  # script 171
+    (0x140692B8, 225, 745),  # script 171
+    (0x140692F4, 225, 745),  # script 171
+    (0x14069318, 225, 745),  # script 171
+    (0x14072A1E, 225, 745),  # script 178
+    (0x14072A42, 225, 745),  # script 178
+    (0x14072A7E, 225, 745),  # script 178
+    (0x14072AA2, 225, 745),  # script 178
+    (0x14097F2A, 225, 745),  # script 207
+    (0x1409FDD0, 225, 745),  # script 211
+    (0x140B46F0, 225, 745),  # script 221
 )
 
 

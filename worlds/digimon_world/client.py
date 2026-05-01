@@ -79,11 +79,14 @@ from .data.addresses import (
     FAST_DRIMOGEMON_DIGGING_STATE_TARGET,
     FAST_DRIMOGEMON_DRIMO_STATE_TARGET,
     FAST_DRIMOGEMON_TUNNEL_STATE_TARGET,
+    KEYITEM_DELIVERY_RAM_BITS,
+    KEYITEM_LOCATION_RAM_BITS,
     RAM_CURRENT_BITS,
     RAM_CURRENT_BRAINS,
     RAM_CURRENT_DEFENSE,
     RAM_CURRENT_OFFENSE,
     RAM_CURRENT_SPEED,
+    RAM_GREAT_CANYON_BRIDGE_UNLOCKED,
     RAM_HAS_BEATEN_DRIMOGEMON,
     RAM_INVENTORY_EMPTY_SLOT_ID,
     RAM_INVENTORY_ITEM_IDS_BASE,
@@ -281,6 +284,7 @@ _RECRUIT_TOGGLE_TARGETS: tuple[_RecruitToggleRow, ...] = (
 LOCATION_RAM_BITS: dict[str, tuple[int, int]] = {
     **DWAP_CHEST_RAM_BITS,
     **RECRUIT_RAM_BITS,
+    **KEYITEM_LOCATION_RAM_BITS,
 }
 
 # Threshold-based detection (e.g. NPC-gift PP gates) is unused in v7 —
@@ -400,6 +404,32 @@ def _make_recruit_deliverer(digimon_id: int) -> ItemDeliverer:
     return deliver
 
 
+def _make_keyitem_bit_deliverer(byte_addr: int, bit_index: int) -> ItemDeliverer:
+    """Return an :class:`ItemDeliverer` that ORs a single trigger-array
+    bit into RAM.
+
+    Used for "key items" whose canonical state is a trigger bit, not an
+    inventory entry — see memory note `dw1_old_fishrod_flag.md`. The
+    rod is the v1 entrant; future verified key items are wired through
+    the same factory.
+
+    Idempotent: reads the byte first, returns no writes if the bit is
+    already set.
+    """
+
+    bit_mask = 1 << bit_index
+
+    async def deliver(ctx: BizHawkClientContext) -> list[RamWrite]:
+        current = (await bizhawk.read(
+            ctx.bizhawk_ctx, [(byte_addr, 1, DOMAIN_MAIN_RAM)],
+        ))[0]
+        if not current or (current[0] & bit_mask):
+            return []
+        return [(byte_addr, [current[0] | bit_mask], DOMAIN_MAIN_RAM)]
+
+    return deliver
+
+
 def _make_bank_deliverer(dw_code: int) -> ItemDeliverer:
     """Return an :class:`ItemDeliverer` that increments the bank slot
     quantity for a 2000-block ``dw_code`` (capped at
@@ -484,6 +514,14 @@ def _build_item_delivery_routes() -> dict[str, ItemDeliverer]:
         recruit_id = digimon_id_for_recruit_item(name)
         if recruit_id is not None:
             routes[name] = _make_recruit_deliverer(recruit_id)
+            continue
+        # Key items live as trigger-array bits, not bank slots — must be
+        # checked before the 2000-block bank route below or AP would
+        # write a meaningless quantity byte and the player would never
+        # actually receive the item.
+        if name in KEYITEM_DELIVERY_RAM_BITS:
+            byte_addr, bit_index = KEYITEM_DELIVERY_RAM_BITS[name]
+            routes[name] = _make_keyitem_bit_deliverer(byte_addr, bit_index)
             continue
         if 2000 <= dw_code < 2000 + RAM_ITEM_BANK_SIZE:
             routes[name] = _make_bank_deliverer(dw_code)
@@ -584,6 +622,9 @@ class DigimonWorldClient(BizHawkClient):
         # the bridge is open from the start; False (vanilla) = leave
         # the bit alone and let the in-game cutscene set it.
         self._bridge_always_open: bool | None = None
+        # Great Canyon bridge: same shape as the Tropical Jungle bridge
+        # toggle, controlling :data:`RAM_GREAT_CANYON_BRIDGE_UNLOCKED`.
+        self._great_canyon_always_open: bool | None = None
         # God Mode: when True, partner stats are pinned to near-max each
         # tick. Testing-only.
         self._god_mode: bool | None = None
@@ -662,6 +703,11 @@ class DigimonWorldClient(BizHawkClient):
             self._bridge_always_open = (
                 int(ctx.slot_data.get("bridge_unlock", 0)) == 0
             )
+        if self._great_canyon_always_open is None and ctx.slot_data is not None:
+            # GreatCanyonUnlock: 0 = always_open (default), 1 = vanilla.
+            self._great_canyon_always_open = (
+                int(ctx.slot_data.get("great_canyon_unlock", 0)) == 0
+            )
         if self._god_mode is None and ctx.slot_data is not None:
             self._god_mode = bool(ctx.slot_data.get("god_mode", 0))
 
@@ -669,6 +715,7 @@ class DigimonWorldClient(BizHawkClient):
             await self._check_locations(ctx)
             await self._deliver_items(ctx)
             await self._reconcile_recruits(ctx)
+            await self._reconcile_keyitem_flags(ctx)
             await self._wipe_chest_sentinels(ctx)
             if self._fast_drimogemon:
                 await self._enforce_fast_drimogemon(ctx)
@@ -680,6 +727,8 @@ class DigimonWorldClient(BizHawkClient):
             await self._enforce_agumon_recruited(ctx)
             if self._bridge_always_open:
                 await self._enforce_bridge_always_open(ctx)
+            if self._great_canyon_always_open:
+                await self._enforce_great_canyon_always_open(ctx)
             if self._god_mode:
                 await self._enforce_god_mode(ctx)
             await self._check_goal(ctx)
@@ -773,6 +822,75 @@ class DigimonWorldClient(BizHawkClient):
             for off in range(BEATEN_BLOCK_SIZE)
             if beaten_bytes[off] != original[off]
         ]
+        if writes:
+            await bizhawk.write(ctx.bizhawk_ctx, writes)
+
+    async def _reconcile_keyitem_flags(self, ctx: BizHawkClientContext) -> None:
+        """Pin key-item trigger bits to AP-delivered state each tick.
+
+        DW1's vanilla rod-give cutscene calls `setTrigger 320`, which
+        flips bit 0 of byte 0x001BDFF5 (the canonical "old fishrod"
+        flag — see memory note `dw1_old_fishrod_flag.md`). We don't
+        patch that out at the bytecode level in v1; instead, this
+        watcher runs each tick and forces the bit to match what AP has
+        actually delivered:
+
+        * AP delivered the item -> bit must be set.
+        * AP has not delivered  -> bit must be cleared, even if the
+          vanilla cutscene just flipped it.
+
+        Net effect: when the player completes the cutscene, the bit is
+        on for ~one watcher tick (~100 ms) before this method clears it.
+        That window is too short for the player to open the menu, so
+        the rod never visibly enters their possession from the vanilla
+        path. The location-check signal (the `Old Fishrod Pickup` AP
+        location, polled at OLD_FISHROD_GATE = trigger 45) is set in
+        the same instruction window and is sticky, so the AP send fires
+        regardless.
+
+        Idempotent: only writes when the byte's actual value differs
+        from the target.
+        """
+
+        if not KEYITEM_DELIVERY_RAM_BITS:
+            return
+
+        received_keyitem_names = {
+            ctx.item_names.lookup_in_game(item.item, ctx.game)
+            for item in ctx.items_received
+        }
+
+        # Group target bits by byte address — multiple key items may share
+        # a byte in the trigger array, so we coalesce reads/writes.
+        targets_by_byte: dict[int, list[tuple[int, bool]]] = {}
+        for item_name, (byte_addr, bit_index) in KEYITEM_DELIVERY_RAM_BITS.items():
+            should_be_set = item_name in received_keyitem_names
+            targets_by_byte.setdefault(byte_addr, []).append((bit_index, should_be_set))
+
+        try:
+            blocks = await bizhawk.read(
+                ctx.bizhawk_ctx,
+                [(addr, 1, DOMAIN_MAIN_RAM) for addr in targets_by_byte],
+            )
+        except bizhawk.RequestFailedError:
+            return
+        if any(len(b) != 1 for b in blocks):
+            return
+
+        writes: list[RamWrite] = []
+        for (byte_addr, bits), block in zip(
+            targets_by_byte.items(), blocks, strict=True,
+        ):
+            current = block[0]
+            new_value = current
+            for bit_index, should_be_set in bits:
+                mask = 1 << bit_index
+                if should_be_set:
+                    new_value |= mask
+                else:
+                    new_value &= ~mask & 0xFF
+            if new_value != current:
+                writes.append((byte_addr, [new_value], DOMAIN_MAIN_RAM))
         if writes:
             await bizhawk.write(ctx.bizhawk_ctx, writes)
 
@@ -882,6 +1000,29 @@ class DigimonWorldClient(BizHawkClient):
             [(byte_addr, [current[0] | bit_mask], DOMAIN_MAIN_RAM)],
         )
 
+    async def _enforce_great_canyon_always_open(self, ctx: BizHawkClientContext) -> None:
+        """Pin the Great Canyon bridge-unlocked trigger bit.
+
+        Same shape as :meth:`_enforce_bridge_always_open`. The byte at
+        :data:`RAM_GREAT_CANYON_BRIDGE_UNLOCKED` holds at least one
+        unrelated story-event flag in lower bits, so the write is a
+        bit-OR rather than a byte assignment.
+        """
+
+        byte_addr, bit_index = RAM_GREAT_CANYON_BRIDGE_UNLOCKED
+        bit_mask = 1 << bit_index
+        current = (await bizhawk.read(
+            ctx.bizhawk_ctx, [(byte_addr, 1, DOMAIN_MAIN_RAM)],
+        ))[0]
+        if not current:
+            return
+        if current[0] & bit_mask:
+            return  # already set
+        await bizhawk.write(
+            ctx.bizhawk_ctx,
+            [(byte_addr, [current[0] | bit_mask], DOMAIN_MAIN_RAM)],
+        )
+
     async def _enforce_easy_monochromon(self, ctx: BizHawkClientContext) -> None:
         """Auto-resolve the Monochromon meat-trade minigame.
 
@@ -974,15 +1115,18 @@ class DigimonWorldClient(BizHawkClient):
         """Pin partner stats to max while the GodMode option is on.
 
         Writes ``999`` to Offense/Defense/Speed/Brain (each u16 LE) and
-        ``9999`` to Max HP / Max MP (each u16 LE). Only writes the
-        bytes that drift, so steady-state cost is one read per tick.
+        ``9999`` to Max HP / Max MP (each u16 LE). Also pins the Auto
+        Pilot bank slot to 99 and the bits counter to ``_MONEY_CAP`` so
+        the player can warp back from anywhere and pay Birdramon-Messenger
+        flight fees indefinitely. Only writes the bytes that drift, so
+        steady-state cost is one read per tick.
 
         Testing aid only — see :class:`worlds.digimon_world.options.GodMode`.
         """
 
         stat_target = 999
         max_hp_mp_target = 9999
-        targets: list[tuple[int, int]] = [
+        u16_targets: list[tuple[int, int]] = [
             (RAM_CURRENT_OFFENSE, stat_target),
             (RAM_CURRENT_DEFENSE, stat_target),
             (RAM_CURRENT_SPEED, stat_target),
@@ -990,22 +1134,48 @@ class DigimonWorldClient(BizHawkClient):
             (RAM_MAX_HP, max_hp_mp_target),
             (RAM_MAX_MP, max_hp_mp_target),
         ]
+        # Auto Pilot lives in DW1 internal item slot 22 -> RAM_ITEM_BANK_BASE + 22.
+        auto_pilot_addr = RAM_ITEM_BANK_BASE + 22
+
         try:
-            blocks = await bizhawk.read(
+            u16_blocks = await bizhawk.read(
                 ctx.bizhawk_ctx,
-                [(addr, 2, DOMAIN_MAIN_RAM) for addr, _ in targets],
+                [(addr, 2, DOMAIN_MAIN_RAM) for addr, _ in u16_targets],
+            )
+            auto_pilot_block, money_block = await bizhawk.read(
+                ctx.bizhawk_ctx,
+                [
+                    (auto_pilot_addr, 1, DOMAIN_MAIN_RAM),
+                    (RAM_CURRENT_BITS, 4, DOMAIN_MAIN_RAM),
+                ],
             )
         except bizhawk.RequestFailedError:
             return
-        if len(blocks) != len(targets) or any(len(b) != 2 for b in blocks):
+        if (
+            len(u16_blocks) != len(u16_targets)
+            or any(len(b) != 2 for b in u16_blocks)
+            or len(auto_pilot_block) != 1
+            or len(money_block) != 4
+        ):
             return
+
         writes: list[RamWrite] = []
-        for (addr, target), block in zip(targets, blocks, strict=True):
+        for (addr, target), block in zip(u16_targets, u16_blocks, strict=True):
             current = int.from_bytes(block, "little")
             if current != target:
                 writes.append((
                     addr, list(target.to_bytes(2, "little")), DOMAIN_MAIN_RAM,
                 ))
+        if auto_pilot_block[0] != _BANK_QUANTITY_CAP:
+            writes.append((
+                auto_pilot_addr, [_BANK_QUANTITY_CAP], DOMAIN_MAIN_RAM,
+            ))
+        if int.from_bytes(money_block, "little") != _MONEY_CAP:
+            writes.append((
+                RAM_CURRENT_BITS,
+                list(_MONEY_CAP.to_bytes(4, "little")),
+                DOMAIN_MAIN_RAM,
+            ))
         if writes:
             await bizhawk.write(ctx.bizhawk_ctx, writes)
 

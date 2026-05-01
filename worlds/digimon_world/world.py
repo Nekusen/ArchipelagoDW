@@ -111,6 +111,7 @@ class DigimonWorldWorld(World):
             "easy_monochromon",
             "stat_gain_multiplier",
             "bridge_unlock",
+            "great_canyon_unlock",
             "god_mode",
         ))
         slot_data["vanilla_grant_chests"] = sorted(

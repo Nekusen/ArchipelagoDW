@@ -146,8 +146,8 @@ class TestChestDispatch(DigimonWorldTestBase):
             seen[key] = name
 
     def test_dispatch_size(self) -> None:
-        # 50 recruits + 65 chests
-        self.assertEqual(len(LOCATION_RAM_BITS), 50 + 65)
+        # 50 recruits + 65 chests + 1 key item (Old Fishrod Pickup)
+        self.assertEqual(len(LOCATION_RAM_BITS), 50 + 65 + 1)
 
 
 # =============================================================================

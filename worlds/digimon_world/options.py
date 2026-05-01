@@ -85,6 +85,25 @@ class BridgeUnlock(Choice):
     default = option_always_open
 
 
+class GreatCanyonUnlock(Choice):
+    """Great Canyon bridge unlock state.
+
+    Vanilla DW1 keeps the Great Canyon bridge closed until the player
+    has reached 6 prosperity AND walks onto a specific unlock spot,
+    which fires a cutscene that opens the bridge.
+
+    * ``always_open`` — the bridge is open from the start (default).
+      The client pins bit 7 of :data:`RAM_GREAT_CANYON_BRIDGE_UNLOCKED`
+      so the bit is always 1, even on a fresh save.
+    * ``vanilla`` — the unlock cutscene must trigger the bit organically.
+    """
+
+    display_name = "Great Canyon Bridge"
+    option_always_open = 0
+    option_vanilla = 1
+    default = option_always_open
+
+
 class TypeLockUnlocks(DefaultOnToggle):
     """Remove the Vaccine/Data/Virus/Monzaemon type gates on Greylord's
     Mansion, Ice Sanctuary, and Toy Town.
@@ -198,6 +217,7 @@ class DigimonWorldOptions(PerGameCommonOptions):
     skip_intro: SkipIntro
     type_lock_unlocks: TypeLockUnlocks
     bridge_unlock: BridgeUnlock
+    great_canyon_unlock: GreatCanyonUnlock
     spawn_rate_boost: SpawnRateBoost
     stat_gain_multiplier: StatGainMultiplier
     combat_stat_multiplier: CombatStatMultiplier
@@ -210,7 +230,8 @@ option_groups: list[OptionGroup] = [
         "Quality of Life",
         [
             FastDrimogemon, EasyMonochromon, SkipIntro, TypeLockUnlocks,
-            BridgeUnlock, SpawnRateBoost, StatGainMultiplier, CombatStatMultiplier,
+            BridgeUnlock, GreatCanyonUnlock, SpawnRateBoost,
+            StatGainMultiplier, CombatStatMultiplier,
         ],
     ),
     OptionGroup("Testing", [GodMode]),

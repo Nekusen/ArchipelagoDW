@@ -152,7 +152,23 @@
       "Bash(venv/Scripts/python.exe -m ruff check worlds/digimon_world/options.py worlds/digimon_world/world.py worlds/digimon_world/client.py)",
       "Bash(venv/Scripts/python.exe -m ruff check --fix worlds/digimon_world/client.py worlds/digimon_world/options.py worlds/digimon_world/world.py)",
       "Bash(venv/Scripts/python.exe -m ruff check worlds/digimon_world/client.py)",
-      "Bash(venv/Scripts/python.exe -m ruff check worlds/digimon_world/client.py worlds/digimon_world/options.py worlds/digimon_world/world.py)"
+      "Bash(venv/Scripts/python.exe -m ruff check worlds/digimon_world/client.py worlds/digimon_world/options.py worlds/digimon_world/world.py)",
+      "Bash(grep -n \"Palmon — 72-site full sweep\\\\|# ====================================================================$\" worlds/digimon_world/data/addresses.py)",
+      "Bash(python dw1_ram_diff.py dw1_ram_snapshot_0[1-5].txt --gaps-only)",
+      "Bash(python dw1_ram_diff.py dw1_ram_snapshot_01.txt dw1_ram_snapshot_02.txt dw1_ram_snapshot_03.txt dw1_ram_snapshot_04.txt dw1_ram_snapshot_05.txt --gaps-only)",
+      "Bash(python dw1_ram_diff.py ./dw1_ram_snapshot_01.txt ./dw1_ram_snapshot_02.txt ./dw1_ram_snapshot_03.txt ./dw1_ram_snapshot_04.txt ./dw1_ram_snapshot_05.txt --gaps-only)",
+      "Bash(python c:/opt/dev/AP/ArchipelagoDW/worlds/digimon_world/tools/dw1_ram_diff.py c:/opt/dev/AP/ArchipelagoDW/worlds/digimon_world/tools/dw1_ram_snapshot_01.txt c:/opt/dev/AP/ArchipelagoDW/worlds/digimon_world/tools/dw1_ram_snapshot_02.txt c:/opt/dev/AP/ArchipelagoDW/worlds/digimon_world/tools/dw1_ram_snapshot_03.txt c:/opt/dev/AP/ArchipelagoDW/worlds/digimon_world/tools/dw1_ram_snapshot_04.txt c:/opt/dev/AP/ArchipelagoDW/worlds/digimon_world/tools/dw1_ram_snapshot_05.txt --gaps-only)",
+      "Bash(python c:/opt/dev/AP/ArchipelagoDW/worlds/digimon_world/tools/dw1_ram_diff.py --help)",
+      "Bash(python c:/opt/dev/AP/ArchipelagoDW/worlds/digimon_world/tools/dw1_ram_diff.py c:/opt/dev/AP/ArchipelagoDW/worlds/digimon_world/tools/dw1_ram_snapshot_01.txt c:/opt/dev/AP/ArchipelagoDW/worlds/digimon_world/tools/dw1_ram_snapshot_02.txt c:/opt/dev/AP/ArchipelagoDW/worlds/digimon_world/tools/dw1_ram_snapshot_03.txt c:/opt/dev/AP/ArchipelagoDW/worlds/digimon_world/tools/dw1_ram_snapshot_04.txt --gaps-only)",
+      "Bash(python -c \"from worlds.digimon_world import locations, regions, items; from worlds.digimon_world.data import addresses; from worlds.digimon_world import client; print\\('imports OK'\\); print\\(f'KEYITEM_LOCATION_RAM_BITS = {addresses.KEYITEM_LOCATION_RAM_BITS}'\\); print\\(f'KEYITEM_DELIVERY_RAM_BITS = {addresses.KEYITEM_DELIVERY_RAM_BITS}'\\); print\\(f'\\\\\"Old Fishrod Pickup\\\\\" in LOCATION_NAME_TO_ID = {\\\\\"Old Fishrod Pickup\\\\\" in locations.LOCATION_NAME_TO_ID}'\\); print\\(f'\\\\\"Gear Savanna\\\\\" in REGION_NAMES = {\\\\\"Gear Savanna\\\\\" in regions.REGION_NAMES}'\\); print\\(f'old fishrod route type = {type\\(client.ITEM_DELIVERY_ROUTES.get\\(\\\\\"old fishrod\\\\\"\\)\\).__name__}'\\)\")",
+      "Bash(python -m pytest worlds/digimon_world/test -x -q)",
+      "Bash(python -m pytest test/general -k \"digimon\" -q)",
+      "Bash(python -m ruff check worlds/digimon_world/client.py worlds/digimon_world/locations.py worlds/digimon_world/regions.py worlds/digimon_world/data/addresses.py worlds/digimon_world/test/test_client.py)",
+      "Bash(python -m ruff check worlds/digimon_world/client.py worlds/digimon_world/locations.py worlds/digimon_world/regions.py worlds/digimon_world/data/addresses.py)",
+      "Bash(python -m ruff check worlds/digimon_world/data/addresses.py)",
+      "Bash(python -m ruff check worlds/digimon_world/client.py)",
+      "Bash(python -m ruff check --diff worlds/digimon_world/client.py)",
+      "Bash(python -m ruff check worlds/digimon_world/client.py worlds/digimon_world/locations.py worlds/digimon_world/regions.py)"
     ]
   }
 }
