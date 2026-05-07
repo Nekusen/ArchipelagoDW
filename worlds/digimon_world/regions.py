@@ -1,44 +1,58 @@
-"""Region graph for the Digimon World 1 APWorld (Phase 2: full map).
+"""Region graph for the Digimon World 1 APWorld (Phase 6).
 
-The graph is **mostly flat** — File City is the hub, every outer area is
-a direct entrance off it. That works because DW1 is fundamentally a hub
-game: you always return to the city. Inter-area sequencing is encoded
-via *access rules* on the entrances rather than a deep region tree.
+The graph reflects the **actual in-game geography** with two halves
+that meet at Misty Trees but cannot cross through Misty Trees in AP
+logic — flying via Birdramon is the only way to switch sides.
 
-Where the in-game map *forces* a sequencing — e.g. you must go through
-the Meramon Tunnel to reach the area beyond, or you only reach Sand Bay
-after Whamon swallows you — those are explicit Entrance children
-(``Beetle Land`` is a child of ``Greatlake`` because you reach it via
-the Whamon-mediated swim, etc.). The cluster of Phase-2 access rules
-lives in :mod:`.rules`.
-
-Region inventory (matches the assignments in :mod:`.locations`):
+Region inventory (22 regions):
 
 * ``Menu`` — AP origin.
-* ``File City`` — hub. Agumon recruit, Start Game, prosperity gifts,
-  general chests.
-* ``Native Forest`` — Phase 1 Rookie cluster (Betamon, Gabumon,
-  Elecmon, Patamon, Biyomon, Sukamon, Palmon, Vegiemon).
-* ``Tropical Jungle`` — Coelamon, Centarumon, Bakemon, Kunemon, Piximon.
-* ``Greatlake`` — fishing-rod gated. Seadramon, Whamon, Numemon,
-  Shellmon, Ogremon. Source for the Whamon-swallow access route to
-  ``Beetle Land`` and ``Sand Bay``.
-* ``Meramon Tunnel`` — Meramon recruit; gateway to many "post-Meramon"
-  areas via the access-rule cluster in :mod:`.rules`.
-* ``Mt. Panorama`` — Greymon, Tyrannomon, Unimon, Mamemon, Leomon.
-* ``Misty Trees`` — Cherrymon route to Monzaemon and Kokatorimon.
-* ``Beetle Land`` — Kabuterimon, Kuwagamon (post-Seadramon).
-* ``Drill Tunnel`` — Drimogemon recruit.
-* ``Sand Bay`` — Penguinmon (post-Whamon).
-* ``Factorial Town`` — Andromon, Giromon, MetalMamemon (post-Whamon
-  chain).
-* ``Toy Town`` — Nanimon (multi-area gate).
-* ``Freezeland`` — Frigimon, Mojyamon, Garurumon, Angemon.
-* ``Great Canyon`` — Birdramon, Monochromon.
-* ``Mt. Infinity`` — late-game cluster: Vademon, SkullGreymon, Devimon,
-  Airdramon, Etemon, Megadramon. Also feeds the Tower.
-* ``Big Store`` — Ninjamon shop (50 PP gate).
-* ``Tower`` — endgame; MetalGreymon, Digitamamon, Final Battle event.
+* ``File City`` — hub. Greymon, Airdramon. Birdra Transport opens here
+  after Birdramon Recruit.
+* ``Native Forest`` — entry to both halves; sub-points include Coela
+  Point (Coelamon), Dragon Eye Lake (Seadramon), Digimon Bridge
+  (Ninjamon at night), Tree House (Etemon).
+* **Right side (Tropical Jungle chain)**:
+
+    * ``Tropical Jungle`` — gated by the TJ-bridge mode option.
+    * ``Overdell`` — Bakemon, plus Grey Lord's Mansion (SkullGreymon
+      via Mansion Key + Frig Key + Steak from Freezeland).
+    * ``Ancient Dino Region`` — Tyrannomon.
+    * ``Greatlake`` (= Dragon Eye Lake cluster) — fishing region.
+    * ``Beetle Land`` — only via Blue Flute / rod path or
+      Birdramon Flight.
+    * ``Great Canyon`` — gated by the GC-bridge mode option.
+    * ``Freezeland`` — recruits cluster, chains into Misty Trees.
+
+* **Left side (Drill Tunnel chain)**:
+
+    * ``Drill Tunnel`` — Drimogemon.
+    * ``Meramon Tunnel`` — Meramon; gated by Lava Cave Access mode.
+    * ``Mt. Panorama`` — Unimon, Mamemon, Vademon.
+    * ``Gear Savanna`` — Patamon, Biyomon, Elecmon, Sukamon, Leomon.
+    * ``Geko Swamp`` — junction approach for Misty Trees.
+
+* **Junction & terminals**:
+
+    * ``Misty Trees`` — Gabumon, Kokatorimon. Reachable via Freezeland
+      (right), Geko Swamp (left), or Birdramon Flight: Misty Trees.
+    * ``Toy Town`` — Monzaemon, Nanimon. From Misty Trees.
+    * ``Mt. Infinity`` — Devimon, Megadramon, MetalGreymon. 50-PP gate
+      from File City.
+    * ``Big Store`` — late-game shop. 50-PP gate.
+    * ``Tower`` — endgame; AS Decoder + 50 PP from Mt. Infinity.
+    * ``Factorial Town`` — Andromon/Giromon/MetalMamemon/Numemon. The
+      only entry is Whamon's ferry from File City after Whamon Recruit.
+    * ``Card Vending`` — synthetic region holding the 66 card-vending AP
+      locations when :class:`worlds.digimon_world.options.CardLocations`
+      is on. Two physical machines exist in DW1: one in Gear Savanna
+      (free-on-region-access) and one in File City (Betamon + Patamon
+      Recruit prereq). The synthetic region has both as parents so a
+      card location is reachable as long as either machine is.
+
+Edges are declared here without rules; access rules are attached in
+:mod:`.rules`. ``Menu``, ``File City``, and ``Native Forest`` are
+unconditional from the start.
 """
 
 from __future__ import annotations
@@ -55,63 +69,72 @@ REGION_NAMES: Final[tuple[str, ...]] = (
     "Menu",
     "File City",
     "Native Forest",
+    # Right side
     "Tropical Jungle",
+    "Overdell",
+    "Ancient Dino Region",
     "Greatlake",
+    "Beetle Land",
+    "Great Canyon",
+    "Freezeland",
+    # Left side
+    "Drill Tunnel",
     "Meramon Tunnel",
     "Mt. Panorama",
+    "Gear Savanna",
+    "Geko Swamp",
+    # Junction & terminals
     "Misty Trees",
-    "Beetle Land",
-    "Drill Tunnel",
-    "Sand Bay",
-    "Factorial Town",
     "Toy Town",
-    "Freezeland",
-    "Great Canyon",
     "Mt. Infinity",
     "Big Store",
     "Tower",
-    "Overdell",
-    "Gear Savanna",
+    "Factorial Town",
+    # Synthetic — populated only when CardLocations is on
+    "Card Vending",
 )
 
 
 # Edges. Rules are attached in :mod:`.rules`; here we just declare
-# adjacency. ``Menu`` and ``File City`` are unconditional. Everything
-# else gets a rule attached after creation.
+# adjacency. Multiple edges into the same target are interpreted as OR
+# by AP region access (any reachable parent grants access).
 
 _EDGES: Final[tuple[tuple[str, str], ...]] = (
     ("Menu", "File City"),
-    # File City connects directly to the immediately-explorable cluster.
+    # File City direct entries
     ("File City", "Native Forest"),
-    ("File City", "Tropical Jungle"),
-    ("File City", "Greatlake"),
-    ("File City", "Meramon Tunnel"),
-    # Post-Meramon cluster (rule = HasMeramonAccess).
-    ("File City", "Mt. Panorama"),
-    ("File City", "Misty Trees"),
-    ("File City", "Factorial Town"),
-    ("File City", "Drill Tunnel"),
-    # Post-Seadramon (Whamon swallow / fishing-rod chain).
-    ("Greatlake", "Beetle Land"),
-    ("Greatlake", "Sand Bay"),
-    # Misty Trees → Cherrymon → Toy Town / Freezeland.
+    ("File City", "Mt. Infinity"),       # 50 PP
+    ("File City", "Big Store"),          # 50 PP
+    ("File City", "Factorial Town"),     # Whamon Recruit
+    # Birdramon flights — alternative entry from File City
+    ("File City", "Misty Trees"),        # Has(BR Recruit) & Has(Flight: Misty Trees)
+    ("File City", "Gear Savanna"),       # Has(BR Recruit) & Has(Flight: Gear Savanna)
+    ("File City", "Ancient Dino Region"),  # Has(BR Recruit) & Has(Flight: Ancient Dino)
+    ("File City", "Freezeland"),         # Has(BR Recruit) & Has(Flight: Freezeland)
+    ("File City", "Beetle Land"),        # Has(BR Recruit) & Has(Flight: Beetle Land)
+    # Mt. Infinity terminal
+    ("Mt. Infinity", "Tower"),           # AS Decoder + 50 PP
+    # Left chain: Native Forest → Drill Tunnel → Meramon Tunnel → Mt. Panorama → ...
+    ("Native Forest", "Drill Tunnel"),
+    ("Drill Tunnel", "Meramon Tunnel"),  # Mode-gated (Lava Cave Access)
+    ("Meramon Tunnel", "Mt. Panorama"),
+    ("Mt. Panorama", "Gear Savanna"),
+    ("Gear Savanna", "Geko Swamp"),
+    ("Geko Swamp", "Misty Trees"),
     ("Misty Trees", "Toy Town"),
-    ("Misty Trees", "Freezeland"),
-    # Yuramon Quest / Shellmon → Great Canyon (alt path to Freezeland too).
-    ("Greatlake", "Great Canyon"),
+    # Right chain: Native Forest → Tropical Jungle / Greatlake → ...
+    ("Native Forest", "Tropical Jungle"),  # Mode-gated (TJ Bridge)
+    ("Tropical Jungle", "Overdell"),
+    ("Tropical Jungle", "Ancient Dino Region"),
+    ("Native Forest", "Greatlake"),
+    ("Greatlake", "Beetle Land"),        # Has(rod) | Has(Blue Flute)
+    ("Greatlake", "Great Canyon"),       # Mode-gated (GC Bridge)
     ("Great Canyon", "Freezeland"),
-    # Late-game: Mt. Infinity behind 45 PP + recruits; Big Store behind 50 PP.
-    ("File City", "Mt. Infinity"),
-    ("File City", "Big Store"),
-    # Tower is endgame; gated on the 50-PP cluster + Mt. Infinity progress.
-    ("Mt. Infinity", "Tower"),
-    # Overdell Cemetery & Grey Lord's Mansion (SkullGreymon area).
-    ("File City", "Overdell"),
-    # Gear Savanna (west of File City) — Trash Mountain sub-area is
-    # where the Old Fishrod is found in vanilla DW1. No gating from the
-    # hub; rod is the prerequisite for Greatlake (Seadramon), not the
-    # other way around.
-    ("File City", "Gear Savanna"),
+    ("Freezeland", "Misty Trees"),
+    # Card vending — multi-parent. Either machine reaches the synthetic
+    # region. Rules attached in :mod:`.rules`.
+    ("Gear Savanna", "Card Vending"),    # free; Gear Savanna access alone
+    ("File City",    "Card Vending"),    # Has(Betamon Recruit) & Has(Patamon Recruit)
 )
 
 

@@ -77,11 +77,19 @@ class BridgeUnlock(Choice):
       The client pins bit 1 of :data:`RAM_TROPICAL_JUNGLE_BRIDGE_FIXED`
       so the bit is always 1, even on a fresh save.
     * ``vanilla`` — the unlock cutscene must trigger the bit organically.
+    * ``shuffled`` — the ``Tropical Jungle Bridge`` AP item must be
+      delivered before the bridge is fixed; receiving the item pins
+      the bit (no cutscene played, bridge appears "as if always there"
+      from that point on). The vanilla cutscene path also still works
+      as a fallback if the player reaches the trigger tile by other
+      means before AP delivers. The ``Tropical Jungle Bridge Fixed``
+      AP location fires the first time the bit is set.
     """
 
     display_name = "Tropical Jungle Bridge"
     option_always_open = 0
     option_vanilla = 1
+    option_shuffled = 2
     default = option_always_open
 
 
@@ -96,12 +104,42 @@ class GreatCanyonUnlock(Choice):
       The client pins bit 7 of :data:`RAM_GREAT_CANYON_BRIDGE_UNLOCKED`
       so the bit is always 1, even on a fresh save.
     * ``vanilla`` — the unlock cutscene must trigger the bit organically.
+    * ``shuffled`` — the ``Great Canyon Bridge`` AP item must be
+      delivered before the bridge is fixed; receiving the item pins
+      the bit (no cutscene). The vanilla cutscene is patcher-disabled
+      in this mode (its gate becomes self-contradictory) so reaching 6
+      prosperity organically can no longer bypass the AP gate. The
+      ``Great Canyon Bridge Fixed`` AP location fires when the bit
+      is set.
     """
 
     display_name = "Great Canyon Bridge"
     option_always_open = 0
     option_vanilla = 1
+    option_shuffled = 2
     default = option_always_open
+
+
+class LavaCaveAccess(Choice):
+    """Drill Tunnel boulder gate (path to Lava Cave / Meramon / Mt. Panorama).
+
+    Vanilla DW1 gates the boulder behind a digimon-evolution-stage
+    whitelist (Champion or above can move it). This option converts that
+    gate into either a no-op or an AP-controlled progression item.
+
+    * ``vanilla`` — keep DW1's original behavior. The boulder requires
+      a Champion-class digimon to move; no AP item or location is created.
+    * ``shuffled`` — the boulder check is rewritten to gate on an
+      AP-controlled trigger bit. The ``Lava Cave Access`` AP item must be
+      delivered before the boulder cutscene will succeed (any digimon may
+      then move it). Triggering the cutscene fires the
+      ``Drill Tunnel Boulder`` AP location. Default.
+    """
+
+    display_name = "Lava Cave Access"
+    option_vanilla = 0
+    option_shuffled = 1
+    default = option_shuffled
 
 
 class TypeLockUnlocks(DefaultOnToggle):
@@ -191,6 +229,91 @@ class SpawnRateBoost(Range):
     default = 50
 
 
+class ChestRandomization(DefaultOnToggle):
+    """Whether DW1's 65 chests participate in AP randomization.
+
+    * **On (default)** — chests are AP locations. AP fill places any
+      pool item at each chest; the patcher rewrites every
+      ``spawnChest`` opcode's item byte to match what fill chose. The
+      chestGiveItem wrapper short-circuits the AP-sentinel item id so
+      foreign-world items don't pollute the player's inventory.
+    * **Off** — chests are NOT AP locations. The 65 chests retain
+      their vanilla items; the patcher emits no chest-related tokens
+      (chest item bytes, AP_ITEM table entry, chestGiveItem wrapper).
+      Players can open chests and get the vanilla item, with no AP
+      check fired and no foreign-world item delivered through them.
+    """
+
+    display_name = "Chest Randomization"
+
+
+class RecruitRandomization(DefaultOnToggle):
+    """Whether ``<Name> Recruit`` items shuffle into the multiworld pool.
+
+    * **On (default)** — each recruit's "<Name> Recruit" AP item can
+      end up at any AP location in any world. To get Tyrannomon into
+      File City, *somebody* (you, or another player) has to find and
+      send Tyrannomon Recruit. Whoever beats Tyrannomon at his spawn
+      gets the AP location check, but the recruit item itself is
+      anywhere in the multiworld.
+    * **Off** — each ``<Name> Recruit`` item is locked to its own
+      recruit AP location. Beating Tyrannomon at his spawn fires the
+      AP location *and* immediately delivers Tyrannomon Recruit to
+      you. No recruit item ever leaves your slot; recruits play out
+      essentially vanilla. Other AP items (chests, etc.) can still
+      be placed at recruit locations if those slots are otherwise
+      unconstrained — wait, no: with this off, the recruit item is
+      locked-in, so the recruit location holds the recruit and
+      nothing else.
+    """
+
+    display_name = "Recruit Randomization"
+
+
+class VendingLocations(Toggle):
+    """Add the consumable vending machines as AP locations.
+
+    DW1 has four consumable vending machines:
+
+    * **Greatlake** — Meat / DigiMushroom (2 items)
+    * **Tropical Jungle** — Hund MP / Thous MP recovery (2)
+    * **Gear Savanna** — Special Prizes (Small Recovery / Portable Potty)
+      and a sub-vendor MP Stand (Hund MP / Thous MP) on the same screen (4)
+    * **Ancient Dino Region** — Try gacha, random output (4)
+
+    With this on, each item-purchase becomes its own AP location (12
+    total). The patcher overwrites the vanilla ``giveItem`` /
+    ``addStats`` opcodes with ``setTrigger N`` so the player still pays
+    bits and sees a result message, but no vanilla item is granted —
+    the AP-placed item at that location is delivered to the player's
+    bank instead. Menu and result text get rewritten to show the
+    AP item's *classification* (Quest / Bonus / Junk) instead of the
+    vanilla item name. Each location's region matches the in-game
+    machine location.
+    """
+
+    display_name = "Vending Machine Locations"
+
+
+class CardLocations(Toggle):
+    """Add the Digimon Card vending machines as AP locations.
+
+    DW1's two card vending machines (Gear Savanna and the File City
+    machine that opens after both Betamon and Patamon are in city) sell
+    66 collectible Digimon cards. With this on, each unique card the
+    player buys for the first time fires an AP location check. Detection
+    uses DW1's vanilla per-card nibble counter starting at
+    :data:`worlds.digimon_world.data.addresses.RAM_CARD_LIST_BASE` — no
+    ROM patching required.
+
+    Logic gating: cards are only considered reachable once the player
+    can reach Gear Savanna OR has received both ``Betamon Recruit`` and
+    ``Patamon Recruit`` (the prereq for the File City machine).
+    """
+
+    display_name = "Card Vending Locations"
+
+
 class GodMode(Toggle):
     """Pin partner Digimon's combat stats to max each client tick.
 
@@ -218,19 +341,26 @@ class DigimonWorldOptions(PerGameCommonOptions):
     type_lock_unlocks: TypeLockUnlocks
     bridge_unlock: BridgeUnlock
     great_canyon_unlock: GreatCanyonUnlock
+    lava_cave_access: LavaCaveAccess
     spawn_rate_boost: SpawnRateBoost
     stat_gain_multiplier: StatGainMultiplier
     combat_stat_multiplier: CombatStatMultiplier
+    chest_randomization: ChestRandomization
+    recruit_randomization: RecruitRandomization
+    card_locations: CardLocations
+    vending_locations: VendingLocations
     god_mode: GodMode
 
 
 option_groups: list[OptionGroup] = [
     OptionGroup("Goal", [Goal]),
+    OptionGroup("Randomization", [ChestRandomization, RecruitRandomization]),
+    OptionGroup("Locations", [CardLocations, VendingLocations]),
     OptionGroup(
         "Quality of Life",
         [
             FastDrimogemon, EasyMonochromon, SkipIntro, TypeLockUnlocks,
-            BridgeUnlock, GreatCanyonUnlock, SpawnRateBoost,
+            BridgeUnlock, GreatCanyonUnlock, LavaCaveAccess, SpawnRateBoost,
             StatGainMultiplier, CombatStatMultiplier,
         ],
     ),

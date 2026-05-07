@@ -4,10 +4,11 @@ Location IDs use DWAP's ``base_id = 69_000_000`` convention, partitioned
 the same way:
 
 * ``69_001_xxx`` — chests (65)
-* ``69_002_xxx`` — cards (reserved for future, unused in v1)
+* ``69_002_xxx`` — cards (66, opt-in via :class:`worlds.digimon_world.options.CardLocations`)
 * ``69_003_xxx`` — start-game / starter pickup (1)
 * ``69_004_xxx`` — reserved (was prosperity NPC gifts; gone in v7)
 * ``69_005_xxx``..``69_054_xxx`` — recruit checks, one Digimon per 1000-block
+* ``69_055_xxx`` — vending machines (12, opt-in via :class:`worlds.digimon_world.options.VendingLocations`)
 
 Locked v1 MVP scope: chests + recruits + starter. NPC-gift "K Prosperity"
 locations are gone — prosperity is now a real AP item shipped in the
@@ -31,6 +32,12 @@ from typing import TYPE_CHECKING, Final, NamedTuple
 
 from BaseClasses import Location
 
+from .data.addresses import (
+    CARD_LOCATION_NIBBLES,
+    VENDING_LOCATION_NAMES,
+    VENDING_LOCATION_REGIONS,
+)
+
 if TYPE_CHECKING:
     from .world import DigimonWorldWorld
 
@@ -52,63 +59,86 @@ class LocationEntry(NamedTuple):
 # Ninjamon = 69_054_000). Region assignment reflects the recruitment-flowchart
 # transcription in references/dw1_recruitment_logic.md and DW1 map knowledge.
 
-# Phase 5 piece C: Agumon is dropped from the recruit-location pool.
-# His recruit bit is force-set by the client every tick (he's the bank
-# NPC and that's a key delivery mechanic — see
-# :meth:`worlds.digimon_world.client.DigimonWorldClient._enforce_agumon_recruited`).
-# Pre-setting bit 203 also blocks the wild-Agumon-fight spawn, so the
-# Agumon AP location can never fire; better to drop it than risk the
-# bank breaking.
+# Phase 6 region assignments (cross-checked vs almarsguides + community
+# guides; see references/recruit_logic_phase5.md and the Phase 6 design
+# doc).
+#
+# Two recruits are dropped from the AP location pool:
+#
+# * **Agumon** — bank NPC, force-recruited by the client. Pre-setting his
+#   bit blocks the wild-Agumon-fight spawn, so the AP location can never
+#   fire. See ``client.DigimonWorldClient._enforce_agumon_recruited``.
+# * **Digitamamon** — post-game optional goal (only reachable after
+#   defeating Machinedramon + reload + return to final chamber). Per
+#   user direction: not an AP location.
+#
+# Names match :data:`addresses.RECRUIT_RAM_BITS` keys exactly (note the
+# in-repo spelling "Vegiemon" — the in-game item table uses that form).
 _RECRUIT_REGIONS: Final[dict[str, str]] = {
-    "Betamon":      "Native Forest",
-    "Greymon":      "Mt. Panorama",
-    "Devimon":      "Mt. Infinity",
-    "Airdramon":    "Mt. Infinity",
-    "Tyrannomon":   "Mt. Panorama",
-    "Meramon":      "Meramon Tunnel",
-    "Seadramon":    "Greatlake",
-    "Numemon":      "Greatlake",
-    "MetalGreymon": "Tower",
-    "Mamemon":      "Mt. Panorama",
-    "Monzaemon":    "Misty Trees",
-    "Gabumon":      "Native Forest",
-    "Elecmon":      "Native Forest",
-    "Kabuterimon":  "Beetle Land",
-    "Angemon":      "Freezeland",
-    "Birdramon":    "Great Canyon",
-    "Garurumon":    "Freezeland",
-    "Frigimon":     "Freezeland",
-    "Whamon":       "Greatlake",
-    "Vegiemon":     "Native Forest",
-    "SkullGreymon": "Overdell",
-    "MetalMamemon": "Factorial Town",
-    "Vademon":      "Mt. Infinity",
-    "Patamon":      "Native Forest",
-    "Kunemon":      "Tropical Jungle",
-    "Unimon":       "Mt. Panorama",
-    "Ogremon":      "Greatlake",
-    "Shellmon":     "Greatlake",
+    # File City
+    "Greymon":      "File City",
+    "Airdramon":    "File City",
+    # Native Forest
+    "Palmon":       "Native Forest",
+    "Kunemon":      "Native Forest",
+    "Coelamon":     "Native Forest",
+    "Seadramon":    "Native Forest",
+    "Ninjamon":     "Native Forest",
+    "Etemon":       "Native Forest",
+    # Tropical Jungle
+    "Betamon":      "Tropical Jungle",
+    "Vegiemon":     "Tropical Jungle",
     "Centarumon":   "Tropical Jungle",
-    "Bakemon":      "Tropical Jungle",
+    "Piximon":      "Tropical Jungle",
+    # Overdell
+    "Bakemon":      "Overdell",
+    "SkullGreymon": "Overdell",
+    # Ancient Dino Region
+    "Tyrannomon":   "Ancient Dino Region",
+    # Beetle Land
+    "Kabuterimon":  "Beetle Land",
+    "Kuwagamon":    "Beetle Land",
+    # Great Canyon
+    "Birdramon":    "Great Canyon",
+    "Monochromon":  "Great Canyon",
+    "Shellmon":     "Great Canyon",
+    "Ogremon":      "Great Canyon",
+    # Freezeland
+    "Frigimon":     "Freezeland",
+    "Mojyamon":     "Freezeland",
+    "Penguinmon":   "Freezeland",
+    "Garurumon":    "Freezeland",
+    "Angemon":      "Freezeland",
+    "Whamon":       "Freezeland",
+    # Drill Tunnel
     "Drimogemon":   "Drill Tunnel",
-    "Sukamon":      "Native Forest",
+    # Meramon Tunnel
+    "Meramon":      "Meramon Tunnel",
+    # Mt. Panorama
+    "Unimon":       "Mt. Panorama",
+    "Mamemon":      "Mt. Panorama",
+    "Vademon":      "Mt. Panorama",
+    # Gear Savanna
+    "Patamon":      "Gear Savanna",
+    "Biyomon":      "Gear Savanna",
+    "Elecmon":      "Gear Savanna",
+    "Sukamon":      "Gear Savanna",
+    "Leomon":       "Gear Savanna",
+    # Misty Trees
+    "Gabumon":      "Misty Trees",
+    "Kokatorimon":  "Misty Trees",
+    # Toy Town
+    "Monzaemon":    "Toy Town",
+    "Nanimon":      "Toy Town",
+    # Factorial Town
+    "Numemon":      "Factorial Town",
     "Andromon":     "Factorial Town",
     "Giromon":      "Factorial Town",
-    "Etemon":       "Mt. Infinity",
-    "Biyomon":      "Native Forest",
-    "Palmon":       "Native Forest",
-    "Monochromon":  "Great Canyon",
-    "Leomon":       "Mt. Panorama",
-    "Coelamon":     "Tropical Jungle",
-    "Kokatorimon":  "Misty Trees",
-    "Kuwagamon":    "Beetle Land",
-    "Mojyamon":     "Freezeland",
-    "Nanimon":      "Toy Town",
+    "MetalMamemon": "Factorial Town",
+    # Mt. Infinity
+    "Devimon":      "Mt. Infinity",
     "Megadramon":   "Mt. Infinity",
-    "Piximon":      "Tropical Jungle",
-    "Digitamamon":  "Tower",
-    "Penguinmon":   "Sand Bay",
-    "Ninjamon":     "Big Store",
+    "MetalGreymon": "Mt. Infinity",
 }
 
 _RECRUIT_DW_IDS: Final[dict[str, int]] = {
@@ -127,13 +157,15 @@ _RECRUIT_DW_IDS: Final[dict[str, int]] = {
     "Biyomon": 69_041_000, "Palmon": 69_042_000, "Monochromon": 69_043_000,
     "Leomon": 69_044_000, "Coelamon": 69_045_000, "Kokatorimon": 69_046_000,
     "Kuwagamon": 69_047_000, "Mojyamon": 69_048_000, "Nanimon": 69_049_000,
-    "Megadramon": 69_050_000, "Piximon": 69_051_000, "Digitamamon": 69_052_000,
+    "Megadramon": 69_050_000, "Piximon": 69_051_000,
+    # 69_052_000 reserved (was Digitamamon — now dropped)
     "Penguinmon": 69_053_000, "Ninjamon": 69_054_000,
 }
 
 RECRUIT_NAMES: Final[tuple[str, ...]] = tuple(_RECRUIT_REGIONS)
-# Phase 5 piece C: Agumon dropped (see _RECRUIT_REGIONS comment).
-assert len(RECRUIT_NAMES) == 49, len(RECRUIT_NAMES)
+# Phase 6: 50 vanilla recruits minus Agumon (force-recruited bank NPC)
+# minus Digitamamon (post-game optional goal).
+assert len(RECRUIT_NAMES) == 48, len(RECRUIT_NAMES)
 
 
 # =============================================================================
@@ -145,61 +177,58 @@ assert len(RECRUIT_NAMES) == 49, len(RECRUIT_NAMES)
 # Recruits at 0 PP have no rule (always logically reachable).
 
 RECRUIT_PP_REQUIREMENTS: Final[dict[str, int]] = {
-    # 0 PP (Agumon dropped — see _RECRUIT_REGIONS comment)
+    # 0 PP — most recruits (Agumon, Digitamamon dropped from pool entirely)
     "Palmon": 0,
     "Kunemon": 0,
     "Coelamon": 0,
-    "Meramon": 0,
+    "Seadramon": 0,
     "Betamon": 0,
-    # 6 PP
-    "Centarumon": 6,
-    "Vegiemon": 6,
-    "Drimogemon": 6,
-    "Monochromon": 6,
-    "Shellmon": 6,
-    "Mojyamon": 6,
-    "Frigimon": 6,
-    "Penguinmon": 6,
-    "Birdramon": 6,
-    "Elecmon": 6,
-    "Patamon": 6,
-    "Biyomon": 6,
-    "Bakemon": 6,
-    "Sukamon": 6,
-    # 10 PP
-    "Unimon": 10,
-    "Whamon": 10,
-    "Gabumon": 10,
-    "Kokatorimon": 10,
-    "Garurumon": 10,
-    "Tyrannomon": 10,
+    "Vegiemon": 0,
+    "Centarumon": 0,
+    "Piximon": 0,
+    "Bakemon": 0,
+    "Tyrannomon": 0,
+    "Kabuterimon": 0,
+    "Kuwagamon": 0,
+    "Birdramon": 0,
+    "Monochromon": 0,
+    "Shellmon": 0,
+    "Ogremon": 0,
+    "Frigimon": 0,
+    "Mojyamon": 0,
+    "Penguinmon": 0,
+    "Garurumon": 0,
+    "Angemon": 0,
+    "Whamon": 0,
+    "Drimogemon": 0,
+    "Meramon": 0,
+    "Unimon": 0,
+    "Mamemon": 0,
+    "Patamon": 0,
+    "Biyomon": 0,
+    "Elecmon": 0,
+    "Sukamon": 0,
+    "Gabumon": 0,
+    "Kokatorimon": 0,
+    "Monzaemon": 0,
+    "Nanimon": 0,
+    "Numemon": 0,
+    "Andromon": 0,
+    "Giromon": 0,
+    "MetalMamemon": 0,
     # 15 PP
     "Greymon": 15,
-    "Seadramon": 15,
-    "Mamemon": 15,
-    # 20 PP
-    "Numemon": 20,
-    "Andromon": 20,
-    "MetalMamemon": 20,
-    "Giromon": 20,
-    "Kabuterimon": 20,
-    "Kuwagamon": 20,
-    "Angemon": 20,
-    "Ogremon": 20,
-    "SkullGreymon": 20,
-    "Monzaemon": 20,
-    "Ninjamon": 20,
+    # 40 PP
+    "SkullGreymon": 40,
     # 45 PP
     "Leomon": 45,
     "Vademon": 45,
     # 50 PP
-    "Nanimon": 50,
-    "Etemon": 50,
     "Airdramon": 50,
+    "Etemon": 50,
+    "Ninjamon": 50,
     "Devimon": 50,
     "Megadramon": 50,
-    "Digitamamon": 50,
-    "Piximon": 50,
     "MetalGreymon": 50,
 }
 
@@ -343,8 +372,55 @@ _STARTER_LOCATION: Final[dict[str, LocationEntry]] = {
 # was — the CE-table values are unreliable, see memory note
 # `dw1_keyitem_flag_block.md`.
 _KEYITEM_LOCATIONS: Final[dict[str, LocationEntry]] = {
-    "Old Fishrod Pickup": LocationEntry(69_004_000, "Gear Savanna"),
+    "Old Fishrod Pickup":            LocationEntry(69_004_000, "Gear Savanna"),
+    "Drill Tunnel Boulder":          LocationEntry(69_004_001, "Drill Tunnel"),
+    "Tropical Jungle Bridge Fixed":  LocationEntry(69_004_002, "Tropical Jungle"),
+    "Great Canyon Bridge Fixed":     LocationEntry(69_004_003, "Great Canyon"),
 }
+
+
+# =============================================================================
+# Card-vending locations (66, opt-in)
+# =============================================================================
+# DW1's two card vending machines (Gear Savanna, post-Betamon+Patamon
+# File City) sell 66 unique Digimon cards. Vanilla DW1 tracks card
+# ownership as a packed nibble counter at
+# :data:`worlds.digimon_world.data.addresses.RAM_CARD_LIST_BASE`. The
+# client watches that block and fires the corresponding AP location the
+# first time a card's nibble flips from 0.
+#
+# IDs follow DWAP's wire format (69_002_000 + index). Region is the
+# synthetic "Card Vending" region declared in :mod:`.regions`; access
+# rules are wired in :mod:`.rules`.
+#
+# Inclusion is gated on :class:`worlds.digimon_world.options.CardLocations`;
+# see :func:`create_all_locations`.
+
+_CARD_LOCATIONS: Final[dict[str, LocationEntry]] = {
+    name: LocationEntry(69_002_000 + i, "Card Vending")
+    for i, name in enumerate(CARD_LOCATION_NIBBLES)
+}
+assert len(_CARD_LOCATIONS) == 66, len(_CARD_LOCATIONS)
+
+CARD_NAMES: Final[tuple[str, ...]] = tuple(_CARD_LOCATIONS)
+
+
+# =============================================================================
+# Vending-machine locations (12, opt-in)
+# =============================================================================
+# Each location lives in the in-game region of its physical machine
+# (Greatlake / Tropical Jungle / Gear Savanna / Ancient Dino Region).
+# Region access rules already exist for each via the entrance rules in
+# :mod:`.regions` / :mod:`.rules`, so no new edges are needed — the
+# location is reachable when its parent region is reachable.
+#
+# IDs land in the previously-reserved ``69_055_xxx`` slot.
+
+_VENDING_LOCATIONS: Final[dict[str, LocationEntry]] = {
+    name: LocationEntry(69_055_000 + i, VENDING_LOCATION_REGIONS[name])
+    for i, name in enumerate(VENDING_LOCATION_NAMES)
+}
+assert len(_VENDING_LOCATIONS) == 12, len(_VENDING_LOCATIONS)
 
 
 # =============================================================================
@@ -357,6 +433,8 @@ _LOCATION_TABLE: Final[dict[str, LocationEntry]] = {
        for name in RECRUIT_NAMES},
     **_CHEST_LOCATIONS,
     **_KEYITEM_LOCATIONS,
+    **_CARD_LOCATIONS,
+    **_VENDING_LOCATIONS,
 }
 
 LOCATION_NAME_TO_ID: Final[dict[str, int]] = {
@@ -368,6 +446,8 @@ LOCATION_NAME_GROUPS: Final[dict[str, set[str]]] = {
     "Chests": set(_CHEST_LOCATIONS),
     "Starter": set(_STARTER_LOCATION),
     "Key Items": set(_KEYITEM_LOCATIONS),
+    "Cards": set(_CARD_LOCATIONS),
+    "Vending": set(_VENDING_LOCATIONS),
 }
 
 
@@ -376,10 +456,43 @@ def locations_in_region(region_name: str) -> tuple[str, ...]:
 
 
 def create_all_locations(world: DigimonWorldWorld) -> None:
-    """Attach every v1 location to its parent region."""
+    """Attach every v1 location to its parent region.
+
+    Some locations are conditional on player options:
+
+    * ``Drill Tunnel Boulder`` only exists in ``shuffled`` mode for
+      :class:`worlds.digimon_world.options.LavaCaveAccess`. In vanilla
+      mode the gate stays as the original digimon-stage whitelist and
+      there's no AP location/item pair for it.
+    """
+
+    skip_locations: set[str] = set()
+    if int(world.options.lava_cave_access.value) == 0:  # 0 = vanilla
+        skip_locations.add("Drill Tunnel Boulder")
+    # BridgeUnlock / GreatCanyonUnlock: 0=always_open, 1=vanilla, 2=shuffled.
+    # The AP location only exists in shuffled (=2).
+    if int(world.options.bridge_unlock.value) != 2:
+        skip_locations.add("Tropical Jungle Bridge Fixed")
+    if int(world.options.great_canyon_unlock.value) != 2:
+        skip_locations.add("Great Canyon Bridge Fixed")
+    # CardLocations: opt-in, default off. When off, the 66 card AP
+    # locations are excluded from the pool.
+    if not int(world.options.card_locations.value):
+        skip_locations.update(_CARD_LOCATIONS)
+    # VendingLocations: opt-in, default off. When off, the 12 vending
+    # machine AP locations are excluded from the pool.
+    if not int(world.options.vending_locations.value):
+        skip_locations.update(_VENDING_LOCATIONS)
+    # ChestRandomization: default ON. When OFF, the 65 chest AP
+    # locations are excluded from the pool — chests retain vanilla
+    # items and don't fire AP checks.
+    if not int(world.options.chest_randomization.value):
+        skip_locations.update(_CHEST_LOCATIONS)
 
     by_region: dict[str, dict[str, int | None]] = {}
     for name, entry in _LOCATION_TABLE.items():
+        if name in skip_locations:
+            continue
         by_region.setdefault(entry.region, {})[name] = entry.id
     for region_name, names_with_ids in by_region.items():
         world.get_region(region_name).add_locations(names_with_ids, DigimonWorldLocation)

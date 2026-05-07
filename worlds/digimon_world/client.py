@@ -73,6 +73,10 @@ from .data.addresses import (
     AP_CHEST_SENTINEL_ITEM_ID,
     AP_RECRUIT_ITEM_DIGIMON,
     BEATEN_RAM_BITS,
+    BIRDRAMON_FLIGHT_RAM_BITS,
+    CARD_BLOCK_BASE,
+    CARD_BLOCK_SIZE,
+    CARD_LOCATION_NIBBLES,
     DWAP_CHEST_RAM_BITS,
     EASY_MONOCHROMON_MAP_ID,
     EASY_MONOCHROMON_PROFIT_TARGET,
@@ -108,6 +112,7 @@ from .data.addresses import (
     RECRUIT_RAM_BITS,
     STAT_CAP_FLAG_TARGET,
     STAT_CAP_TARGET,
+    VENDING_LOCATION_RAM_BITS,
 )
 from .items import (
     ITEM_ID_BASE,
@@ -285,6 +290,7 @@ LOCATION_RAM_BITS: dict[str, tuple[int, int]] = {
     **DWAP_CHEST_RAM_BITS,
     **RECRUIT_RAM_BITS,
     **KEYITEM_LOCATION_RAM_BITS,
+    **VENDING_LOCATION_RAM_BITS,
 }
 
 # Threshold-based detection (e.g. NPC-gift PP gates) is unused in v7 —
@@ -521,6 +527,13 @@ def _build_item_delivery_routes() -> dict[str, ItemDeliverer]:
         # actually receive the item.
         if name in KEYITEM_DELIVERY_RAM_BITS:
             byte_addr, bit_index = KEYITEM_DELIVERY_RAM_BITS[name]
+            routes[name] = _make_keyitem_bit_deliverer(byte_addr, bit_index)
+            continue
+        # Birdramon flight destination items: each unlocks one entry in
+        # the patched callRoutine 10 destination table. Reuses the
+        # keyitem bit deliverer (same byte+bit OR semantics).
+        if name in BIRDRAMON_FLIGHT_RAM_BITS:
+            byte_addr, bit_index = BIRDRAMON_FLIGHT_RAM_BITS[name]
             routes[name] = _make_keyitem_bit_deliverer(byte_addr, bit_index)
             continue
         if 2000 <= dw_code < 2000 + RAM_ITEM_BANK_SIZE:
@@ -1213,10 +1226,16 @@ class DigimonWorldClient(BizHawkClient):
     async def _check_locations(self, ctx: BizHawkClientContext) -> None:
         """Poll per-location RAM signals and send LocationChecks for new ones.
 
-        Bit-set checks for chests (vanilla DWAP bits) and recruits
-        (vanilla recruit bits — fired by the spawn-point's encounter
-        regardless of trigger remap). Threshold checks were dropped
-        in v7 along with the K Prosperity locations.
+        Three detection styles:
+
+        * **Bit-set** (chests, recruits, key-item gates) — read one byte,
+          test a single bit.
+        * **Threshold** (currently unused; reserved) — read one byte,
+          compare ``>= min_value``.
+        * **Nibble** (card vending, opt-in) — read the 33-byte card
+          block once, test the 4-bit count for each card. ``> 0`` means
+          owned. Only polled if the player has at least one card AP
+          location in their slot (i.e. the option was on).
         """
 
         assert self._location_name_to_id is not None
@@ -1244,10 +1263,55 @@ class DigimonWorldClient(BizHawkClient):
             if data and data[0] >= min_value:
                 new_checks.append(location_id)
 
+        await self._check_card_locations(ctx, new_checks)
+
         if new_checks:
             checked = await ctx.check_locations(new_checks)
             for location_id in checked:
                 ctx.locations_checked.add(location_id)
+
+    async def _check_card_locations(
+        self, ctx: BizHawkClientContext, new_checks: list[int],
+    ) -> None:
+        """Append any newly-owned card AP locations to ``new_checks``.
+
+        Reads the contiguous 33-byte card-counter block in one call. Each
+        card occupies one nibble; ``count > 0`` means the player has
+        bought it at least once. Cards already in
+        ``ctx.locations_checked`` are skipped.
+
+        Skips the entire batched read when no card AP location for this
+        slot exists on the server (the
+        :class:`worlds.digimon_world.options.CardLocations` option is
+        off, or the server hasn't sent location data yet).
+        """
+
+        assert self._location_name_to_id is not None
+        if not ctx.server_locations:
+            return
+        # Cheap guard: no card AP id is in the server's location set,
+        # meaning the option is off for this slot.
+        card_ids = {
+            self._location_name_to_id[name] for name in CARD_LOCATION_NIBBLES
+        }
+        if card_ids.isdisjoint(ctx.server_locations):
+            return
+        block = (await bizhawk.read(
+            ctx.bizhawk_ctx,
+            [(CARD_BLOCK_BASE, CARD_BLOCK_SIZE, DOMAIN_MAIN_RAM)],
+        ))[0]
+        if len(block) != CARD_BLOCK_SIZE:
+            return
+        for location_name, nibble in CARD_LOCATION_NIBBLES.items():
+            location_id = self._location_name_to_id.get(location_name)
+            if (location_id is None
+                    or location_id in ctx.locations_checked
+                    or location_id not in ctx.server_locations):
+                continue
+            byte_val = block[nibble.byte_addr - CARD_BLOCK_BASE]
+            count = (byte_val >> 4) if nibble.is_upper else (byte_val & 0x0F)
+            if count > 0:
+                new_checks.append(location_id)
 
     async def _deliver_items(self, ctx: BizHawkClientContext) -> None:
         """Apply the next pending item from ``ctx.items_received`` to RAM.

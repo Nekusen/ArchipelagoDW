@@ -230,19 +230,206 @@ RAM_GREAT_CANYON_BRIDGE_UNLOCKED: Final = (0x001BDFD9, 7)
 OLD_FISHROD_FLAG: Final[tuple[int, int]] = (0x001BDFF5, 0)
 OLD_FISHROD_GATE: Final[tuple[int, int]] = (0x001BDFD2, 5)
 
+# **LAVA_CAVE_ACCESS_FLAG** — trigger 145, AP-controlled. Set when the AP
+# delivers the ``Lava Cave Access`` item; read by the patched boulder
+# script (Script ID 30, Section_5, script offset 484) to decide whether
+# the player can move the rock that gates Drill Tunnel -> Lava Cave (and
+# transitively Meramon and Mt. Panorama). Trigger 145 was selected after
+# scanning the entire script disassembly for unused trigger IDs — gap-A
+# slot, not touched by any vanilla setTrigger / trigger / unsetTrigger
+# read, not allocated by any AP table.
+# **LAVA_CAVE_ACCESS_GATE** — trigger 120, vanilla "boulder moved" flag,
+# set by ``setTrigger 120`` at script offset 001290 in Script ID 30
+# Section_5. AP polls this as the location-check signal for the
+# ``Drill Tunnel Boulder`` location.
+LAVA_CAVE_ACCESS_FLAG: Final[tuple[int, int]] = (0x001BDFDF, 1)
+LAVA_CAVE_ACCESS_GATE: Final[tuple[int, int]] = (0x001BDFDC, 0)
+
 # Per-AP-location bits for the key-item AP locations. Mirrors the shape
 # of `RECRUIT_RAM_BITS` / `DWAP_CHEST_RAM_BITS`; consumed by the client
 # via `LOCATION_RAM_BITS`.
+#
+# In shuffled mode, the bridge "Fixed" locations re-use the same trigger
+# bit as their corresponding ``always_open`` flag (185 / 103). Two paths
+# can set the bit: (1) AP item delivery — client OR-pins the bit on
+# receipt; (2) the vanilla cutscene path — only reachable for the TJ
+# bridge, since the GC cutscene is patcher-disabled in shuffled mode.
 KEYITEM_LOCATION_RAM_BITS: Final[dict[str, tuple[int, int]]] = {
-    "Old Fishrod Pickup": OLD_FISHROD_GATE,
+    "Old Fishrod Pickup":          OLD_FISHROD_GATE,
+    "Drill Tunnel Boulder":        LAVA_CAVE_ACCESS_GATE,
+    "Tropical Jungle Bridge Fixed": RAM_TROPICAL_JUNGLE_BRIDGE_FIXED,
+    "Great Canyon Bridge Fixed":    RAM_GREAT_CANYON_BRIDGE_UNLOCKED,
 }
 
 # Per-AP-item delivery flags for AP-side delivery of key items. Mirrors
 # the recruit deliverer pattern: when AP delivers the matching item, set
 # this bit in RAM.
 KEYITEM_DELIVERY_RAM_BITS: Final[dict[str, tuple[int, int]]] = {
-    "Old Fishrod": OLD_FISHROD_FLAG,
+    "Old Fishrod":            OLD_FISHROD_FLAG,
+    "Lava Cave Access":       LAVA_CAVE_ACCESS_FLAG,
+    "Tropical Jungle Bridge": RAM_TROPICAL_JUNGLE_BRIDGE_FIXED,
+    "Great Canyon Bridge":    RAM_GREAT_CANYON_BRIDGE_UNLOCKED,
 }
+
+# ----- Birdramon flight destination gates -----------------------------------
+#
+# Birdramon-Messenger reads a 6-entry destination table (`<u16 trigger,
+# u32 price, u16 label_id>`) embedded in the binary at .bin offsets
+# 0x14B8B698 and 0x14D725CE (two identical copies). Each destination
+# only appears in his menu when its trigger bit is set in the trigger
+# array. Vanilla mapping: G Canyon Top=trig 221 (Birdramon recruit),
+# Gear Savanna=190, Ancient Dino=188, Freezeland=351, Misty Trees=147,
+# Beetle Land=210.
+#
+# We redirect the 5 non-recruit entries' trigger IDs in the table to
+# fresh AP-controlled trigger IDs (880-884) at byte 0x001BE03B bits 0-4.
+# That byte is in a clearly unused gap region of the trigger array (no
+# script references, no other game systems), so the bits live in
+# isolation -- AP delivery sets them, callRoutine 10 reads them via the
+# patched table, no game-state side effects.
+#
+# G Canyon Top (vanilla trig 221 = Birdramon recruit) is left
+# unpatched: it correctly auto-unlocks when the Birdramon Recruit AP
+# item is delivered. So 5 AP items, not 6.
+#
+# See memory note `dw1_birdramon_flight_gates.md` for the full RE story.
+
+BIRDRAMON_FLIGHT_RAM_BITS: Final[dict[str, tuple[int, int]]] = {
+    "Birdramon Flight: Gear Savanna":        (0x001BE03B, 0),  # trigger 880
+    "Birdramon Flight: Ancient Dino Region": (0x001BE03B, 1),  # trigger 881
+    "Birdramon Flight: Freezeland":          (0x001BE03B, 2),  # trigger 882
+    "Birdramon Flight: Misty Trees":         (0x001BE03B, 3),  # trigger 883
+    "Birdramon Flight: Beetle Land":         (0x001BE03B, 4),  # trigger 884
+}
+
+# (offset, new_trigger_id) pairs for the destination-table trigger-id
+# rewrites. 5 entries x 2 table copies = 10 patch sites. Format is u16 LE.
+ROM_BIRDRA_FLIGHT_TABLE_FORMAT: Final = "<H"
+ROM_BIRDRA_FLIGHT_TABLE_PATCHES: Final = (
+    # Copy 1 (.bin base 0x14B8B698) -- entry trigger u16 at +1*8, +2*8, ...
+    (0x14B8B6A0, 880),  # Gear Savanna       (was trig 190)
+    (0x14B8B6A8, 881),  # Ancient Dino       (was trig 188)
+    (0x14B8B6B0, 882),  # Freezeland         (was trig 351)
+    (0x14B8B6B8, 883),  # Misty Trees        (was trig 147)
+    (0x14B8B6C0, 884),  # Beetle Land        (was trig 210)
+    # Copy 2 (.bin base 0x14D725C6) -- same offsets relative to the base
+    (0x14D725CE, 880),
+    (0x14D725D6, 881),
+    (0x14D725DE, 882),
+    (0x14D725E6, 883),
+    (0x14D725EE, 884),
+)
+
+# ----- Card-vending location nibbles ----------------------------------------
+#
+# DW1 stores collectible business-card ownership as a packed nibble counter
+# array starting at :data:`RAM_CARD_LIST_BASE` (= ``0x001BDFAC``). Each
+# card uses one 4-bit nibble; two cards per byte. ``nibble > 0`` means the
+# player has bought the card at least once (the count saturates a bit
+# lower in practice but >0 is the canonical "owned" check).
+#
+# 66 cards span 33 bytes (0x001BDFAC..0x001BDFCC inclusive). The byte
+# immediately after, ``0x001BDFCD``, is :data:`AP_TRIGGER_ARRAY_BASE` — no
+# overlap with the trigger array.
+#
+# Layout cross-referenced with DWAP's
+# ``references/DWAP/source/DWAP/Resources/DigimonCards.json``. AP IDs
+# ``69_002_000``..``69_002_065`` follow DWAP's wire format so cross-walk
+# stays clean for future tooling.
+#
+# Used by the BizHawk client when the
+# :class:`worlds.digimon_world.options.CardLocations` option is on. The
+# whole 33-byte block is read once per watcher tick as a single batched
+# read.
+
+class _CardNibble(NamedTuple):
+    byte_addr: int
+    is_upper: bool  # True = high nibble (>>4), False = low nibble (& 0x0F)
+
+
+def _nibble(byte_addr: int, position: str) -> _CardNibble:
+    return _CardNibble(byte_addr, position == "upper")
+
+
+CARD_LOCATION_NIBBLES: Final[dict[str, _CardNibble]] = {
+    "Player Card":         _nibble(0x001BDFAC, "lower"),
+    "Phoenixmon Card":     _nibble(0x001BDFAC, "upper"),
+    "H-Kabuterimon Card":  _nibble(0x001BDFAD, "lower"),
+    "MegaSeadramon Card":  _nibble(0x001BDFAD, "upper"),
+    "ShogunGekomon Card":  _nibble(0x001BDFAE, "lower"),
+    "Myotismon Card":      _nibble(0x001BDFAE, "upper"),
+    "MetalGreymon Card":   _nibble(0x001BDFAF, "lower"),
+    "Mamemon Card":        _nibble(0x001BDFAF, "upper"),
+    "Monzaemon Card":      _nibble(0x001BDFB0, "lower"),
+    "SkullGreymon Card":   _nibble(0x001BDFB0, "upper"),
+    "MetalMamemon Card":   _nibble(0x001BDFB1, "lower"),
+    "Vademon Card":        _nibble(0x001BDFB1, "upper"),
+    "Andromon Card":       _nibble(0x001BDFB2, "lower"),
+    "Giromon Card":        _nibble(0x001BDFB2, "upper"),
+    "Etemon Card":         _nibble(0x001BDFB3, "lower"),
+    "Megadramon Card":     _nibble(0x001BDFB3, "upper"),
+    "Piximon Card":        _nibble(0x001BDFB4, "lower"),
+    "Digitamamon Card":    _nibble(0x001BDFB4, "upper"),
+    "Gekomon Card":        _nibble(0x001BDFB5, "lower"),
+    "WaruMonzaemon Card":  _nibble(0x001BDFB5, "upper"),
+    "Jijimon Card":        _nibble(0x001BDFB6, "lower"),
+    "King of Sukamon Card": _nibble(0x001BDFB6, "upper"),
+    "Cherrymon Card":      _nibble(0x001BDFB7, "lower"),
+    "Guardromon Card":     _nibble(0x001BDFB7, "upper"),
+    "Hagurumon Card":      _nibble(0x001BDFB8, "lower"),
+    "Brachiomon Card":     _nibble(0x001BDFB8, "upper"),
+    "Greymon Card":        _nibble(0x001BDFB9, "lower"),
+    "Devimon Card":        _nibble(0x001BDFB9, "upper"),
+    "Airdramon Card":      _nibble(0x001BDFBA, "lower"),
+    "Tyrannomon Card":     _nibble(0x001BDFBA, "upper"),
+    "Meramon Card":        _nibble(0x001BDFBB, "lower"),
+    "Seadramon Card":      _nibble(0x001BDFBB, "upper"),
+    "Kabuterimon Card":    _nibble(0x001BDFBC, "lower"),
+    "Angemon Card":        _nibble(0x001BDFBC, "upper"),
+    "Birdramon Card":      _nibble(0x001BDFBD, "lower"),
+    "Garurumon Card":      _nibble(0x001BDFBD, "upper"),
+    "Frigimon Card":       _nibble(0x001BDFBE, "lower"),
+    "Whamon Card":         _nibble(0x001BDFBE, "upper"),
+    "Unimon Card":         _nibble(0x001BDFBF, "lower"),
+    "Ogremon Card":        _nibble(0x001BDFBF, "upper"),
+    "Shellmon Card":       _nibble(0x001BDFC0, "lower"),
+    "Centarumon Card":     _nibble(0x001BDFC0, "upper"),
+    "Bakemon Card":        _nibble(0x001BDFC1, "lower"),
+    "Drimogemon Card":     _nibble(0x001BDFC1, "upper"),
+    "Monochromon Card":    _nibble(0x001BDFC2, "lower"),
+    "Leomon Card":         _nibble(0x001BDFC2, "upper"),
+    "Coelamon Card":       _nibble(0x001BDFC3, "lower"),
+    "Kokatorimon Card":    _nibble(0x001BDFC3, "upper"),
+    "Kuwagamon Card":      _nibble(0x001BDFC4, "lower"),
+    "Mojyamon Card":       _nibble(0x001BDFC4, "upper"),
+    "Ninjamon Card":       _nibble(0x001BDFC5, "lower"),
+    "Penguinmon Card":     _nibble(0x001BDFC5, "upper"),
+    "Otamamon Card":       _nibble(0x001BDFC6, "lower"),
+    "Tentomon Card":       _nibble(0x001BDFC6, "upper"),
+    "Yanmamon Card":       _nibble(0x001BDFC7, "lower"),
+    "Gotsumon Card":       _nibble(0x001BDFC7, "upper"),
+    "Darkrizamon Card":    _nibble(0x001BDFC8, "lower"),
+    "ToyAgumon Card":      _nibble(0x001BDFC8, "upper"),
+    "DemiMeramon Card":    _nibble(0x001BDFC9, "lower"),
+    "Tankmon Card":        _nibble(0x001BDFC9, "upper"),
+    "Goburimon Card":      _nibble(0x001BDFCA, "lower"),
+    "Numemon Card":        _nibble(0x001BDFCA, "upper"),
+    "Vegiemon Card":       _nibble(0x001BDFCB, "lower"),
+    "Sukamon Card":        _nibble(0x001BDFCB, "upper"),
+    "Nanimon Card":        _nibble(0x001BDFCC, "lower"),
+    "Machinedramon Card":  _nibble(0x001BDFCC, "upper"),
+}
+assert len(CARD_LOCATION_NIBBLES) == 66, len(CARD_LOCATION_NIBBLES)
+
+# Contiguous read window covering every card nibble. The client uses this
+# to issue one batched RAM read per tick instead of 66 per-card reads.
+CARD_BLOCK_BASE: Final = 0x001BDFAC
+CARD_BLOCK_SIZE: Final = 33  # 0x001BDFAC..0x001BDFCC inclusive
+assert all(
+    CARD_BLOCK_BASE <= nb.byte_addr < CARD_BLOCK_BASE + CARD_BLOCK_SIZE
+    for nb in CARD_LOCATION_NIBBLES.values()
+)
+
 
 # ----- Per-Digimon technique tables (full-roster learned-tech tables) -------
 
@@ -1321,6 +1508,354 @@ ROM_GABU_PATCH_OFFSETS: Final = (
 
 
 # =============================================================================
+# Vending machine locations (consumable machines — opt-in option)
+# =============================================================================
+#
+# Four vending machine scripts in DW1 sell consumable items. With the
+# :class:`worlds.digimon_world.options.VendingLocations` option on,
+# each item-purchase becomes its own AP location (12 total). Detection
+# is a free trigger bit set by a ``setTrigger N`` opcode that the
+# patcher writes over the vanilla ``giveItem`` / ``addStats`` opcode at
+# the success branch of each purchase. Bytecode-level surgery:
+#
+# * vanilla ``giveItem ID 1``  (4 bytes: ``28 00 ID 01``)
+#   → patched ``setTrigger N`` (4 bytes: ``1C 00 N_lo N_hi``)
+# * vanilla ``addStats CURRENTMP X`` (4 bytes: ``35 07 X_lo X_hi``)
+#   → patched ``setTrigger N`` (4 bytes: ``1C 00 N_lo N_hi``)
+#
+# Net effect: the player still pays bits and sees the result text, but
+# no vanilla item is granted. The AP location fires; the AP-placed item
+# at that location is delivered to the bank by the standard delivery
+# path. Same UX as a chest with an AP-placed item.
+#
+# Each script has 1-2 byte-identical ROM copies (paired duplicates the
+# game loads under different Script IDs, like chests). All copies must
+# be patched in lockstep.
+#
+# Free trigger bits 890..901 land in gap C of the trigger array
+# (0x001BE03C bits 2..7 + 0x001BE03D bits 0..5). Adjacent to but does
+# not overlap the Birdramon flight bits (trigger 880..884 at
+# 0x001BE03B bits 0..4) — see :data:`BIRDRAMON_FLIGHT_RAM_BITS`.
+#
+# Result text + menu text slot replacements are done by the patcher in
+# place (slot byte budgets verified against the vanilla content).
+# Replacement text shows the AP item's *classification* (Quest / Bonus
+# / Junk) instead of the vanilla item name, so the player can plan
+# without spoiling individual item identities. The Try gacha's menu is
+# only 24 bytes ("Try"/"Cancel") — too small for menu text — so for
+# that machine only the result text is rewritten.
+
+class _VendingItem(NamedTuple):
+    """Per-purchase row for a vending machine."""
+    location_name: str           # AP location name
+    region: str                  # AP region the location belongs to
+    trigger_id: int              # AP-allocated trigger bit (890..901)
+    overwrite_offsets: tuple[int, ...]
+    """Script-relative byte offsets within the parent script where the
+    vanilla ``giveItem``/``addStats`` opcode lives. Each must be
+    overwritten with ``setTrigger trigger_id`` (4 bytes). Multiple
+    entries cover both the success branch and any inventory-recovery
+    branch the vanilla script uses.
+    """
+    price_offsets: tuple[int, ...]
+    """Script-relative byte offsets of the 16-bit LE price immediates
+    (used by the optional :class:`worlds.digimon_world.options.RandomizeVendingPrices`
+    option in Stage 2 to rewrite the prices). Reserved for future use;
+    Stage 1 ships price-randomization as not-yet-implemented.
+    """
+    vanilla_price: int           # vanilla cost in bits (informational)
+
+
+class _VendingTextSlot(NamedTuple):
+    """Text-slot range to overwrite with classification text.
+
+    The slot starts at the ``1A 00`` showTextbox opcode and the length
+    covers the full opcode+content+null block up to the next opcode.
+    The patcher writes ``1A 00 [encoded content] [zero-padding]`` to
+    fill the slot.
+    """
+    rel: int        # script-relative offset of the showTextbox opcode
+    length: int     # full slot byte budget (opcode + content + padding)
+    purpose: str    # "menu" | "result" | "preface"
+    item_indices: tuple[int, ...]
+    """For ``"menu"`` slots: indices into ``machine.items`` for each
+    purchase line in the menu (in display order). For ``"result"``
+    slots: a single-element tuple identifying which item's result
+    text this is. For ``"preface"`` slots: empty tuple — preface text
+    is rewritten with a generic 'AP-randomized prizes' line.
+    """
+
+
+class _VendingMachine(NamedTuple):
+    """One vending machine: a script with N items and 1-2 ROM copies."""
+    label: str                   # short region/name for diagnostics
+    region: str                  # AP region (matches existing regions.py)
+    script_bases: tuple[int, ...]  # .bin offset of each ROM copy's script base
+    items: tuple[_VendingItem, ...]
+    text_slots: tuple[_VendingTextSlot, ...]
+    """Text-substitution slots. ``item_index=None`` means the slot is a
+    menu/preface (rewrite with one line per item, comma-separated).
+    ``item_index=k`` is the result-text slot for ``items[k]``.
+    """
+
+
+# Allocated trigger IDs for vending purchases. Gap C of the trigger
+# array; immediately after Birdramon flight bits (880..884).
+_VENDING_TRIGGER_BASE: Final = 890
+
+VENDING_MACHINES: Final[tuple[_VendingMachine, ...]] = (
+    # ---- Script 9 — Greatlake (Dragon Eye Lake): Meat 300, DigiMushroom 600
+    _VendingMachine(
+        label="Greatlake",
+        region="Greatlake",
+        script_bases=(0x13FE3108, 0x13FE3108 + 0x96A),
+        items=(
+            _VendingItem(
+                "Vending: Greatlake Meat", "Greatlake",
+                trigger_id=890,
+                overwrite_offsets=(540, 632),
+                price_offsets=(330, 496),
+                vanilla_price=300,
+            ),
+            _VendingItem(
+                "Vending: Greatlake DigiMushroom", "Greatlake",
+                trigger_id=891,
+                overwrite_offsets=(714, 806),
+                price_offsets=(414, 640),
+                vanilla_price=600,
+            ),
+        ),
+        text_slots=(
+            _VendingTextSlot(190, 126, "menu",   (0, 1)),
+            _VendingTextSlot(502, 38,  "result", (0,)),
+            _VendingTextSlot(646, 68,  "result", (1,)),
+        ),
+    ),
+    # ---- Script 11 — Tropical Jungle: Hund MP 200, Thous MP 1800
+    _VendingMachine(
+        label="Tropical Jungle",
+        region="Tropical Jungle",
+        script_bases=(0x13FE5EF8, 0x13FE5EF8 + 0x3E0),
+        items=(
+            _VendingItem(
+                "Vending: Tropical Jungle Hund MP", "Tropical Jungle",
+                trigger_id=892,
+                overwrite_offsets=(340,),  # addStats CURRENTMP 100
+                price_offsets=(330, 346),
+                vanilla_price=200,
+            ),
+            _VendingItem(
+                "Vending: Tropical Jungle Thous MP", "Tropical Jungle",
+                trigger_id=893,
+                overwrite_offsets=(490,),  # addStats CURRENTMP 1000
+                price_offsets=(480, 496),
+                vanilla_price=1800,
+            ),
+        ),
+        text_slots=(
+            _VendingTextSlot(192, 126, "menu",   (0, 1)),
+            _VendingTextSlot(352, 56,  "result", (0,)),
+            _VendingTextSlot(502, 56,  "result", (1,)),
+        ),
+    ),
+    # ---- Script 71 — Gear Savanna: Special Prizes (Small Recovery 200,
+    #      Portable Potty 500) + MP Stand sub-vendor (Hund 200, Thous 1800)
+    _VendingMachine(
+        label="Gear Savanna",
+        region="Gear Savanna",
+        script_bases=(0x1400FDE8, 0x1400FDE8 + 0xA44),
+        items=(
+            _VendingItem(
+                "Vending: Gear Savanna Small Recovery", "Gear Savanna",
+                trigger_id=894,
+                overwrite_offsets=(984,),
+                price_offsets=(824, 1130),
+                vanilla_price=200,
+            ),
+            _VendingItem(
+                "Vending: Gear Savanna Portable Potty", "Gear Savanna",
+                trigger_id=895,
+                overwrite_offsets=(1156,),
+                price_offsets=(906, 1292),
+                vanilla_price=500,
+            ),
+            _VendingItem(
+                "Vending: Gear Savanna Hund MP", "Gear Savanna",
+                trigger_id=896,
+                overwrite_offsets=(1750,),  # MP Stand addStats 100
+                price_offsets=(1740, 1756),
+                vanilla_price=200,
+            ),
+            _VendingItem(
+                "Vending: Gear Savanna Thous MP", "Gear Savanna",
+                trigger_id=897,
+                overwrite_offsets=(1902,),  # MP Stand addStats 1000
+                price_offsets=(1892, 1908),
+                vanilla_price=1800,
+            ),
+        ),
+        text_slots=(
+            _VendingTextSlot(530,  130, "preface", ()),         # Special Prizes preface
+            _VendingTextSlot(668,  142, "menu",    (0, 1)),
+            _VendingTextSlot(1054, 74,  "result",  (0,)),       # SR
+            _VendingTextSlot(1226, 64,  "result",  (1,)),       # PP
+            _VendingTextSlot(1600, 126, "menu",    (2, 3)),     # MP Stand menu
+            _VendingTextSlot(1762, 60,  "result",  (2,)),       # Hund MP result
+            _VendingTextSlot(1914, 60,  "result",  (3,)),       # Thous MP result
+        ),
+    ),
+    # ---- Script 78 — Ancient Dino Region: Try gacha (200 bits, random)
+    _VendingMachine(
+        label="Ancient Dino Region",
+        region="Ancient Dino Region",
+        script_bases=(0x14015168,),  # single copy
+        items=(
+            _VendingItem(
+                "Vending: Ancient Dino Gacha Meat", "Ancient Dino Region",
+                trigger_id=898,
+                overwrite_offsets=(3090,),
+                price_offsets=(2946, 3046),
+                vanilla_price=200,
+            ),
+            _VendingItem(
+                "Vending: Ancient Dino Gacha Small Recovery", "Ancient Dino Region",
+                trigger_id=899,
+                overwrite_offsets=(3320,),
+                price_offsets=(3238,),
+                vanilla_price=200,
+            ),
+            _VendingItem(
+                "Vending: Ancient Dino Gacha Steak", "Ancient Dino Region",
+                trigger_id=900,
+                overwrite_offsets=(3516,),
+                price_offsets=(3468,),
+                vanilla_price=200,
+            ),
+            _VendingItem(
+                "Vending: Ancient Dino Gacha MP Floppy", "Ancient Dino Region",
+                trigger_id=901,
+                overwrite_offsets=(3840,),
+                price_offsets=(3664,),
+                vanilla_price=200,
+            ),
+        ),
+        text_slots=(
+            # Menu is "Try"/"Cancel" only — too narrow for class hints.
+            # Per user spec, only result text gets rewritten for the gacha.
+            _VendingTextSlot(3052, 38, "result", (0,)),  # Meat
+            _VendingTextSlot(3244, 76, "result", (1,)),  # Small Recovery
+            _VendingTextSlot(3474, 42, "result", (2,)),  # Steak
+            _VendingTextSlot(3670, 56, "result", (3,)),  # MP Floppy
+        ),
+    ),
+)
+
+# Flat list of (location_name, byte_addr, bit_index) for client lookup.
+# AP_TRIGGER_ARRAY_BASE is defined further down; inline it here.
+def _build_vending_location_ram_bits() -> dict[str, tuple[int, int]]:
+    _BASE = 0x001BDFCD  # AP_TRIGGER_ARRAY_BASE — declared later
+    table: dict[str, tuple[int, int]] = {}
+    for machine in VENDING_MACHINES:
+        for item in machine.items:
+            byte_addr = _BASE + item.trigger_id // 8
+            bit_index = item.trigger_id % 8
+            table[item.location_name] = (byte_addr, bit_index)
+    return table
+
+
+VENDING_LOCATION_RAM_BITS: Final[dict[str, tuple[int, int]]] = _build_vending_location_ram_bits()
+assert len(VENDING_LOCATION_RAM_BITS) == 12, len(VENDING_LOCATION_RAM_BITS)
+
+# Ordered list of all vending location names — locations.py imports this
+# to build location entries.
+VENDING_LOCATION_NAMES: Final[tuple[str, ...]] = tuple(VENDING_LOCATION_RAM_BITS)
+
+# Region for each location — locations.py uses this to attach the
+# location to the correct region.
+VENDING_LOCATION_REGIONS: Final[dict[str, str]] = {
+    item.location_name: item.region
+    for machine in VENDING_MACHINES
+    for item in machine.items
+}
+
+# Sanity: trigger range 890..901 lives in 2 bytes of gap C.
+assert all(
+    0x001BE03C <= b <= 0x001BE03D for b, _ in VENDING_LOCATION_RAM_BITS.values()
+), VENDING_LOCATION_RAM_BITS
+
+
+# ----- Vending machine helper encoders --------------------------------------
+#
+# DW1's script-engine opcode constants used by the vending patcher.
+
+VENDING_OPCODE_SETTRIGGER: Final = 0x1C  # 4 bytes: 1C 00 [N_LE]
+VENDING_OPCODE_SHOWTEXTBOX: Final = 0x1A  # 1A 00 + content + null terminator
+
+
+def encode_set_trigger(trigger_id: int) -> bytes:
+    """Encode a 4-byte ``setTrigger N`` script-engine opcode."""
+    return bytes((VENDING_OPCODE_SETTRIGGER, 0x00,
+                  trigger_id & 0xFF, (trigger_id >> 8) & 0xFF))
+
+
+# DW1 fullwidth shift_jis encoding for ASCII letters/digits and basic
+# punctuation. The script engine's text rendering expects this encoding;
+# raw ASCII is NOT rendered correctly. Control codes (color, line break)
+# are passed through as raw bytes.
+
+_DW1_PUNCT: Final[dict[str, bytes]] = {
+    " ": bytes((0x81, 0x40)),
+    ":": bytes((0x81, 0x46)),
+    ".": bytes((0x81, 0x44)),
+    "!": bytes((0x81, 0x49)),
+    "?": bytes((0x81, 0x48)),
+    ",": bytes((0x81, 0x43)),
+    "-": bytes((0x81, 0x7C)),
+    "/": bytes((0x81, 0x5E)),
+}
+
+
+def encode_dw1_text(text: str) -> bytes:
+    """Encode an ASCII string as DW1 fullwidth shift_jis bytes.
+
+    Each ASCII letter / digit / supported punctuation expands to 2
+    bytes. Unsupported characters are passed through as raw single
+    bytes (which DW1 will likely render as garbage — callers should
+    stick to the ASCII subset).
+    """
+    out = bytearray()
+    for c in text:
+        cv = ord(c)
+        if "A" <= c <= "Z":
+            out += bytes((0x82, 0x60 + (cv - 0x41)))
+        elif "a" <= c <= "z":
+            out += bytes((0x82, 0x81 + (cv - 0x61)))
+        elif "0" <= c <= "9":
+            out += bytes((0x82, 0x4F + (cv - 0x30)))
+        elif c in _DW1_PUNCT:
+            out += _DW1_PUNCT[c]
+        else:
+            out.append(cv & 0xFF)
+    return bytes(out)
+
+
+def build_vending_textbox(content: str, slot_length: int) -> bytes:
+    """Build a complete vending-text slot replacement.
+
+    Layout: ``1A 00 [encoded content] 0D 00 00...`` padded with NULs to
+    ``slot_length``. If the encoded content overflows the slot, raise.
+    """
+    body = encode_dw1_text(content) + b"\x0D\x00"
+    payload = bytes((VENDING_OPCODE_SHOWTEXTBOX, 0x00)) + body
+    if len(payload) > slot_length:
+        raise ValueError(
+            f"Encoded vending text (size {len(payload)}) exceeds slot "
+            f"length {slot_length}: content={content!r}",
+        )
+    return payload + b"\x00" * (slot_length - len(payload))
+
+
+# =============================================================================
 # Recruit trigger remap data (Phase 4 v4 — full table)
 # =============================================================================
 #
@@ -1872,6 +2407,108 @@ ROM_OGREMON_SOFTLOCK_OFFSETS: Final = (0x13FD689A, 0x140B7A1A)
 
 
 # =============================================================================
+# Lava Cave gate patch (Drill Tunnel boulder)
+# =============================================================================
+#
+# Script ID 30 (the Drimogemon-tunnel/boulder script) gates rock removal
+# behind a 28-byte ``if pstat(103) != ... then`` whitelist of digimon IDs
+# (Fresh/In-Training/Rookie). The patched bytecode replaces that whole
+# 28-byte block with a single ``if trigger(145) == true then 600``
+# (jump straight into the rock-moving sequence) followed by 16 bytes of
+# ``jumpTo 1376`` filler (unreachable in normal flow; both branches of
+# the new if either go to 600 or fall through to the original
+# ``jumpTo 1376`` at script offset 512).
+#
+# When trigger 145 (= :data:`LAVA_CAVE_ACCESS_FLAG`) is unset, the patched
+# if falls through and the boulder cutscene fails. When the AP delivers
+# the ``Lava Cave Access`` item, the client sets bit 1 of ``0x001BDFDF``
+# and the next time the player walks to the boulder, the rock moves.
+#
+# The boulder script is duplicated in the BIN under two script IDs (same
+# pattern as chest scripts that get loaded under multiple Script IDs);
+# both copies must be patched. Offsets verified by reading the BIN —
+# both contain byte-identical 28-byte rock-check blocks beginning with
+# ``19 00 08 00 67 01 48 00 ...``.
+#
+# Encoding: ``19 00`` = if-statement opcode, ``01 00`` = 1-condition
+# count, ``<id_LE>`` = trigger ID (145 = ``91 00``), ``18 00`` = "==
+# true" comparator, ``<target_LE>`` = branch target (600 = ``58 02``),
+# trailing ``19 00`` = next-instruction marker. ``16 00 <target_LE>`` =
+# jumpTo (4 bytes total). 1376 = ``60 05`` LE.
+
+ROM_LAVA_CAVE_GATE_OFFSETS: Final = (
+    0x13FF468C,  # Script ID 30 (boulder), Section_5 script-offset 484
+    0x13FF4C58,  # Duplicate copy of the same script in the BIN
+)
+ROM_LAVA_CAVE_GATE_VALUE: Final = bytes((
+    # if trigger(145) == true then 600  (12 bytes)
+    0x19, 0x00, 0x01, 0x00, 0x91, 0x00, 0x18, 0x00, 0x58, 0x02, 0x19, 0x00,
+    # jumpTo 1376 x 4  (16 bytes filler — unreachable in normal flow)
+    0x16, 0x00, 0x60, 0x05, 0x16, 0x00, 0x60, 0x05,
+    0x16, 0x00, 0x60, 0x05, 0x16, 0x00, 0x60, 0x05,
+))
+
+
+# =============================================================================
+# Coelamon take-across gate patch (Tropical Jungle Bridge SHUFFLED mode)
+# =============================================================================
+#
+# Coelamon's Section_51 (Script ID 6, script-offset 586) uses a 16-byte
+# 2-condition gate:
+#
+#     if trigger(185) == false OR trigger(249) == true then 1506
+#
+# Branch target 1506 is the entry to case 1 ("I'll take you across the
+# water"), which would let the player reach Tropical Jungle without the
+# AP-controlled "Tropical Jungle Bridge" item. To close the bypass we
+# rewrite *only the branch target* — 1506 -> 1532 — so the same gate
+# now jumps to ``endSection`` (Coelamon does nothing) when the bridge
+# bit is unset. Once AP delivers the bridge item, the client OR-pins
+# trigger 185, the gate falls through, and case 2 ("Coelamon joins the
+# city") fires as in vanilla.
+#
+# Two BIN copies of the script; both target bytes patched. Patch is
+# emitted only when ``options.bridge_unlock == shuffled``.
+# Vanilla mode (and always_open mode, where 185 is pinned from the
+# start anyway) keep the unpatched 1506 branch target.
+
+ROM_COELAMON_GATE_OFFSETS: Final = (
+    0x13FE0572,  # Copy 1: 0x13FE0566 + 12 (target byte position in if-stmt)
+    0x13FE12B6,  # Copy 2: 0x13FE12AA + 12
+)
+ROM_COELAMON_GATE_VALUE: Final = bytes((0xFC, 0x05))  # 1532 LE
+
+
+# =============================================================================
+# Great Canyon cutscene-disable patch (Great Canyon Bridge SHUFFLED mode)
+# =============================================================================
+#
+# Great Canyon's bridge-fix cutscene script (Script ID 36, script-offset
+# 614) gates on:
+#
+#     if trigger(103) == true OR trigger(124) == false then 846
+#
+# Where 124 is the "6 prosperity reached" prereq. In shuffled mode we
+# need the cutscene to never fire (otherwise reaching 6 PP organically
+# would set bit 103 without AP delivery, bypassing the gate). The patch
+# replaces the second trigger ID with 103, making the gate
+#
+#     if trigger(103) == true OR trigger(103) == false then 846
+#
+# i.e. always-true → always jumpTo 846 → cutscene skipped unconditionally.
+# The bridge can only be fixed via AP item delivery (client pins bit 103).
+#
+# Two BIN copies of the script; both trigger-ID bytes patched. Patch
+# is emitted only when ``options.great_canyon_unlock == shuffled``.
+
+ROM_GREAT_CANYON_CUTSCENE_OFFSETS: Final = (
+    0x13FF876A,  # Copy 1: 0x13FF8762 + 8 (second trigger ID byte position)
+    0x13FF8ABC,  # Copy 2: 0x13FF8AB4 + 8
+)
+ROM_GREAT_CANYON_CUTSCENE_VALUE: Final = bytes((0x67, 0x00))  # trigger 103 LE
+
+
+# =============================================================================
 # Chest item replacement (Phase 4 v9)
 # =============================================================================
 #
@@ -2141,10 +2778,15 @@ assert ROM_SETTRIGGER_PATCH_VALUE[0] == 0x080255F7, hex(ROM_SETTRIGGER_PATCH_VAL
 #   triggers in the player's run. Note: the Agumon-fight AP location still
 #   fires from the beaten bit when the player completes that cutscene; we
 #   only suppress the join-city redirect for Agumon by pre-setting the bit.
-# * :data:`AP_RECRUIT_ITEM_DIGIMON` — the 49-element ordered tuple of
+# * :data:`AP_RECRUIT_ITEM_DIGIMON` — the 48-element ordered tuple of
 #   Digimon names that ship as "<X> Recruit" AP items (everyone except
-#   Agumon). Used by the item table builder and the client's deliverer
-#   route registration.
+#   Agumon and Digitamamon). Used by the item table builder and the
+#   client's deliverer route registration.
+#
+# Agumon is excluded because he's the bank NPC (force-recruited by the
+# client). Digitamamon is excluded because he's a post-game optional
+# goal — accessible only after defeating the final boss + reload —
+# and is intentionally not an AP location, so no AP item corresponds.
 
 _BEATEN_TRIGGER_OFFSET: Final = 520
 
@@ -2177,12 +2819,13 @@ assert _beaten_bytes.isdisjoint(_chest_bytes), (
 
 AGUMON_RECRUIT_BIT: Final[tuple[int, int]] = RECRUIT_RAM_BITS["Agumon"]
 
-# AP-item Digimon = every recruit *except* Agumon (Agumon is force-recruited
-# by the client because he's the bank NPC).
+# AP-item Digimon = every recruit *except* Agumon (force-recruited bank
+# NPC) and Digitamamon (post-game optional goal, not an AP location).
+_AP_RECRUIT_EXCLUDED: Final = frozenset({"Agumon", "Digitamamon"})
 AP_RECRUIT_ITEM_DIGIMON: Final[tuple[str, ...]] = tuple(
-    name for name in RECRUIT_RAM_BITS if name != "Agumon"
+    name for name in RECRUIT_RAM_BITS if name not in _AP_RECRUIT_EXCLUDED
 )
-assert len(AP_RECRUIT_ITEM_DIGIMON) == 49, len(AP_RECRUIT_ITEM_DIGIMON)
+assert len(AP_RECRUIT_ITEM_DIGIMON) == 48, len(AP_RECRUIT_ITEM_DIGIMON)
 
 
 # =============================================================================

@@ -54,6 +54,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
 import settings
+from BaseClasses import ItemClassification
 from worlds.Files import APPatchExtension, APProcedurePatch, APTokenMixin, APTokenTypes
 
 from .data import edc
@@ -64,6 +65,8 @@ from .data.addresses import (
     ROM_AP_ITEM_ENTRY_OFFSET,
     ROM_BIN_BYTES,
     ROM_BIN_SHA1,
+    ROM_BIRDRA_FLIGHT_TABLE_FORMAT,
+    ROM_BIRDRA_FLIGHT_TABLE_PATCHES,
     ROM_CHANGEMAP_PATCH_FORMAT,
     ROM_CHANGEMAP_PATCH_OFFSET,
     ROM_CHANGEMAP_PATCH_VALUE,
@@ -108,8 +111,14 @@ from .data.addresses import (
     ROM_ISTRIGGERSET_PATCH_FORMAT,
     ROM_ISTRIGGERSET_PATCH_OFFSET,
     ROM_ISTRIGGERSET_PATCH_VALUE,
+    ROM_COELAMON_GATE_OFFSETS,
+    ROM_COELAMON_GATE_VALUE,
+    ROM_GREAT_CANYON_CUTSCENE_OFFSETS,
+    ROM_GREAT_CANYON_CUTSCENE_VALUE,
     ROM_ISTRIGGERSET_WRAPPER_BYTES,
     ROM_ISTRIGGERSET_WRAPPER_OFFSET,
+    ROM_LAVA_CAVE_GATE_OFFSETS,
+    ROM_LAVA_CAVE_GATE_VALUE,
     ROM_OGREMON_SOFTLOCK_FORMAT,
     ROM_OGREMON_SOFTLOCK_OFFSETS,
     ROM_OGREMON_SOFTLOCK_VALUE,
@@ -142,7 +151,10 @@ from .data.addresses import (
     ROM_UNLOCK_TOY_TOWN_OFFSETS,
     ROM_UNLOCK_TOY_TOWN_VALUE,
     ROM_UNLOCK_TYPE_LOCK_FORMAT,
+    VENDING_MACHINES,
     build_combat_multiplier_trampolines,
+    build_vending_textbox,
+    encode_set_trigger,
 )
 
 if TYPE_CHECKING:
@@ -659,9 +671,93 @@ def _write_softlock_fix_tokens(patch: DigimonWorldProcedurePatch) -> None:
         patch.write_token(APTokenTypes.WRITE, offset, fix_ogremon)
 
 
+def _write_lava_cave_gate_tokens(patch: DigimonWorldProcedurePatch) -> None:
+    """Replace the boulder script's digimon-ID whitelist with an AP-controlled
+    trigger gate.
+
+    Two byte-identical copies of the boulder script live in the BIN; both
+    receive the same 28-byte rewrite that turns the original
+    ``if pstat(103) != ... then`` whitelist into a single
+    ``if trigger(145) == true then 600`` plus 16 bytes of
+    ``jumpTo 1376`` filler. See :data:`ROM_LAVA_CAVE_GATE_OFFSETS` and
+    :data:`ROM_LAVA_CAVE_GATE_VALUE` for byte layout.
+    """
+
+    for offset in ROM_LAVA_CAVE_GATE_OFFSETS:
+        patch.write_token(APTokenTypes.WRITE, offset, ROM_LAVA_CAVE_GATE_VALUE)
+
+
+def _write_coelamon_gate_tokens(patch: DigimonWorldProcedurePatch) -> None:
+    """Redirect Coelamon Section_51's first-gate branch target.
+
+    Closes the Tropical Jungle Bridge bypass: without this, in shuffled
+    mode the player could visit Coelamon, take vanilla case 1 across to
+    TJ, walk the bridge cutscene tile, and set trigger 185 organically —
+    bypassing the AP gate entirely. The 2-byte target rewrite makes the
+    same gate redirect to ``endSection`` so case 1 never fires; case 2
+    (Coelamon joins city) still works once trigger 185 is set by AP item
+    delivery. See :data:`ROM_COELAMON_GATE_OFFSETS` /
+    :data:`ROM_COELAMON_GATE_VALUE`.
+    """
+
+    for offset in ROM_COELAMON_GATE_OFFSETS:
+        patch.write_token(APTokenTypes.WRITE, offset, ROM_COELAMON_GATE_VALUE)
+
+
+def _write_great_canyon_cutscene_tokens(patch: DigimonWorldProcedurePatch) -> None:
+    """Disable the Great Canyon bridge-fix cutscene.
+
+    Closes the Great Canyon Bridge bypass: without this, reaching 6
+    prosperity organically would let the vanilla cutscene fire and set
+    trigger 103, bypassing the AP gate. The 2-byte rewrite replaces the
+    second condition's trigger ID (124) with the same trigger ID as the
+    first (103), making the gate ``if 103==true OR 103==false`` —
+    always-true, always-skip-cutscene. The bridge can then only be
+    fixed via AP item delivery.
+    """
+
+    for offset in ROM_GREAT_CANYON_CUTSCENE_OFFSETS:
+        patch.write_token(APTokenTypes.WRITE, offset, ROM_GREAT_CANYON_CUTSCENE_VALUE)
+
+
 # =============================================================================
 # QoL patcher helpers (Phase 5 polish; opt-in via player options)
 # =============================================================================
+
+def _write_birdra_flight_table_tokens(patch: DigimonWorldProcedurePatch) -> None:
+    """Redirect Birdramon-Messenger flight gate triggers to AP-controlled bits.
+
+    Vanilla DW1's destination table (at .bin offsets 0x14B8B698 and a
+    duplicate at 0x14D725CE) lists 6 entries of (trigger, price, label).
+    Five of those triggers are story flags with multi-purpose use --
+    setting them via AP delivery would fire downstream behaviors
+    (cutscenes, NPC unlocks, dialog branches). Trigger 147 (Misty Trees)
+    is heavily multi-purpose (16 references); trigger 210 (Beetle Land)
+    has a complex prosperity-gated reference; etc.
+
+    Solution: rewrite each non-recruit entry's trigger ID to point at a
+    fresh, isolated AP-controlled bit (triggers 880..884 at
+    `0x001BE03B` bits 0..4). callRoutine 10 reads these new bits via the
+    patched table; AP delivery sets them via the standard keyitem-bit
+    deliverer (no game-state side effects since the original story flags
+    are untouched).
+
+    G Canyon Top (entry 0, vanilla trigger 221 = Birdramon recruit) is
+    intentionally left unpatched: it correctly auto-unlocks when the
+    Birdramon Recruit AP item lands. That's why there are 5 patches
+    per table copy, not 6.
+
+    See `dw1_birdramon_flight_gates.md` and the `BIRDRAMON_FLIGHT_RAM_BITS`
+    block in `addresses.py` for the full mapping.
+    """
+
+    for offset, new_trigger_id in ROM_BIRDRA_FLIGHT_TABLE_PATCHES:
+        patch.write_token(
+            APTokenTypes.WRITE,
+            offset,
+            struct.pack(ROM_BIRDRA_FLIGHT_TABLE_FORMAT, new_trigger_id),
+        )
+
 
 def _write_skip_intro_tokens(patch: DigimonWorldProcedurePatch) -> None:
     """Replace two intro-textbox sequences with ``jumpTo`` opcodes.
@@ -783,6 +879,120 @@ def _write_combat_multiplier_tokens(
 
 
 # =============================================================================
+# Vending-machine patcher (Stage 1 — opcode overwrite + text substitution)
+# =============================================================================
+#
+# For each ``_VendingItem`` in :data:`VENDING_MACHINES`, the patcher
+# overwrites the vanilla success-branch ``giveItem`` / ``addStats`` opcode
+# with ``setTrigger N`` — N is the AP-allocated trigger bit for that
+# location. The overwrite happens at every ``script_base + offset`` for
+# every ROM copy of the script.
+#
+# Then, for each text slot (menu / preface / result), the patcher
+# substitutes the vanilla item-name text with classification text
+# derived from the AP item placed at each location:
+#
+# * ``ItemClassification.progression`` (or progression_skip_balancing) → "Quest"
+# * ``ItemClassification.useful``                                     → "Bonus"
+# * everything else (filler, trap, etc.)                              → "Junk"
+
+_CLASS_LABELS: dict[int, str] = {
+    int(ItemClassification.progression): "Quest",
+    int(ItemClassification.progression_skip_balancing): "Quest",
+    int(ItemClassification.useful): "Bonus",
+}
+
+
+def _classify(item_classification: ItemClassification) -> str:
+    """Map an AP ItemClassification to a 5-char vending-text label."""
+    flags = int(item_classification)
+    # Honor progression > useful > everything-else priority.
+    if flags & int(ItemClassification.progression):
+        return "Quest"
+    if flags & int(ItemClassification.useful):
+        return "Bonus"
+    return "Junk"
+
+
+def _write_vending_tokens(
+    patch: DigimonWorldProcedurePatch,
+    world: DigimonWorldWorld,
+) -> None:
+    """Write all vending-machine tokens for the seed.
+
+    Two passes per machine:
+
+    1. **Opcode overwrites.** For each item, replace every vanilla
+       ``giveItem``/``addStats`` opcode location (in every ROM copy)
+       with a ``setTrigger`` opcode pointing at the item's AP-allocated
+       trigger bit.
+
+    2. **Text substitution.** For each text slot, write a
+       classification-aware replacement message:
+
+       * **Menu** slots become ``"<Cat1>: <P1> bits\\rDon't buy"`` style
+         — one line per item plus a Don't-buy line.
+       * **Result** slots become ``"<Cat>!"`` (short — fits 38-byte
+         result slots that some machines have).
+       * **Preface** slots become ``"AP randomized prizes."``.
+
+       The classification is derived from the AP item placed at the
+       corresponding location after fill.
+    """
+
+    multiworld = world.multiworld
+    player = world.player
+
+    for machine in VENDING_MACHINES:
+        # Resolve each item's AP classification by inspecting what fill
+        # placed at that location. ``get_location`` will raise KeyError
+        # if the option-gated location is absent for this seed; in that
+        # case we skip the machine entirely. ``location.item`` may be
+        # None during test fixtures where fill hasn't fully populated
+        # placements yet — fall back to "Junk" so the patcher tokens
+        # still emit (the test only verifies presence, not exact text).
+        try:
+            classes_list: list[str] = []
+            for item in machine.items:
+                location = multiworld.get_location(item.location_name, player)
+                placed = location.item
+                if placed is None:
+                    classes_list.append("Junk")
+                else:
+                    classes_list.append(_classify(placed.classification))
+            classes = tuple(classes_list)
+        except KeyError:
+            return  # option off — no vending locations exist for this slot
+
+        for base in machine.script_bases:
+            # Pass 1: opcode overwrites.
+            for class_label, item in zip(classes, machine.items, strict=True):
+                trigger_bytes = encode_set_trigger(item.trigger_id)
+                for off in item.overwrite_offsets:
+                    patch.write_token(APTokenTypes.WRITE, base + off, trigger_bytes)
+            # Pass 2: text substitution.
+            for slot in machine.text_slots:
+                if slot.purpose == "menu":
+                    lines = []
+                    for idx in slot.item_indices:
+                        item = machine.items[idx]
+                        lines.append(f"{classes[idx]}: {item.vanilla_price} bits")
+                    # Cancel line — DW1's text engine doesn't render
+                    # ASCII apostrophe so we avoid 'Don't buy' here.
+                    lines.append("Cancel")
+                    content = "\r\0".join(lines)
+                elif slot.purpose == "result":
+                    idx = slot.item_indices[0]
+                    content = f"{classes[idx]}!"
+                elif slot.purpose == "preface":
+                    content = "AP randomized prizes."
+                else:
+                    continue
+                payload = build_vending_textbox(content, slot.length)
+                patch.write_token(APTokenTypes.WRITE, base + slot.rel, payload)
+
+
+# =============================================================================
 # Generation-time helper (called from world.py:generate_output)
 # =============================================================================
 
@@ -825,9 +1035,20 @@ def write_patch(world: DigimonWorldWorld, output_directory: str) -> None:
     _write_recruit_trigger_redirect_tokens(patch)
     _write_pp_calc_patch_tokens(patch)
     _write_softlock_fix_tokens(patch)
-    _write_chest_item_tokens(patch, world)
+    # ChestRandomization off: chests retain vanilla items + vanilla
+    # giveItem flow, so the patcher emits no chest-related tokens.
+    if int(world.options.chest_randomization.value):
+        _write_chest_item_tokens(patch, world)
     _write_field_spawn_trigger_patches(patch)  # Plan A: per-Digimon
     _write_gettopcity_trigger_patches(patch)  # Plan A: Top City variants
+    _write_birdra_flight_table_tokens(patch)
+    if int(world.options.lava_cave_access.value) != 0:  # 0 = vanilla
+        _write_lava_cave_gate_tokens(patch)
+    # Bridge shuffled-mode patches (option value 2 = shuffled).
+    if int(world.options.bridge_unlock.value) == 2:
+        _write_coelamon_gate_tokens(patch)
+    if int(world.options.great_canyon_unlock.value) == 2:
+        _write_great_canyon_cutscene_tokens(patch)
 
     options = world.options
     if options.skip_intro:
@@ -838,6 +1059,8 @@ def write_patch(world: DigimonWorldWorld, output_directory: str) -> None:
     _write_combat_multiplier_tokens(
         patch, int(options.combat_stat_multiplier.value),
     )
+    if int(options.vending_locations.value):
+        _write_vending_tokens(patch, world)
 
     patch.write_file("token_data.bin", patch.get_token_binary())
 

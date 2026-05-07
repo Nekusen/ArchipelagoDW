@@ -399,6 +399,97 @@ class TestQoLPatcherOptionsOn(DigimonWorldTestBase):
             self.assertIn((off, small_bytes), observed)
 
 
+class TestVendingPatcherOn(DigimonWorldTestBase):
+    """VendingLocations on: opcode overwrite + text substitution tokens
+    must reach the token blob."""
+
+    options: ClassVar[dict[str, Any]] = {"vending_locations": True}
+
+    def test_vending_settrigger_overwrite_tokens_present(self) -> None:
+        from ..data.addresses import VENDING_MACHINES, encode_set_trigger
+
+        observed = _capture_tokens(self.world)
+        for machine in VENDING_MACHINES:
+            for base in machine.script_bases:
+                for item in machine.items:
+                    expected_bytes = encode_set_trigger(item.trigger_id)
+                    for off in item.overwrite_offsets:
+                        self.assertIn(
+                            (base + off, expected_bytes), observed,
+                            f"missing setTrigger {item.trigger_id} at "
+                            f"{base + off:#x} for {item.location_name}",
+                        )
+
+    def test_vending_text_slot_tokens_present(self) -> None:
+        """Every vending text slot gets a token whose first 2 bytes are
+        the showTextbox opcode (1A 00) and whose total length matches
+        the slot budget."""
+        from ..data.addresses import VENDING_MACHINES
+
+        observed = {off: data for off, data in _capture_tokens(self.world)}
+        for machine in VENDING_MACHINES:
+            for base in machine.script_bases:
+                for slot in machine.text_slots:
+                    addr = base + slot.rel
+                    self.assertIn(
+                        addr, observed,
+                        f"no text token at {addr:#x} ({machine.label}, "
+                        f"{slot.purpose})",
+                    )
+                    payload = observed[addr]
+                    self.assertEqual(len(payload), slot.length)
+                    self.assertEqual(payload[:2], b"\x1A\x00")
+
+
+class TestChestRandomizationOffPatcher(DigimonWorldTestBase):
+    """ChestRandomization off — none of the chest-specific patcher
+    helpers run. The chestGiveItem wrapper, AP_ITEM table entry, and
+    per-chest item byte writes are all suppressed."""
+
+    # Pair with cards on so the seed has enough non-chest locations to
+    # absorb the mandatory progression items (see
+    # :class:`.test_stub_logic.TestChestRandomizationOff` rationale).
+    options: ClassVar[dict[str, Any]] = {
+        "chest_randomization": False,
+        "card_locations": True,
+    }
+
+    def test_chest_tokens_absent(self) -> None:
+        from ..data.addresses import (
+            CHEST_NAME_TO_ROM_OFFSETS,
+            ROM_AP_ITEM_ENTRY_OFFSET,
+            ROM_CHEST_GIVEITEM_PATCH_OFFSET,
+            ROM_CHEST_GIVEITEM_WRAPPER_OFFSET,
+        )
+
+        observed_offsets = {off for off, _ in _capture_tokens(self.world)}
+        self.assertNotIn(ROM_AP_ITEM_ENTRY_OFFSET, observed_offsets)
+        self.assertNotIn(ROM_CHEST_GIVEITEM_PATCH_OFFSET, observed_offsets)
+        self.assertNotIn(ROM_CHEST_GIVEITEM_WRAPPER_OFFSET, observed_offsets)
+        # And no per-chest item byte writes either.
+        for offsets in CHEST_NAME_TO_ROM_OFFSETS.values():
+            for offset in offsets:
+                self.assertNotIn(offset + 1, observed_offsets)
+
+
+class TestVendingPatcherOff(DigimonWorldTestBase):
+    """VendingLocations off: zero vending-related tokens emitted."""
+
+    options: ClassVar[dict[str, Any]] = {}
+
+    def test_vending_tokens_absent(self) -> None:
+        from ..data.addresses import VENDING_MACHINES
+
+        observed_offsets = {off for off, _ in _capture_tokens(self.world)}
+        for machine in VENDING_MACHINES:
+            for base in machine.script_bases:
+                for item in machine.items:
+                    for off in item.overwrite_offsets:
+                        self.assertNotIn(base + off, observed_offsets)
+                for slot in machine.text_slots:
+                    self.assertNotIn(base + slot.rel, observed_offsets)
+
+
 class TestQoLPatcherOptionsOff(DigimonWorldTestBase):
     """Skip-intro and type-unlocks OFF: their tokens should NOT appear.
     Spawn-rate-boost is a Range and always writes (the option just

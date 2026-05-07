@@ -34,6 +34,7 @@ from . import (
     rom,
     rules,
 )
+from .data.addresses import AP_RECRUIT_ITEM_DIGIMON
 from .options import DigimonWorldOptions
 from .rom import DigimonWorldSettings
 
@@ -68,7 +69,39 @@ class DigimonWorldWorld(World):
     def create_regions(self) -> None:
         regions.create_and_connect_regions(self)
         locations.create_all_locations(self)
+        # Lock recruit items to their own AP locations when
+        # :class:`worlds.digimon_world.options.RecruitRandomization` is
+        # off. Must run before :meth:`create_items` so the pool sizing
+        # (which depends on ``get_unfilled_locations``) accounts for
+        # the 48 pre-placed recruit slots.
+        self._lock_recruit_items_if_disabled()
         locations.create_events(self)
+
+    def _lock_recruit_items_if_disabled(self) -> None:
+        """Self-place each ``<Name> Recruit`` item at its AP location
+        when recruit randomization is off.
+
+        With the option off, ``items.create_all_items`` separately
+        skips the 48 recruit items from the pool — they're created
+        fresh here and locked, so each recruit's join-city item is
+        delivered exclusively by the player completing that recruit's
+        encounter, never sourced from another player's slot. The
+        recruit AP location's other roles (firing on cutscene
+        completion, gating progression via ``Has(Birdramon Recruit)``
+        etc.) are unaffected.
+        """
+
+        if int(self.options.recruit_randomization.value):
+            return  # randomization on — nothing to lock
+
+        for name in AP_RECRUIT_ITEM_DIGIMON:
+            try:
+                location = self.get_location(name)
+            except KeyError:
+                # Defensive: a recruit AP location should always exist
+                # in v7+, but skip if it's somehow been excluded.
+                continue
+            location.place_locked_item(self.create_item(f"{name} Recruit"))
 
     def create_items(self) -> None:
         items.create_all_items(self)
@@ -112,6 +145,7 @@ class DigimonWorldWorld(World):
             "stat_gain_multiplier",
             "bridge_unlock",
             "great_canyon_unlock",
+            "lava_cave_access",
             "god_mode",
         ))
         slot_data["vanilla_grant_chests"] = sorted(

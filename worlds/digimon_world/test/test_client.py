@@ -146,8 +146,13 @@ class TestChestDispatch(DigimonWorldTestBase):
             seen[key] = name
 
     def test_dispatch_size(self) -> None:
-        # 50 recruits + 65 chests + 1 key item (Old Fishrod Pickup)
-        self.assertEqual(len(LOCATION_RAM_BITS), 50 + 65 + 1)
+        # 50 recruits + 65 chests + 4 key items (Old Fishrod Pickup,
+        # Drill Tunnel Boulder, Tropical Jungle Bridge Fixed,
+        # Great Canyon Bridge Fixed) + 12 vending machines. Per-seed
+        # availability of the option-gated entries (3 keyitems and the
+        # 12 vending) is filtered on the AP server side; the dispatch
+        # dict is unconditional.
+        self.assertEqual(len(LOCATION_RAM_BITS), 50 + 65 + 4 + 12)
 
 
 # =============================================================================
@@ -392,15 +397,19 @@ class TestManifestRecruitTableShape(DigimonWorldTestBase):
     options: ClassVar[dict[str, Any]] = {}
 
     def test_all_recruit_names_have_recruit_bits(self) -> None:
-        # RECRUIT_NAMES (49, post-Agumon-drop) is a subset of
-        # RECRUIT_RAM_BITS (50, manifest still includes Agumon for the
-        # client's force-set deliverer).
+        # RECRUIT_NAMES (48, post-Phase-6) is a subset of
+        # RECRUIT_RAM_BITS (50, manifest still includes Agumon and
+        # Digitamamon for the client's deliverer + bit-poll routes).
+        # Agumon: force-recruited bank NPC, no AP location.
+        # Digitamamon: post-game optional, no AP location.
         for recruit_name in RECRUIT_NAMES:
             self.assertIn(recruit_name, RECRUIT_RAM_BITS)
         self.assertEqual(len(RECRUIT_RAM_BITS), 50)
-        self.assertEqual(len(RECRUIT_NAMES), 49)
+        self.assertEqual(len(RECRUIT_NAMES), 48)
         self.assertNotIn("Agumon", RECRUIT_NAMES)
+        self.assertNotIn("Digitamamon", RECRUIT_NAMES)
         self.assertIn("Agumon", RECRUIT_RAM_BITS)
+        self.assertIn("Digitamamon", RECRUIT_RAM_BITS)
 
     def test_bit_indices_in_byte_range(self) -> None:
         for (_offset, bit_index) in RECRUIT_RAM_BITS.values():

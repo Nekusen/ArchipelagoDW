@@ -73,6 +73,17 @@ _KEY_ITEMS: Final[dict[str, ItemEntry]] = {
     "Old Fishrod": ItemEntry(2116, ItemClassification.progression),
     "Amazing rod": ItemEntry(2117, ItemClassification.progression | ItemClassification.useful),
     "Rain Plant":  ItemEntry(2121, ItemClassification.progression),
+    # Virtual access item (no real DW1 inventory entry). Delivered as a
+    # trigger-array bit-flip via KEYITEM_DELIVERY_RAM_BITS; the patched
+    # boulder script in Drill Tunnel reads that bit. dw_code 5000 is
+    # outside any real-DW1 / recruit / Birdramon-flight range.
+    "Lava Cave Access": ItemEntry(5000, ItemClassification.progression),
+    # Bridge unlock items (only included in the pool when the
+    # corresponding option is in ``shuffled`` mode). Each pins its
+    # bridge-fixed trigger bit on delivery. dw_codes 5001/5002 follow
+    # the 5000+ "virtual access item" range.
+    "Tropical Jungle Bridge": ItemEntry(5001, ItemClassification.progression),
+    "Great Canyon Bridge":    ItemEntry(5002, ItemClassification.progression),
 }
 
 # =============================================================================
@@ -184,7 +195,42 @@ _RECRUIT_ITEMS: Final[dict[str, ItemEntry]] = {
     )
     for name in AP_RECRUIT_ITEM_DIGIMON
 }
-assert len(_RECRUIT_ITEMS) == 49, len(_RECRUIT_ITEMS)
+assert len(_RECRUIT_ITEMS) == 48, len(_RECRUIT_ITEMS)
+
+
+# =============================================================================
+# Birdramon flight destination items
+# =============================================================================
+# Each item unlocks one of Birdramon-Messenger's flight destinations. The
+# vanilla destination table (6 entries) is patcher-rewritten so the gate
+# triggers point at AP-controlled bits in `0x001BE03B` (trigger array gap
+# region); see `data.addresses.BIRDRAMON_FLIGHT_RAM_BITS` and
+# `ROM_BIRDRA_FLIGHT_TABLE_PATCHES`. G Canyon Top (vanilla trig 221 =
+# Birdramon recruit) is left unpatched so it auto-unlocks with the
+# Birdramon Recruit item -- that's why there are 5 of these and not 6.
+#
+# Phase 6: Promoted to **progression**. Each flight provides an
+# alternative entrance to its destination region (in addition to the
+# walking path), and AP rules treat the flight as a real
+# progression-item gate. With both bridges in shuffled mode, several
+# walking paths are AP-item-gated, so the flight items become the
+# multiworld's only path to certain regions for many fills. See
+# rules.py entrance rules and `dw1_birdramon_flight_gates` memory.
+#
+# Each flight requires Birdramon Recruit to function (the flight menu
+# only opens once Birdramon is in the city).
+
+_BIRDRAMON_FLIGHT_ITEMS: Final[dict[str, ItemEntry]] = {
+    name: ItemEntry(4000 + i, ItemClassification.progression)
+    for i, name in enumerate((
+        "Birdramon Flight: Gear Savanna",
+        "Birdramon Flight: Ancient Dino Region",
+        "Birdramon Flight: Freezeland",
+        "Birdramon Flight: Misty Trees",
+        "Birdramon Flight: Beetle Land",
+    ))
+}
+assert len(_BIRDRAMON_FLIGHT_ITEMS) == 5, len(_BIRDRAMON_FLIGHT_ITEMS)
 
 
 # =============================================================================
@@ -198,6 +244,7 @@ _ITEM_TABLE: Final[dict[str, ItemEntry]] = {
     **_BITS,
     **_PROSPERITY,
     **_RECRUIT_ITEMS,
+    **_BIRDRAMON_FLIGHT_ITEMS,
 }
 
 ITEM_NAME_TO_ID: Final[dict[str, int]] = {
@@ -295,10 +342,30 @@ def create_all_items(world: DigimonWorldWorld) -> None:
 
     locations_count = len(world.multiworld.get_unfilled_locations(world.player))
 
-    # Mandatory items (progression).
+    # Mandatory items (progression + useful flight items shipped one each).
+    # Several "virtual access" key items only ship in their corresponding
+    # ``shuffled`` mode; in other modes (vanilla / always_open) the gate
+    # is handled differently and there's no AP item/location pair.
+    skip_keys = set()
+    if int(world.options.lava_cave_access.value) == 0:  # 0 = vanilla
+        skip_keys.add("Lava Cave Access")
+    # BridgeUnlock / GreatCanyonUnlock: 0=always_open, 1=vanilla, 2=shuffled.
+    # The AP item only exists in shuffled (=2).
+    if int(world.options.bridge_unlock.value) != 2:
+        skip_keys.add("Tropical Jungle Bridge")
+    if int(world.options.great_canyon_unlock.value) != 2:
+        skip_keys.add("Great Canyon Bridge")
+
     mandatory: list[Item] = []
-    mandatory.extend(world.create_item(name) for name in _KEY_ITEMS)
-    mandatory.extend(world.create_item(name) for name in _RECRUIT_ITEMS)
+    mandatory.extend(world.create_item(name) for name in _KEY_ITEMS if name not in skip_keys)
+    # When recruit_randomization is OFF, recruit items are locked to
+    # their own AP location in :meth:`DigimonWorldWorld.pre_fill` and
+    # must NOT enter the multiworld pool — pre_fill creates them
+    # fresh via ``world.create_item`` and calls ``place_locked_item``
+    # directly (the canonical AP self-locked-item pattern).
+    if int(world.options.recruit_randomization.value):
+        mandatory.extend(world.create_item(name) for name in _RECRUIT_ITEMS)
+    mandatory.extend(world.create_item(name) for name in _BIRDRAMON_FLIGHT_ITEMS)
     mandatory.extend(
         world.create_item(PROSPERITY_POINT_NAME)
         for _ in range(PROSPERITY_POINT_COUNT)
