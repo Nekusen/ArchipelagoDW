@@ -9,6 +9,7 @@ the same way:
 * ``69_004_xxx`` — reserved (was prosperity NPC gifts; gone in v7)
 * ``69_005_xxx``..``69_054_xxx`` — recruit checks, one Digimon per 1000-block
 * ``69_055_xxx`` — vending machines (12, opt-in via :class:`worlds.digimon_world.options.VendingLocations`)
+* ``69_056_xxx`` — recycle shop slots (7, opt-in via :class:`worlds.digimon_world.options.RecycleShopLocations`)
 
 Locked v1 MVP scope: chests + recruits + starter. NPC-gift "K Prosperity"
 locations are gone — prosperity is now a real AP item shipped in the
@@ -34,6 +35,7 @@ from BaseClasses import ItemClassification, Location, LocationProgressType
 
 from .data.addresses import (
     CARD_LOCATION_NIBBLES,
+    RECYCLE_SHOP_LOCATION_NAMES,
     VENDING_LOCATION_NAMES,
     VENDING_LOCATION_REGIONS,
 )
@@ -456,6 +458,26 @@ assert len(_VENDING_LOCATIONS) == 12, len(_VENDING_LOCATIONS)
 
 
 # =============================================================================
+# Recycle-shop locations (7, opt-in)
+# =============================================================================
+# Tinmon's Recycle Shop in Gear Savanna (screen GIAS06B). 7 fixed
+# rows; each becomes its own AP location when
+# :class:`worlds.digimon_world.options.RecycleShopLocations` is on.
+# Region = ``Gear Savanna`` so the existing region access rule
+# governs reachability (gated on Bridge access etc.).
+#
+# Inclusion / patch wiring is documented in
+# :mod:`worlds.digimon_world.data.addresses` under
+# ``RECYCLE_SHOP_*`` and in :func:`rom._write_recycle_shop_tokens`.
+
+_RECYCLE_SHOP_LOCATIONS: Final[dict[str, LocationEntry]] = {
+    name: LocationEntry(69_056_000 + i, "Gear Savanna")
+    for i, name in enumerate(RECYCLE_SHOP_LOCATION_NAMES)
+}
+assert len(_RECYCLE_SHOP_LOCATIONS) == 7, len(_RECYCLE_SHOP_LOCATIONS)
+
+
+# =============================================================================
 # Final assembled location table
 # =============================================================================
 
@@ -466,6 +488,7 @@ _LOCATION_TABLE: Final[dict[str, LocationEntry]] = {
     **_KEYITEM_LOCATIONS,
     **_CARD_LOCATIONS,
     **_VENDING_LOCATIONS,
+    **_RECYCLE_SHOP_LOCATIONS,
 }
 
 LOCATION_NAME_TO_ID: Final[dict[str, int]] = {
@@ -478,6 +501,7 @@ LOCATION_NAME_GROUPS: Final[dict[str, set[str]]] = {
     "Key Items": set(_KEYITEM_LOCATIONS),
     "Cards": set(_CARD_LOCATIONS),
     "Vending": set(_VENDING_LOCATIONS),
+    "Recycle Shop": set(_RECYCLE_SHOP_LOCATIONS),
 }
 
 
@@ -501,6 +525,10 @@ def create_all_locations(world: DigimonWorldWorld) -> None:
     # machine AP locations are excluded from the pool.
     if not int(world.options.vending_locations.value):
         skip_locations.update(_VENDING_LOCATIONS)
+    # RecycleShopLocations: opt-in, default off. When off, the 7
+    # recycle shop AP locations are excluded from the pool.
+    if not int(world.options.recycle_shop_locations.value):
+        skip_locations.update(_RECYCLE_SHOP_LOCATIONS)
     # ChestRandomization: default ON. When OFF, the 65 chest AP
     # locations are excluded from the pool — chests retain vanilla
     # items and don't fire AP checks.
