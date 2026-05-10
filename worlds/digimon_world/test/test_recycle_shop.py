@@ -20,6 +20,7 @@ Covers four areas:
 from __future__ import annotations
 
 import struct
+import tempfile
 import unittest
 import zipfile
 from typing import Any, ClassVar
@@ -238,8 +239,8 @@ class _CapturedPatch:
 
         with mock.patch.object(
             rom_module.DigimonWorldProcedurePatch, "write", fake_write,
-        ):
-            world.generate_output(".")
+        ), tempfile.TemporaryDirectory() as tmp_dir:
+            world.generate_output(tmp_dir)
 
         return _parse_token_blob(captured["token_data.bin"]), procedure_holder[0]
 
