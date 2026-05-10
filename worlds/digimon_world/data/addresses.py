@@ -6251,9 +6251,20 @@ ROM_SPAWN_RATE_OTAMAMON_OFFSETS: Final = (0x13FD7F47, 0x140B90C7)
 #
 # In-place ITEM_PARA extension via ITEM_DESC_PTR relocation. The
 # description-pointer table (128 × u32 at RAM 0x801279DC, immediately
-# after ITEM_PARA[0..127]) moves to Cave1 free RAM (0x800A0A50,
-# 61 KB available). Its freed 1024 bytes at 0x801279DC become extended
-# ITEM_PARA slots 128..255.
+# after ITEM_PARA[0..127]) moves to **Cave6** free RAM (the same
+# unused-libgs region that already hosts the chest wrapper, merit shop
+# wrapper, combat trampolines, and recycle wrapper). Its freed 1024
+# bytes at 0x801279DC become extended ITEM_PARA slots 128..255.
+#
+# **History note**: an earlier revision targeted "Cave1" at
+# RAM 0x800A0A50 per the plan-doc, but that region contains live
+# vanilla SLUS code (functions called from many sites across the
+# binary, e.g. 0x000B61F0, 0x000D9764, 0x000E3624, 0x000F1534).
+# SydPatches can repurpose Cave1 because they ship a complete
+# replacement implementation; we cannot. Cave6 is the only region
+# verified safe for arbitrary writes against vanilla SLUS-01032,
+# and it has ~3 KB free after our existing wrappers + recycle
+# shop wrapper.
 #
 # Slots 128..134 hold the 7 AP shop entries — one per recycle shop row.
 # Each entry's name = the multiworld-resolved AP item name truncated to
@@ -6369,33 +6380,72 @@ def _slus_ram_to_bin_offset(ram_addr: int) -> int:
     return _flat_to_user_data(ROM_CHEST_GIVEITEM_WRAPPER_OFFSET, delta)
 
 
-# --- Cave1 layout: relocated ITEM_DESC_PTR + AP description strings --------
-# Cave1 spans RAM 0x800A0A50..0x800AFD78 (61 KB). The AP-recycle-shop
-# block sits at the very start, leaving ~60 KB headroom for future work.
-
-EXT_CAVE1_RAM_BASE: Final = 0x800A0A50
-EXT_CAVE1_BIN_OFFSET: Final = _slus_ram_to_bin_offset(EXT_CAVE1_RAM_BASE)
+# --- Cave6 layout: relocated ITEM_DESC_PTR + AP description strings --------
+# Cave6 spans RAM 0x800957C0..0x80096BCC (5132 bytes total). Vanilla DW1
+# never calls into this region (verified: the first vanilla call past the
+# chest wrapper is at 0x80096BCC = the byte right after Cave6 ends — see
+# SLUS.asm `0x000b40d4 jal 0x00096bcc`). Existing layout inside Cave6:
+#
+#   0x800957C0..0x800957DC  chest wrapper (28 B, always-on)
+#   0x800957DC..0x800957FC  setTrigger wrapper (32 B, NOT installed but reserved)
+#   0x800957FC..0x80095800  4-byte gap
+#   0x80095800..0x800958B4  merit shop wrapper (180 B for N=1 dispatch entry,
+#                            grows by 28 B per additional dispatch entry)
+#   0x800958B4..0x800958CD  AP_ITEM_DESC_STRING (25 B, "Item from the multiworld")
+#   0x800958CD..0x80095900  ~51-byte gap
+#   0x80095900..0x8009593C  combat trampolines tr1+tr2+tr3 (60 B,
+#                            installed only when combat_stat_multiplier > 1)
+#   0x80095940..0x8009597C  recycle shop giveItem wrapper (60 B, opt-in)
+#   0x80095980..0x80095D80  RELOC_ITEM_DESC_PTR (1024 B, opt-in) <- this section
+#   0x80095D80..0x80095F40  AP_DESC_STRINGS (448 B, opt-in)       <-
+#   0x80095F40..0x80096BCC  ~3.1 KB free for future expansion
+#
+# Recycle-shop usage adds 1472 bytes inside Cave6, well within the
+# remaining headroom. An assertion at the bottom of this block enforces
+# the upper-bound invariant so any future wrapper that grows past
+# 0x80095980 fails loudly at module-load time.
+RECYCLE_SHOP_RELOC_TABLE_RAM_BASE: Final = 0x80095980
 
 # Relocated ITEM_DESC_PTR table — 256 entries × u32 = 1024 bytes. The
 # patcher copies the vanilla 128-entry pointer block (RAM 0x801279DC)
 # verbatim into slots 0..127, fills slots 128..134 with pointers to
 # the AP description strings (below), and leaves slots 135..255 zeroed.
-RELOC_ITEM_DESC_PTR_RAM: Final = EXT_CAVE1_RAM_BASE                    # 0x800A0A50
+RELOC_ITEM_DESC_PTR_RAM: Final = RECYCLE_SHOP_RELOC_TABLE_RAM_BASE     # 0x80095980
 RELOC_ITEM_DESC_PTR_ENTRIES: Final = 256
 RELOC_ITEM_DESC_PTR_SIZE: Final = RELOC_ITEM_DESC_PTR_ENTRIES * 4      # 1024
-RELOC_ITEM_DESC_PTR_BIN_OFFSET: Final = EXT_CAVE1_BIN_OFFSET
+RELOC_ITEM_DESC_PTR_BIN_OFFSET: Final = _slus_ram_to_bin_offset(
+    RELOC_ITEM_DESC_PTR_RAM,
+)
 
 # AP description strings — placed immediately after the relocated
 # ITEM_DESC_PTR. Each string lives in a fixed AP_DESC_STRING_MAX_LEN
 # byte slot (NUL-padded). Layout: 7 contiguous slots starting at
-# RAM 0x800A0E50.
+# RAM 0x80095D80.
 AP_DESC_STRING_MAX_LEN: Final = 64
 AP_DESC_STRINGS_RAM: Final = (
-    RELOC_ITEM_DESC_PTR_RAM + RELOC_ITEM_DESC_PTR_SIZE                  # 0x800A0E50
+    RELOC_ITEM_DESC_PTR_RAM + RELOC_ITEM_DESC_PTR_SIZE                  # 0x80095D80
 )
 AP_DESC_STRINGS_BIN_OFFSET: Final = _slus_ram_to_bin_offset(AP_DESC_STRINGS_RAM)
 AP_DESC_STRINGS_TOTAL_SIZE: Final = (
     AP_DESC_STRING_MAX_LEN * RECYCLE_SHOP_AP_ITEM_ID_COUNT              # 448
+)
+
+# Hard upper bound: the relocated table + AP desc strings must fit
+# inside Cave6's documented end at RAM 0x80096BCC. If a future wrapper
+# pushes the recycle shop's start past 0x80095980, OR if the table /
+# strings grow past Cave6's end, this assertion fires at module-load
+# time and refuses to ship a corrupting patch.
+_CAVE6_END_RAM: Final = 0x80096BCC
+assert AP_DESC_STRINGS_RAM + AP_DESC_STRINGS_TOTAL_SIZE <= _CAVE6_END_RAM, (
+    f"Recycle shop relocated table + desc strings overflow Cave6: "
+    f"end = 0x{AP_DESC_STRINGS_RAM + AP_DESC_STRINGS_TOTAL_SIZE:08X}, "
+    f"Cave6 ends at 0x{_CAVE6_END_RAM:08X}"
+)
+# Also verify the table starts above the recycle shop wrapper (which
+# also lives in Cave6 at 0x80095940 and is 60 B long).
+assert RECYCLE_SHOP_RELOC_TABLE_RAM_BASE >= 0x80095940 + 60, (
+    f"Recycle shop relocated table at 0x{RECYCLE_SHOP_RELOC_TABLE_RAM_BASE:08X} "
+    f"overlaps the recycle shop wrapper (which ends at 0x8009597C)"
 )
 
 # String prefix/suffix for "From <player>'s World".
@@ -6495,28 +6545,22 @@ def build_ap_item_para_entry(name: str, price: int) -> bytes:
 #   * RAM 0x000FD76C lui $r2, 0x8012   <- target #3 hi half (shop desc panel)
 #     RAM 0x000FD770 addiu $r2, $r2, 0x79DC
 #
-# We rewrite each pair to load RELOC_ITEM_DESC_PTR_RAM (= 0x800A0A50):
-#   lui   $r2, 0x800A     -> 0x3C02800A
-#   addiu $r2, $r2, 0x0A50 -> 0x24420A50
-# (low half 0x0A50 is positive < 0x8000, no sign-extension issue.)
+# We rewrite each pair to load RELOC_ITEM_DESC_PTR_RAM (= 0x80095980):
+#   lui   $r2, 0x8009     -> 0x3C028009
+#   addiu $r2, $r2, 0x5980 -> 0x24425980
+# (low half 0x5980 is positive < 0x8000, no sign-extension issue.)
 
 # Encoding helpers — derived from RELOC_ITEM_DESC_PTR_RAM so the bytes
 # stay in sync if the relocated address moves.
-_RELOC_HI: Final = (RELOC_ITEM_DESC_PTR_RAM >> 16) & 0xFFFF                 # 0x800A
-_RELOC_LO: Final = RELOC_ITEM_DESC_PTR_RAM & 0xFFFF                         # 0x0A50
+_RELOC_HI: Final = (RELOC_ITEM_DESC_PTR_RAM >> 16) & 0xFFFF                 # 0x8009
+_RELOC_LO: Final = RELOC_ITEM_DESC_PTR_RAM & 0xFFFF                         # 0x5980
 assert _RELOC_LO < 0x8000, (
     f"RELOC low half 0x{_RELOC_LO:04X} would need sign-extension; pick a "
     f"new RELOC_ITEM_DESC_PTR_RAM whose low 16 bits are < 0x8000."
 )
 # Both encodings target $r2 (rt=2). lui: opcode 0x0F << 26 | rt<<16 | imm
-RELOC_ITEM_DESC_PTR_LUI_VALUE: Final = 0x3C020000 | _RELOC_HI               # 0x3C02800A
-RELOC_ITEM_DESC_PTR_ADDIU_VALUE: Final = 0x24420000 | _RELOC_LO             # 0x24420A50
-assert RELOC_ITEM_DESC_PTR_LUI_VALUE == 0x3C02800A, (
-    hex(RELOC_ITEM_DESC_PTR_LUI_VALUE)
-)
-assert RELOC_ITEM_DESC_PTR_ADDIU_VALUE == 0x24420A50, (
-    hex(RELOC_ITEM_DESC_PTR_ADDIU_VALUE)
-)
+RELOC_ITEM_DESC_PTR_LUI_VALUE: Final = 0x3C020000 | _RELOC_HI               # 0x3C028009
+RELOC_ITEM_DESC_PTR_ADDIU_VALUE: Final = 0x24420000 | _RELOC_LO             # 0x24425980
 
 # Per-callsite (lui_bin_offset, addiu_bin_offset) tuples. Each lands in
 # the patcher as two 4-byte WRITEs.
