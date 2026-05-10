@@ -337,23 +337,6 @@ MANSION_KEY_LOCATION_TRIGGER_ID: Final = 110
 FRIG_KEY_LOCATION_BIT: Final[tuple[int, int]] = (0x001BDFDA, 0)
 FRIG_KEY_LOCATION_TRIGGER_ID: Final = 104
 
-# **STEAK_LOCATION_BIT** — trigger 348, set by the fridge interaction
-# in Overdell (Script 55 Section_83 at script offset 848 — see
-# DW1Script.txt:11810). The fridge interaction is the canonical
-# "player obtained Steak" event in vanilla DW1: using Frig Key on the
-# fridge consumes the key, sets trigger 348, and (in vanilla) causes
-# a Steak object to spawn at coords (48, 32) on the Overdell map
-# (Script 35 Section_254). In AP rando the spawn is patched out (see
-# ROM_STEAK_SPAWN_NEUTER_*); only AP delivery puts Steak in the
-# player's bank. Trigger 348 has 5 references in the entire DW1
-# script — 4 in the fridge cutscene itself, 1 gating the spawn we
-# neuter — so it's safe to reuse as the AP signal.
-#
-# Trigger 348 lives at byte ``0x001BDFCD + 348/8 = 0x001BDFF8``,
-# bit ``348 % 8 = 4`` (gap B, the post-recruit-block trigger range).
-STEAK_LOCATION_BIT: Final[tuple[int, int]] = (0x001BDFF8, 4)
-STEAK_LOCATION_TRIGGER_ID: Final = 348
-
 # **GEAR_LOCATION_BIT** — trigger 270, set at the end of the Gear
 # acquisition cutscene in Toy Town (Script 144 Section_83 at script
 # offset 4518 — see DW1Script.txt:22436). The cutscene plays after
@@ -448,8 +431,10 @@ LEOMONSTONE_LOCATION_TRIGGER_ID: Final = 135
 # argument against item 117 (Amazing Rod) and, on match, calls
 # ``setTrigger(903)`` before tail-calling the vanilla give-item
 # function. Trigger 903 is in gap C, byte 0x001BE03D bit 7 — the
-# only free bit in that byte (bits 0..5 used by vending 896..901,
-# bit 6 by Old Fishrod 902).
+# only free bit in that byte (bits 2..5 used by vending 898..901,
+# bit 6 by Old Fishrod 902; bits 0..1 are unused — trigger IDs 896
+# and 897 reserved historically for the Gear Savanna MP Stand
+# sub-vendor slots, which never became AP locations).
 AMAZING_ROD_LOCATION_BIT: Final[tuple[int, int]] = (0x001BE03D, 7)
 AMAZING_ROD_LOCATION_TRIGGER_ID: Final = 903
 
@@ -500,12 +485,6 @@ KEYITEM_LOCATION_RAM_BITS: Final[dict[str, tuple[int, int]]] = {
     # (idempotent; the bit was already flipped at offset 238). No key
     # enters the player's inventory — only AP delivery does.
     "Frig Key Pickup":             FRIG_KEY_LOCATION_BIT,
-    # "Steak Pickup" polls trigger 348 (set by the Overdell fridge
-    # interaction when the player uses Frig Key on the fridge). The
-    # vanilla Steak spawn that follows (in Script 35 Section_254) is
-    # patched out — see ROM_STEAK_SPAWN_NEUTER_*. AP delivery via
-    # bank slot 122 is the only path to actually obtain Steak.
-    "Steak Pickup":                STEAK_LOCATION_BIT,
     # "Gear Pickup" polls trigger 270 (Toy Town WaruMonzaemon defeat
     # cutscene's section gate, set at script offset 4518 in Script
     # 144 Section_83). The two giveItem 120 instructions at offsets
@@ -730,6 +709,104 @@ assert all(
 
 RAM_TECHNIQUE_TABLE_BASE: Final = 0x0012623C
 RAM_LEARNING_CHANCE_TABLE_BASE: Final = 0x00125FA4
+
+
+# ----- Technique mastery bitmap (partner save block) -----------------------
+#
+# Per-partner-Digimon "I have mastered tech N" bitmap. One bit per
+# technique slot, packed LSB-first: slot N -> byte
+# ``RAM_TECH_MASTERY_BASE + N // 8``, bit ``N % 8``.
+#
+# Player-masterable range is 56 slots: 0..56 inclusive minus slot 48
+# ("Dynamite Kick v2"), a duplicate skipped by DW1's own "Master all
+# Techniques" debug script and by DWAP's per-slot lookup table.
+# Slots 57..120 are mostly digivolution-finisher techs tied to specific
+# Digimon forms and are not mastered through the normal learn path.
+#
+# Source: DWAP's ``GetTechAddress`` switch
+# (``references/DWAP/source/DWAP/Helpers.cs:507``). Live-verified
+# 2026-05-11 via ``worlds/digimon_world/tools/dw1_tech_snapshot.lua``
+# (snapshots #01/#02 against a Patamon-style starter):
+#
+#   * Snapshot #01 baseline: only bit 4 of 0x00155801 set, matching
+#     slot 12 = "Static Elect" (the starter's initial tech per DWAP's
+#     ``staticElectStarters`` list).
+#   * Snapshot #02 after the poker pressed B on the 9-tech TEST_LIST:
+#     bytes 0x00155800..0x00155805 picked up exactly the 9 expected
+#     bits PLUS the preserved starter bit. 1:1 match with the
+#     ``slot N -> bit N % 8 of byte BASE + N // 8`` mapping.
+#
+# **The bit alone is load-bearing**: setting it ORs the technique into
+# the partner's active combat moveset (verified in-battle 2026-05-11).
+# No separate active-moveset slot table needs to be written. AP item
+# delivery is therefore a single OR-write to the right byte/bit, with
+# a per-tick reconcile loop in the client to re-assert the bit if it
+# gets cleared by partner death/rebirth or digivolution.
+
+RAM_TECH_MASTERY_BASE: Final = 0x00155800
+
+# Duplicate slot that vanilla DW1 itself skips. Never present in a
+# mastery write, never appears in :data:`TECH_MASTERY_SLOTS`.
+TECH_MASTERY_DUPLICATE_SLOT: Final = 48
+
+# The 56 player-masterable technique slots in canonical (ascending)
+# order. Defined as a tuple so the order is stable across runs (an AP
+# item's id derives from its position-independent dw_code, but tests
+# that iterate the list want deterministic ordering).
+TECH_MASTERY_SLOTS: Final[tuple[int, ...]] = tuple(
+    s for s in range(0, 57) if s != TECH_MASTERY_DUPLICATE_SLOT
+)
+assert len(TECH_MASTERY_SLOTS) == 56, len(TECH_MASTERY_SLOTS)
+
+# Display names per slot. Verbatim from the standalone DW1 randomizer
+# (``references/digimon_world_randomizer/digimon/data.py:65``). Names
+# match in-game spelling exactly (including "Spit Fire" with a space,
+# "Static Elect" abbreviated, etc.) so AP item-name strings can be
+# read straight off the AP client without cross-referencing.
+TECH_NAMES_BY_SLOT: Final[dict[int, str]] = {
+    0:  "Fire Tower",       1:  "Prominence Beam", 2:  "Spit Fire",
+    3:  "Red Inferno",      4:  "Magma Bomb",      5:  "Heat Laser",
+    6:  "Infinity Burn",    7:  "Meltdown",        8:  "Thunder Justice",
+    9:  "Spinning Shot",    10: "Electric Cloud",  11: "Megalo Spark",
+    12: "Static Elect",     13: "Wind Cutter",     14: "Confused Storm",
+    15: "Hurricane",        16: "Giga Freeze",     17: "Ice Statue",
+    18: "Winter Blast",     19: "Ice Needle",      20: "Water Blit",
+    21: "Aqua Magic",       22: "Aurora Freeze",   23: "Tear Drop",
+    24: "Power Crane",      25: "All Range Beam",  26: "Metal Sprinter",
+    27: "Pulse Laser",      28: "Delete Program",  29: "DG Dimension",
+    30: "Full Potential",   31: "Reverse Prog",    32: "Poison Powder",
+    33: "Bug",              34: "Mass Morph",      35: "Insect Plague",
+    36: "Charm Perfume",    37: "Poison Claw",     38: "Danger Sting",
+    39: "Green Trap",       40: "Tremar",          41: "Muscle Charge",
+    42: "War Cry",          43: "Sonic Jab",       44: "Dynamite Kick",
+    45: "Counter",          46: "Megaton Punch",   47: "Buster Dive",
+    # slot 48 ("Dynamite Kick v2") deliberately omitted — see
+    # TECH_MASTERY_DUPLICATE_SLOT.
+    49: "Odor Spray",       50: "Poop Spd Toss",   51: "Big Poop Toss",
+    52: "Big Rnd Toss",     53: "Poop Rnd Toss",   54: "Rnd Spd Toss",
+    55: "Horizontal Kick",  56: "Ult Poop Hell",
+}
+assert set(TECH_NAMES_BY_SLOT) == set(TECH_MASTERY_SLOTS), (
+    sorted(set(TECH_NAMES_BY_SLOT) ^ set(TECH_MASTERY_SLOTS))
+)
+
+
+def tech_mastery_bit(slot: int) -> tuple[int, int]:
+    """Return ``(byte_address, bit_index)`` for technique mastery ``slot``.
+
+    Layout: bit ``slot % 8`` of byte ``RAM_TECH_MASTERY_BASE + slot // 8``.
+    Asserts the slot is one of the 56 player-masterable techs — passing
+    slot 48 (the duplicate) or anything outside 0..56 raises, since
+    those have no defined mastery storage.
+    """
+
+    if slot not in TECH_NAMES_BY_SLOT:
+        raise ValueError(
+            f"tech slot {slot} is not player-masterable (valid: "
+            f"{TECH_MASTERY_SLOTS!r})",
+        )
+    return RAM_TECH_MASTERY_BASE + slot // 8, slot % 8
+
 
 # ----- Misc -----------------------------------------------------------------
 
@@ -1949,7 +2026,10 @@ VENDING_MACHINES: Final[tuple[_VendingMachine, ...]] = (
         ),
     ),
     # ---- Script 71 — Gear Savanna: Special Prizes (Small Recovery 200,
-    #      Portable Potty 500) + MP Stand sub-vendor (Hund 200, Thous 1800)
+    #      Portable Potty 500). The MP Stand sub-vendor's two slots
+    #      (Hund / Thous MP) are not exposed as AP locations — the
+    #      in-game machine entries those would have hooked don't exist
+    #      in practice, so attaching checks to them was unreachable.
     _VendingMachine(
         label="Gear Savanna",
         region="Gear Savanna",
@@ -1968,20 +2048,6 @@ VENDING_MACHINES: Final[tuple[_VendingMachine, ...]] = (
                 overwrite_offsets=(1156,),
                 price_offsets=(906, 1292),
                 vanilla_price=500,
-            ),
-            _VendingItem(
-                "Vending: Gear Savanna Hund MP", "Gear Savanna",
-                trigger_id=896,
-                overwrite_offsets=(1750,),  # MP Stand addStats 100
-                price_offsets=(1740, 1756),
-                vanilla_price=200,
-            ),
-            _VendingItem(
-                "Vending: Gear Savanna Thous MP", "Gear Savanna",
-                trigger_id=897,
-                overwrite_offsets=(1902,),  # MP Stand addStats 1000
-                price_offsets=(1892, 1908),
-                vanilla_price=1800,
             ),
         ),
     ),
@@ -2037,7 +2103,7 @@ def _build_vending_location_ram_bits() -> dict[str, tuple[int, int]]:
 
 
 VENDING_LOCATION_RAM_BITS: Final[dict[str, tuple[int, int]]] = _build_vending_location_ram_bits()
-assert len(VENDING_LOCATION_RAM_BITS) == 12, len(VENDING_LOCATION_RAM_BITS)
+assert len(VENDING_LOCATION_RAM_BITS) == 10, len(VENDING_LOCATION_RAM_BITS)
 
 # Ordered list of all vending location names — locations.py imports this
 # to build location entries.
@@ -2885,17 +2951,15 @@ ROM_MANSION_KEY_GIVEITEM_NEUTER_VALUE: Final = bytes((
 # between primary and retry). Script 63 base copies: 0x1400A1C8
 # and 0x1400AC96 (delta 0xACE).
 #
-# **Corner case (documented; not patched):** the cutscene's first
-# instruction at offset 146 checks for Steak (item 122) — if the
-# player has Steak when first approaching Myotismon, the script
-# jumps to the Steak handover path (offset 1014 onward) and trigger
-# 104 is NEVER set on that visit. In vanilla DW1 this never happens
-# (Steak comes from a fridge that requires Frig Key), but in AP
-# rando, Steak may be delivered from another world before Frig Key.
-# The AP location still fires on a subsequent visit — when the
-# player approaches Myotismon without Steak, Section_5 takes the
-# normal path and trigger 104 transitions 0->1. So the location is
-# reachable, just possibly delayed by one visit.
+# Note: the cutscene's first instruction at offset 146 checks for
+# Steak (item 122) — if the player has Steak when first approaching
+# Myotismon, the script jumps to the Steak handover path (offset 1014
+# onward) and trigger 104 is NEVER set on that visit. Since Steak is
+# NOT an AP-tracked item (vanilla DW1 spawns it from the Overdell
+# fridge, which itself requires Frig Key), the player cannot reach
+# Myotismon with Steak in inventory unless they already have Frig
+# Key — so this corner case is unreachable and the cutscene always
+# takes the normal first-meeting branch, flipping trigger 104.
 
 ROM_FRIG_KEY_GIVEITEM_OFFSETS: Final = (
     0x1400A466,  # Copy 1 primary  (script-offset 670 = 0x29E)
@@ -2908,56 +2972,6 @@ ROM_FRIG_KEY_GIVEITEM_NEUTER_VALUE: Final = bytes((
     VENDING_OPCODE_SETTRIGGER, 0x00,
     FRIG_KEY_LOCATION_TRIGGER_ID & 0xFF,
     (FRIG_KEY_LOCATION_TRIGGER_ID >> 8) & 0xFF,
-))
-
-
-# =============================================================================
-# Steak spawn neuter (always-on)
-# =============================================================================
-#
-# Unlike the rod / Mansion Key / Frig Key cutscenes, Steak is **not**
-# given via a ``giveItem`` opcode anywhere in DW1's script
-# (zero ``giveItem 122`` calls). Instead, vanilla DW1 spawns Steak as a
-# **map item** (opcode 0x74 = ``spawnItem``) on the Overdell map, gated
-# on the fridge having been used. The relevant section
-# (Script 35 Section_254 — see DW1Script.txt:9184-9199):
-#
-#     000128 if trigger(348) == false OR trigger(128) == true then 150
-#     000144 spawnItem 122 48 32   <-- 6 bytes: 74 7A 30 00 20 00
-#     000150 endSection
-#
-# Conditional gates the spawn on trigger 348 (fridge used) AND
-# trigger 128 not set (Steak not yet given to Myotismon). When both
-# conditions hold, Steak object spawns at coords (48, 32) on the
-# Overdell map; the player walks to it and picks it up.
-#
-# In AP rando the spawn is bypassed: vanilla Steak goes nowhere; the
-# player gets Steak only via AP delivery (bank slot 122). The 6-byte
-# ``spawnItem`` is replaced with ``jumpTo 150`` (4 bytes:
-# ``16 00 96 00``) plus 2 bytes of unreachable filler (``00 00``).
-# The jumpTo lands directly on the ``endSection`` at offset 150, so
-# Section_254 ends without spawning anything when entered.
-#
-# Why use trigger 348 as the AP location signal instead of patching a
-# new trigger in: trigger 348 is set during the fridge cutscene
-# itself (Script 55 Section_83 offset 848), which is the canonical
-# "player obtained Steak via fridge" event. The actual Steak walk-to
-# and pickup are merely consequences of this. Polling trigger 348
-# fires the AP location at the conceptually-correct moment.
-#
-# Two ROM copies of Script 35 in the .bin (verified by scanning for
-# the 6-byte signature ``74 7A 30 00 20 00``: two hits at
-# 0x13FF7C58 and 0x13FF81E2; delta 0x58A).
-
-ROM_STEAK_SPAWN_NEUTER_OFFSETS: Final = (
-    0x13FF7C58,  # Copy 1 (Script 35 Section_254, script-offset 144 = 0x90)
-    0x13FF81E2,  # Copy 2
-)
-# 6-byte replacement: jumpTo 150 (4 bytes) + 2 bytes unreachable filler.
-ROM_STEAK_SPAWN_NEUTER_VALUE: Final = bytes((
-    VENDING_OPCODE_JUMPTO, 0x00,
-    0x96, 0x00,    # target = 150 (= 0x96), little-endian
-    0x00, 0x00,    # filler — never executed because the jumpTo lands at offset 150
 ))
 
 
@@ -3206,6 +3220,30 @@ ROM_GREAT_CANYON_CUTSCENE_OFFSETS: Final = (
     0x13FF8AB8,  # Copy 2: 0x13FF8AB4 + 4
 )
 ROM_GREAT_CANYON_CUTSCENE_VALUE: Final = bytes((0x67, 0x00))  # trigger 103 LE
+
+# Sections 51/52/53 of Script 36 (= GCAN01, the bridge approach screen)
+# each start with ``if trigger(124) == true then <skip-danger>``. If
+# the IF fails, the section plays the "Oh no, it's dangerous!" anim
+# and forcibly walks the player back to a safe spot before falling
+# through to the cutscene gate at offset 614. Trigger 124 is NOT "6 PP
+# reached" — it's set by the in-town "Invisible Bridge rumor" NPC
+# (script offset 003026 elsewhere, gated on ``pstat(1) >= 6``). So in
+# vanilla the player needs both 6 PP AND that NPC dialog before the
+# bridge is approachable. In shuffled mode the AP rules
+# (:func:`worlds.digimon_world.rules._set_entrance_rules`) gate the
+# Greatlake → Great Canyon entrance on ``Has("Great Canyon Bridge")``
+# alone — so the in-game gate must follow. Rewriting the cond1 trigger
+# ID byte (+0 from IF base) from 124 → 103 makes the AP item the only
+# gate. 3 sections × 2 BIN copies = 6 patch sites.
+ROM_GREAT_CANYON_APPROACH_GATE_OFFSETS: Final = (
+    0x13FF865E,  # Copy 1 Section_51 (script offset 354)
+    0x13FF86B4,  # Copy 1 Section_52 (script offset 440)
+    0x13FF870A,  # Copy 1 Section_53 (script offset 526)
+    0x13FF89B0,  # Copy 2 Section_51
+    0x13FF8A06,  # Copy 2 Section_52
+    0x13FF8A5C,  # Copy 2 Section_53
+)
+ROM_GREAT_CANYON_APPROACH_GATE_VALUE: Final = bytes((0x67, 0x00))  # trigger 103 LE
 
 
 # =============================================================================
@@ -6684,5 +6722,108 @@ ROM_RECYCLE_SHOP_PATCH_OFFSET: Final = _slus_ram_to_bin_offset(
 ROM_RECYCLE_SHOP_PATCH_FORMAT: Final = "<I"
 ROM_RECYCLE_SHOP_PATCH_VALUE: Final = (
     0x0C000000 | ((ROM_RECYCLE_SHOP_WRAPPER_RAM >> 2) & 0x03FFFFFF)
+)
+
+
+# --- setItemTexture clamp wrapper (icon fix for extended ITEM_PARA slots) --
+# Vanilla ``setItemTexture`` at RAM 0x800E5DFC computes
+# ``col = item_id % 16; row = item_id / 16`` and reads a 16x16 tile from
+# ITEM.TIM at those grid coordinates. ITEM.TIM is laid out as 16 cols x
+# 8 rows of 16x16 tiles (= 128 tiles total, exactly slots 0..127). Our
+# extended slots 128..134 map to col=0..6, row=8 — OFF the texture, so
+# the renderer reads garbage pixels for AP shop slot icons.
+#
+# Fix: install a small trampoline before ``setItemTexture``'s prologue
+# that clamps any ``item_id >= 128`` to slot 83 (the universal "AP Item"
+# slot whose icon is already blanked in ITEM.TIM via
+# :data:`AP_ITEM_ICON_BLANK_BIN_OFFSETS`). After the clamp, the
+# trampoline reproduces the displaced first 2 instructions of
+# ``setItemTexture`` and ``j``s back into the function body.
+#
+# Function layout (vanilla):
+#   0x800E5DFC  addiu $sp, $sp, -0x28   <- prologue instr 1 (we hijack)
+#   0x800E5E00  sw    $ra, 0x20($sp)    <- prologue instr 2 (becomes nop)
+#   0x800E5E04  sw    $s1, 0x1C($sp)    <- where the trampoline returns
+#   ...
+#
+# Wrapper layout (7 instructions / 28 bytes):
+#   sltiu $t0, $a1, RECYCLE_SHOP_AP_ITEM_ID_BASE  ; t0 = (item < 128) ? 1 : 0
+#   bne   $t0, $0, .keep
+#   nop                                            ; bne delay slot
+#   addiu $a1, $0, AP_CHEST_SENTINEL_ITEM_ID       ; clamp: item = 83
+#  .keep:
+#   addiu $sp, $sp, -0x28                          ; reproduced instr 1
+#   j     0x800E5E04                               ; jump back to instr 3
+#   sw    $ra, 0x20($sp)                           ; reproduced instr 2
+#                                                  ; (delay slot of j)
+#
+# Wrapper sits in Cave6 immediately after AP_DESC_STRINGS (which ends at
+# RAM 0x80095F40). 4-byte aligned. ~3.1 KB of Cave6 still free after.
+
+ROM_SET_ITEM_TEXTURE_RAM: Final = 0x800E5DFC
+ROM_SET_ITEM_TEXTURE_RETURN_RAM: Final = 0x800E5E04  # instr 3 of setItemTexture
+
+ROM_ICON_CLAMP_WRAPPER_RAM: Final = (
+    AP_DESC_STRINGS_RAM + AP_DESC_STRINGS_TOTAL_SIZE                         # 0x80095F40
+)
+ROM_ICON_CLAMP_WRAPPER_OFFSET: Final = _slus_ram_to_bin_offset(
+    ROM_ICON_CLAMP_WRAPPER_RAM,
+)
+
+
+def _build_icon_clamp_wrapper_bytes() -> bytes:
+    """Build the setItemTexture clamp trampoline.
+
+    7 MIPS instructions / 28 bytes. See :data:`ROM_ICON_CLAMP_WRAPPER_RAM`
+    block comment for the dispatch shape.
+    """
+
+    import struct as _struct
+
+    j_back = (
+        0x08000000 | ((ROM_SET_ITEM_TEXTURE_RETURN_RAM >> 2) & 0x03FFFFFF)
+    )
+    return b"".join(
+        _struct.pack("<I", v) for v in (
+            # sltiu $t0, $a1, 128
+            0x2CA80000 | (RECYCLE_SHOP_AP_ITEM_ID_BASE & 0xFFFF),
+            # bne $t0, $0, +2  (skip the clamp instructions if in-range)
+            0x15000002,
+            # nop (bne delay slot)
+            0x00000000,
+            # addiu $a1, $0, 83  (clamp: a1 = AP chest sentinel slot)
+            0x24050000 | (AP_CHEST_SENTINEL_ITEM_ID & 0xFFFF),
+            # addiu $sp, $sp, -0x28  (reproduced setItemTexture instr 1)
+            0x27BDFFD8,
+            # j 0x800E5E04  (return to setItemTexture instr 3)
+            j_back,
+            # sw $ra, 0x20($sp)  (reproduced instr 2 — j delay slot)
+            0xAFBF0020,
+        )
+    )
+
+
+ROM_ICON_CLAMP_WRAPPER_BYTES: Final = _build_icon_clamp_wrapper_bytes()
+assert len(ROM_ICON_CLAMP_WRAPPER_BYTES) == 28, len(ROM_ICON_CLAMP_WRAPPER_BYTES)
+
+# Cave6 bounds re-check — wrapper extends past AP_DESC_STRINGS.
+assert (ROM_ICON_CLAMP_WRAPPER_RAM + len(ROM_ICON_CLAMP_WRAPPER_BYTES)
+        <= _CAVE6_END_RAM), (
+    f"Icon clamp wrapper end "
+    f"0x{ROM_ICON_CLAMP_WRAPPER_RAM + len(ROM_ICON_CLAMP_WRAPPER_BYTES):08X} "
+    f"overflows Cave6 end 0x{_CAVE6_END_RAM:08X}"
+)
+
+# Patch site: rewrite first 2 instructions of setItemTexture as
+# ``j ROM_ICON_CLAMP_WRAPPER_RAM`` + ``nop`` (delay slot). Single 8-byte
+# write. The trampoline reproduces the displaced bytes inline before
+# returning to instr 3.
+ROM_ICON_CLAMP_PATCH_OFFSET: Final = _slus_ram_to_bin_offset(
+    ROM_SET_ITEM_TEXTURE_RAM,
+)
+ROM_ICON_CLAMP_PATCH_FORMAT: Final = "<II"
+ROM_ICON_CLAMP_PATCH_VALUE: Final = (
+    0x08000000 | ((ROM_ICON_CLAMP_WRAPPER_RAM >> 2) & 0x03FFFFFF),  # j wrapper
+    0x00000000,                                                      # nop
 )
 

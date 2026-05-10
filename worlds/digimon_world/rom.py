@@ -116,6 +116,8 @@ from .data.addresses import (
     ROM_GACHA_MP_FLOPPY_FIX_OFFSET,
     ROM_GETTOPCITY_TRIGGER_FORMAT,
     ROM_GETTOPCITY_TRIGGER_PATCHES,
+    ROM_GREAT_CANYON_APPROACH_GATE_OFFSETS,
+    ROM_GREAT_CANYON_APPROACH_GATE_VALUE,
     ROM_GREAT_CANYON_CUTSCENE_OFFSETS,
     ROM_GREAT_CANYON_CUTSCENE_VALUE,
     ROM_ISTRIGGERSET_PATCH_FORMAT,
@@ -166,13 +168,16 @@ from .data.addresses import (
     ROM_OLD_FISHROD_REMAP_VALUE,
     ROM_RAIN_PLANT_GIVEITEM_NEUTER_VALUE,
     ROM_RAIN_PLANT_GIVEITEM_OFFSETS,
-    ROM_STEAK_SPAWN_NEUTER_OFFSETS,
-    ROM_STEAK_SPAWN_NEUTER_VALUE,
     ROM_PP_CALC_PATCH_FORMAT,
     ROM_PP_CALC_PATCH_OFFSET,
     ROM_PP_CALC_PATCH_VALUE,
     ROM_RECRUITMENT,
     ROM_RECRUITMENT_FORMAT,
+    ROM_ICON_CLAMP_PATCH_FORMAT,
+    ROM_ICON_CLAMP_PATCH_OFFSET,
+    ROM_ICON_CLAMP_PATCH_VALUE,
+    ROM_ICON_CLAMP_WRAPPER_BYTES,
+    ROM_ICON_CLAMP_WRAPPER_OFFSET,
     ROM_RECYCLE_SHOP_PATCH_FORMAT,
     ROM_RECYCLE_SHOP_PATCH_OFFSET,
     ROM_RECYCLE_SHOP_PATCH_VALUE,
@@ -1138,33 +1143,6 @@ def _write_gear_neuter_tokens(patch: DigimonWorldProcedurePatch) -> None:
         patch.write_token(APTokenTypes.WRITE, offset, ROM_GEAR_GIVEITEM_NEUTER_VALUE)
 
 
-def _write_steak_spawn_neuter_tokens(patch: DigimonWorldProcedurePatch) -> None:
-    """Replace the ``spawnItem 122 48 32`` in Script 35 Section_254 with a
-    ``jumpTo 150`` (lands on the section's terminal ``endSection``).
-
-    Unlike the rod / Mansion / Frig Key cutscenes, vanilla DW1 hands the
-    player Steak by spawning it as a map item rather than via a
-    ``giveItem`` opcode. Section_254 of the Overdell map (Script 35)
-    spawns Steak at coordinates (48, 32) when ``trigger(348) ==
-    true AND trigger(128) == false`` — i.e. when the player has used
-    the fridge (with Frig Key) but hasn't yet given the Steak to
-    Myotismon.
-
-    In AP rando, vanilla Steak is bypassed: only AP delivery (bank
-    slot 122 via :func:`_make_bank_deliverer`) puts Steak in the
-    player's hands. The 6-byte ``spawnItem`` is rewritten as 4-byte
-    ``jumpTo 150`` + 2-byte unreachable filler — execution skips
-    over the spawn and ends the section. Trigger 348 (set by the
-    fridge cutscene itself, not by us) remains the AP location signal.
-
-    See :data:`ROM_STEAK_SPAWN_NEUTER_OFFSETS` /
-    :data:`ROM_STEAK_SPAWN_NEUTER_VALUE` for byte layout.
-    """
-
-    for offset in ROM_STEAK_SPAWN_NEUTER_OFFSETS:
-        patch.write_token(APTokenTypes.WRITE, offset, ROM_STEAK_SPAWN_NEUTER_VALUE)
-
-
 def _write_frig_key_neuter_tokens(patch: DigimonWorldProcedurePatch) -> None:
     """Replace both ``giveItem 123 1`` calls in Script 63 Section_5
     (Myotismon Frig-Key dialog) with ``setTrigger 104``.
@@ -1281,6 +1259,13 @@ def _write_great_canyon_cutscene_tokens(patch: DigimonWorldProcedurePatch) -> No
 
     for offset in ROM_GREAT_CANYON_CUTSCENE_OFFSETS:
         patch.write_token(APTokenTypes.WRITE, offset, ROM_GREAT_CANYON_CUTSCENE_VALUE)
+    # Sections 51/52/53 of Script 36 (the bridge approach screen) gate
+    # the danger animation on trigger 124 — set only by the in-town
+    # "Invisible Bridge rumor" NPC, which the player may never reach
+    # (or may have skipped past) once their game state has advanced.
+    # Redirect the gate to trigger 103 so the AP item alone is enough.
+    for offset in ROM_GREAT_CANYON_APPROACH_GATE_OFFSETS:
+        patch.write_token(APTokenTypes.WRITE, offset, ROM_GREAT_CANYON_APPROACH_GATE_VALUE)
 
 
 # =============================================================================
@@ -1620,6 +1605,25 @@ def _write_recycle_shop_tokens(
         struct.pack(ROM_RECYCLE_SHOP_PATCH_FORMAT, ROM_RECYCLE_SHOP_PATCH_VALUE),
     )
 
+    # 6. setItemTexture clamp wrapper — fixes garbage icons for slots
+    #    128..134 by redirecting any icon lookup with item_id >= 128 to
+    #    slot 83 (which is already blanked in ITEM.TIM by the merit shop
+    #    patcher). Without this, slots 128..134 read tile coords
+    #    (col=0..6, row=8) which is off the 16x8-tile texture.
+    patch.write_token(
+        APTokenTypes.WRITE,
+        ROM_ICON_CLAMP_WRAPPER_OFFSET,
+        ROM_ICON_CLAMP_WRAPPER_BYTES,
+    )
+    # 7. Patch site for icon clamp: rewrite first 2 instructions of
+    #    setItemTexture as ``j wrapper`` + ``nop``. The trampoline
+    #    reproduces the displaced bytes inline before returning.
+    patch.write_token(
+        APTokenTypes.WRITE,
+        ROM_ICON_CLAMP_PATCH_OFFSET,
+        struct.pack(ROM_ICON_CLAMP_PATCH_FORMAT, *ROM_ICON_CLAMP_PATCH_VALUE),
+    )
+
 
 def _write_ground_item_params(
     patch: DigimonWorldProcedurePatch,
@@ -1774,7 +1778,6 @@ def write_patch(world: DigimonWorldWorld, output_directory: str) -> None:
     _write_old_fishrod_remap_tokens(patch)  # always-on; decouples cutscene from rod ownership
     _write_mansion_key_neuter_tokens(patch)  # always-on; vanilla key give -> AP location signal
     _write_frig_key_neuter_tokens(patch)  # always-on; same shape as Mansion Key
-    _write_steak_spawn_neuter_tokens(patch)  # always-on; spawn-replacement (6-byte patch)
     _write_gear_neuter_tokens(patch)  # always-on; same shape as Mansion/Frig Key
     _write_rain_plant_neuter_tokens(patch)  # always-on; single-site giveItem -> setTrigger
     _write_blue_flute_neuter_tokens(patch)  # always-on; same shape as Mansion/Frig/Gear
