@@ -60,19 +60,45 @@ class ItemEntry(NamedTuple):
 # =============================================================================
 # Progression keys
 # =============================================================================
-# Mansion Key, Gear, Frig Key, AS Decoder, Blue Flute, Old Fishrod, Amazing rod,
-# Rain Plant — eight items the v1 logic in :mod:`.rules` actually gates on.
+# The canonical DW1 key-item list (per user, 2026-05-08) is:
+#
+#     Blue Flute   — summon Seadramon to Beetle Land
+#     Old Fishrod  — fishing
+#     Amazing Rod  — better fishing
+#     Leomonstone  — Leomon's recruit quest (Stone Tablet)
+#     Mansion Key  — enter Grey Lord's Mansion
+#     Gear         — Monzaemon / Toy Town questline
+#     Rain Plant   — Vegimon recruit quest
+#     Steak        — Grey Lord's Mansion / SkullGreymon questline
+#     Frig Key     — Grey Lord's Mansion / refrigerator
+#
+# **AS Decoder is NOT a key item.** It exists in DW1 but does nothing
+# in-game and gates nothing — removed from the item pool 2026-05-08.
+#
+# All 9 canonical key items are AP-tracked progression items below.
+# Leomonstone and Steak were added 2026-05-08 to gate Leomon's recruit
+# (Stone Tablet path) and SkullGreymon's recruit (Grey Lord's Mansion /
+# Steak feeding) respectively. See ``rules.py`` for the per-recruit
+# extras.
+#
+# Note: Steak is also a regular consumable available from shops/vending
+# in vanilla DW1, so the ``Has("Steak")`` gate is currently bypassable
+# by buying Steak in-game; same for Leomonstone (vanilla pickup at the
+# Stone Tablet site in Ancestor's Cave). Both bypasses will close when
+# the v2 "key item spawn randomization" lands (PLAN.md Phase 7).
+#
 # DV codes mirror DWAP where the item exists there.
 
 _KEY_ITEMS: Final[dict[str, ItemEntry]] = {
     "Mansion Key": ItemEntry(2119, ItemClassification.progression),
     "Gear":        ItemEntry(2120, ItemClassification.progression),
     "Frig Key":    ItemEntry(2123, ItemClassification.progression),
-    "AS Decoder":  ItemEntry(2124, ItemClassification.progression),
     "Blue Flute":  ItemEntry(2115, ItemClassification.progression),
     "Old Fishrod": ItemEntry(2116, ItemClassification.progression),
     "Amazing rod": ItemEntry(2117, ItemClassification.progression | ItemClassification.useful),
     "Rain Plant":  ItemEntry(2121, ItemClassification.progression),
+    "Leomonstone": ItemEntry(2118, ItemClassification.progression),
+    "Steak":       ItemEntry(2122, ItemClassification.progression),
     # Virtual access item (no real DW1 inventory entry). Delivered as a
     # trigger-array bit-flip via KEYITEM_DELIVERY_RAM_BITS; the patched
     # boulder script in Drill Tunnel reads that bit. dw_code 5000 is
@@ -87,47 +113,161 @@ _KEY_ITEMS: Final[dict[str, ItemEntry]] = {
 }
 
 # =============================================================================
-# DV (digivolution) items
+# Bank-item catalog — unified table for non-key, non-recruit items
 # =============================================================================
-# Pool ballast for v1. Digivolution randomization is deferred to v2; until
-# then these are filler|useful but not progression. Codes mirror DWAP's
-# 2071-2114 range.
+#
+# Phase 8 (2026-05-09) rework: replaces the old separate ``_DV_ITEMS``
+# (useful) + ``_CONSUMABLES`` (filler) tables. Every shippable bank
+# item now lives in a single catalog keyed by display name → dw_code.
+# The classification is set per-item: 5 explicit useful items, the
+# rest are filler. dw_code = 2000 + ITEM_PARA slot.
+#
+# **Items intentionally omitted:**
+#
+# * Slot 22 (Auto Pilot) — already in the player's starting
+#   inventory; shipping it in the AP pool would be redundant filler.
+# * Slot 32 (Port. potty) — vending-machine reward; not in AP pool.
+# * Slot 50 (Gold Acorn) — niche "sells for high price" item; out
+#   of the design.
+# * Slot 48 Blue apple, slot 54 Pricklypear, slot 68 Moldy Meat,
+#   slot 69 Happymushrm — niche / risky / trap-shaped flavor items
+#   the user opted out of.
+# * Slot 83 (Electo ring) — repurposed as
+#   ``AP_CHEST_SENTINEL_ITEM_ID`` (the in-game "AP ITEM"
+#   placeholder); underlying vanilla item is unused / crashes the
+#   game.
+# * Slot 114 (Moon mirror) — repurposed as
+#   ``AP_SHOP_BOUGHT_SENTINEL_ITEM_ID`` ("AP Item Bought"); same
+#   reason.
+# * Slots 111-113 (Red Ruby, Beetlepearl, Coral charm) — "Mega"-tier
+#   digivolution items omitted to keep the Ultimate-tier filler
+#   list coherent (those items lead to extra-high-tier evolutions
+#   that are mostly-cosmetic / post-game).
+# * Slots 125-127 (Giga Hand, Noble Mane, Metalbanana) — used for
+#   the AP items_received counter scratch state per
+#   ``dw1_counter_safe_address.md``.
+# * Slot 124 (AS Decoder) — vanilla key item that gates nothing
+#   (the "Final Battle requires AS Decoder" rule was removed
+#   2026-05-08); not worth shipping.
+#
+# Slots 83 and 114 are also banned from ground-item randomization
+# via ``ground_items.BANNED_ITEM_IDS``.
 
-_DV_ITEMS: Final[dict[str, ItemEntry]] = {
-    name: ItemEntry(code, ItemClassification.useful) for name, code in (
-        ("Grey Claws", 2071), ("Fireball", 2072), ("Flamingwing", 2073),
-        ("Iron Hoof", 2074), ("Mono Stone", 2075), ("Steel drill", 2076),
-        ("White Fang", 2077), ("Black Wing", 2078), ("Spike Club", 2079),
-        ("Flamingmane", 2080), ("White Wing", 2081), ("Torn tatter", 2082),
-        ("Electo ring", 2083), ("Rainbowhorn", 2084), ("Rooster", 2085),
-        ("Unihorn", 2086), ("Horn helmet", 2087), ("Scissor jaw", 2088),
-        ("Fertilizer", 2089), ("Koga laws", 2090), ("Waterbottle", 2091),
-        ("North Star", 2092), ("Red Shell", 2093), ("Hard Scale", 2094),
-        ("Bluecrystal", 2095), ("Ice crystal", 2096), ("Hair grower", 2097),
-        ("Sunglasses", 2098), ("Metal part", 2099), ("Fatal Bone", 2100),
+# Items the user explicitly tagged as ``useful``: meaningful in-game
+# effect that AP fill should prefer placing at non-EXCLUDED locations.
+_USEFUL_ITEM_NAMES: Final[frozenset[str]] = frozenset({
+    "Trn. manual",   # better training
+    "Rest pillow",   # more recovery during rest
+    "Health shoe",   # walking boosts HP/MP
+    "Enemy repel",   # repel wild encounters
+    "Enemy bell",    # attract wild encounters
+})
+
+# Single source of truth for non-key bank items. Names match the
+# in-game ITEM_PARA strings exactly (preserves "Sup.restore" with
+# the period, "Hispeed dsk" abbreviation, etc.). Order in this
+# table is by ITEM_PARA slot so cross-reference with the BIN is
+# trivial.
+_BANK_ITEMS: Final[dict[str, ItemEntry]] = {
+    name: ItemEntry(
+        code,
+        ItemClassification.useful if name in _USEFUL_ITEM_NAMES
+        else ItemClassification.filler,
+    )
+    for name, code in (
+        # ----- Heals (slots 0..14) -----
+        ("SM Recovery",   2000), ("Med Recovery",  2001),
+        ("Lrg Recovery",  2002), ("Sup Recovery",  2003),
+        ("MP Floppy",     2004), ("Medium MP",     2005),
+        ("Large MP",      2006), ("Double flop",   2007),
+        ("Various",       2008), ("Omnipotent",    2009),
+        ("Protection",    2010), ("Restore",       2011),
+        ("Sup.restore",   2012), ("Bandage",       2013),
+        ("Medicine",      2014),
+        # ----- Battle-stat disks (slots 15..21) -----
+        ("Off. Disk",     2015), ("Def. Disk",     2016),
+        ("Hispeed dsk",   2017), ("Omni Disk",     2018),
+        ("S.Off.disk",    2019), ("S.Def.disk",    2020),
+        ("S.speed.disk",  2021),
+        # slot 22 = Auto Pilot — omitted (already in starting inventory)
+        # ----- Permanent stat-boost chips (slots 23..31) -----
+        ("Off. Chip",     2023), ("Def. Chip",     2024),
+        ("Brain Chip",    2025), ("Quick Chip",    2026),
+        ("HP Chip",       2027), ("MP Chip",       2028),
+        ("DV Chip A",     2029), ("DV Chip D",     2030),
+        ("DV Chip E",     2031),
+        # slot 32 = Port. potty — vending reward, omitted
+        # ----- Useful (slots 33..37) -----
+        ("Trn. manual",   2033), ("Rest pillow",   2034),
+        ("Enemy repel",   2035), ("Enemy bell",    2036),
+        ("Health shoe",   2037),
+        # ----- Food (slots 38..47) -----
+        ("Meat",          2038), ("Giant Meat",    2039),
+        ("Sirloin",       2040), ("Supercarrot",   2041),
+        ("Hawk radish",   2042), ("Spiny green",   2043),
+        ("Digimushrm",    2044), ("Ice mushrm",    2045),
+        ("Deluxmushrm",   2046), ("Digipine",      2047),
+        # slot 48 = Blue apple — omitted (niche)
+        # ----- Berries / fruits (slots 49..55) -----
+        ("Red Berry",     2049),
+        # slot 50 = Gold Acorn — omitted (sells for high price; niche)
+        ("Big Berry",     2051), ("Sweet Nut",     2052),
+        ("Super veggy",   2053),
+        # slot 54 = Pricklypear — omitted (niche)
+        ("Orange bana",   2055),
+        # ----- Permanent stat-boost berries (slots 56..61) -----
+        ("Power fruit",   2056), ("Power Ice",     2057),
+        ("Speed Leaf",    2058), ("Sage Fruit",    2059),
+        ("Muscle Yam",    2060), ("Calm berry",    2061),
+        # ----- Fish (slots 62..67) -----
+        ("Digianchovy",   2062), ("Digisnapper",   2063),
+        ("DigiTrout",     2064), ("Black trout",   2065),
+        ("Digicatfish",   2066), ("Digiseabass",   2067),
+        # slot 68 = Moldy Meat, slot 69 = Happymushrm — both omitted
+        # ----- Special (slot 70) -----
+        ("Chain melon",   2070),
+        # ----- DV items, Champion-tier (slots 71..98) -----
+        ("Grey Claws",    2071), ("Fireball",      2072),
+        ("Flamingwing",   2073), ("Iron Hoof",     2074),
+        ("Mono Stone",    2075), ("Steel drill",   2076),
+        ("White Fang",    2077), ("Black Wing",    2078),
+        ("Spike Club",    2079), ("Flamingmane",   2080),
+        ("White Wing",    2081), ("Torn tatter",   2082),
+        # slot 83 = Electo ring (sentinel) — omitted
+        ("Rainbowhorn",   2084), ("Rooster",       2085),
+        ("Unihorn",       2086), ("Horn helmet",   2087),
+        ("Scissor jaw",   2088), ("Fertilizer",    2089),
+        ("Koga laws",     2090), ("Waterbottle",   2091),
+        ("North Star",    2092), ("Red Shell",     2093),
+        ("Hard Scale",    2094), ("Bluecrystal",   2095),
+        ("Ice crystal",   2096), ("Hair grower",   2097),
+        ("Sunglasses",    2098),
+        # ----- DV items, Ultimate-tier (slots 99..110) -----
+        ("Metal part",    2099), ("Fatal Bone",    2100),
+        ("Cyber part",    2101), ("Mega Hand",     2102),
+        ("Silver ball",   2103), ("Metal armor",   2104),
+        ("Chainsaw",      2105), ("Small spear",   2106),
+        ("X Bandage",     2107), ("Ray Gun",       2108),
+        ("Gold banana",   2109), ("Mysty Egg",     2110),
+        # slots 111-113 (Red Ruby, Beetlepearl, Coral charm) — Mega
+        # tier, omitted from filler distribution to keep tiers
+        # coherent
+        # slot 114 = Moon mirror (sentinel) — omitted
     )
 }
 
-# =============================================================================
-# Consumables
-# =============================================================================
-# Standard food / recovery / disk items. All filler classification.
-
+# Backward-compatible aliases used by other modules / tests.
+_DV_ITEMS: Final[dict[str, ItemEntry]] = {
+    name: entry for name, entry in _BANK_ITEMS.items()
+    if 2071 <= entry.dw_code <= 2110
+}
 _CONSUMABLES: Final[dict[str, ItemEntry]] = {
-    name: ItemEntry(code, ItemClassification.filler) for name, code in (
-        ("SM Recovery", 2000), ("Med Recovery", 2001), ("Lrg Recovery", 2002),
-        ("Sup Recovery", 2003), ("MP Floppy", 2004), ("Medium MP", 2005),
-        ("Large MP", 2006), ("Various", 2008),
-        ("Protection", 2010), ("Restore", 2011),
-        ("Sup.restore", 2012), ("Medicine", 2014),
-        ("Off. Disk", 2015), ("Def. Disk", 2016), ("Hispeed dsk", 2017),
-        ("Omni Disk", 2018),
-        ("Off. Chip", 2023),
-        ("Brain Chip", 2025),
-        ("HP Chip", 2027), ("MP Chip", 2028), ("Meat", 2038),
-        ("Sirloin", 2040), ("Supercarrot", 2041),
-        ("Hawk radish", 2042), ("Spiny green", 2043),
-    )
+    name: entry for name, entry in _BANK_ITEMS.items()
+    if entry.dw_code < 2071 and name not in _USEFUL_ITEM_NAMES
+}
+_USEFUL_ITEMS: Final[dict[str, ItemEntry]] = {
+    name: entry for name, entry in _BANK_ITEMS.items()
+    if name in _USEFUL_ITEM_NAMES
 }
 
 # =============================================================================
@@ -149,16 +289,44 @@ _BITS: Final[dict[str, ItemEntry]] = {
 # Any vanilla DW1 attempt to bump prosperity is overwritten on the next
 # tick. AP is the single source of truth for prosperity progression.
 #
-# Phase 5 piece C: each ``Prosperity Point`` item is worth 2 PP. With
-# :data:`PROSPERITY_POINT_COUNT` = 25, the pool delivers exactly 50 PP
-# (matching the Final-Battle goal gate). PP-gated logic in
+# Phase 9 (2026-05-10): each ``Prosperity Point`` item is worth 3 PP.
+# Pool size is sized by :func:`prosperity_point_count` from the player's
+# ``prosperity_goal`` option (default 50 → 21 items, range
+# 20–100 → 7–40 items). PP-gated logic in
 # :mod:`worlds.digimon_world.rules` rounds the in-game PP threshold up
-# to the nearest even multiple, so a "15 PP gate" becomes a "16 PP
-# gate" requiring 8 of the 25 items.
+# to the nearest multiple of 3, so a "15 PP gate" becomes a "15 PP
+# gate" requiring 5 items, and the Mt. Infinity gate (``threshold``)
+# requires ``ceil(threshold / 3)`` items.
 
 PROSPERITY_POINT_NAME: Final = "Prosperity Point"
-PROSPERITY_POINT_COUNT: Final = 25
-PROSPERITY_PER_ITEM: Final = 2
+# Phase 9 (2026-05-10): pool count is dynamic — sized to the player's
+# ``prosperity_goal`` option via :func:`prosperity_point_count`.
+# Each AP-delivered Prosperity Point item still bumps the in-game
+# prosperity counter by ``PROSPERITY_PER_ITEM`` = 3.
+PROSPERITY_PER_ITEM: Final = 3
+PROSPERITY_OVERHEAD_FACTOR: Final = 1.2
+
+
+def prosperity_point_count(threshold: int) -> int:
+    """Return the AP pool size for ``Prosperity Point`` given a
+    Mt. Infinity threshold.
+
+    Sized as ``ceil(ceil(threshold / 3) * 1.2)`` — enough copies to
+    reach the threshold (each item = 3 PP) plus a 20% comfort margin
+    rounded up. AP fill needs the slack so the player isn't gated on
+    every single PP copy being collected; this is the standard
+    AP-game pattern for goal-threshold items.
+
+    Locations whose vanilla PP gate exceeds the (un-margined)
+    threshold are unreachable in-game; :func:`worlds.digimon_world.
+    rules.set_all_rules` marks them EXCLUDED + filler-only and drops
+    their PP gate from AP logic, so they don't pull the player into
+    needing extra PP they can never collect.
+    """
+
+    import math
+
+    return math.ceil(math.ceil(threshold / PROSPERITY_PER_ITEM) * PROSPERITY_OVERHEAD_FACTOR)
 
 _PROSPERITY: Final[dict[str, ItemEntry]] = {
     PROSPERITY_POINT_NAME: ItemEntry(3003, ItemClassification.progression),
@@ -166,19 +334,69 @@ _PROSPERITY: Final[dict[str, ItemEntry]] = {
 
 
 # =============================================================================
-# Recruit items (Phase 5 piece C)
+# Recruit items — individual + Progressive-bundled
 # =============================================================================
-# One "<Digimon> Recruit" item per recruitable Digimon except Agumon
-# (49 items). Each is keyed at dw_code = 1000 + digimon_id, where
-# digimon_id is the Digimon's in-ROM id (recoverable from the recruit
-# trigger as ``trigger - 200``). Progression-classified because they
-# unlock in-city behavior (PP/model/roster) for that Digimon and AP
-# logic gates downstream content on cumulative-PP via the recruit's
-# vanilla level-based contribution... except this APWorld suppresses
-# that contribution via the setTrigger wrapper redirection. The
-# recruits remain progression because future logic (per-recruit gates
-# beyond PP) may want them, and a `Has("<X> Recruit")` rule is
-# unambiguous.
+#
+# Phase 7 (2026-05-09) recruit-bundling rework. Per the recruitment
+# guide and a per-Digimon role audit, only a handful of Digimon do
+# things meaningful enough to warrant being individual progression
+# items in AP. The bulk fall into one of six town-feature ladders:
+# Item Shop, Secret Shop, Restaurant, Arena, Green Gym, Treasure Hunt.
+# Those Digimon's individual ``<X> Recruit`` items are removed from
+# the pool — their in-town visibility is unlocked instead by collecting
+# the corresponding ``Progressive <Feature>`` item. Each Progressive
+# delivery sets the BEATEN bits (720+X) for the Digimon in its tier;
+# patched city-visibility scripts read those bits, so the bundled
+# Digimon appear in town as the player progresses each ladder.
+#
+# Cross-reference: :data:`PROGRESSIVE_BUNDLES` (below) defines the per-
+# Progressive-item tier table. The client's
+# :meth:`_reconcile_recruits` reads it each tick to OR in the right
+# bits.
+#
+# Individual recruit-item classifications are derived from the audit
+# in the project memory note (the list below mirrors that). 18
+# Digimon retain individual ``<X> Recruit`` AP items; the other 26
+# (in :data:`_BUNDLED_RECRUITS`) are bundled into Progressive ladders.
+
+# Individual classifications (dw_code base 1000 + digimon_id).
+#
+# Progression: gates AP logic in our world (see rules.py).
+# Useful: does something meaningful in town but doesn't gate AP logic.
+# Filler: in-town effect is purely cosmetic / "patrols the city".
+_INDIVIDUAL_RECRUIT_CLASSIFICATIONS: Final[dict[str, ItemClassification]] = {
+    # Progression — referenced in access rules
+    "Whamon":      ItemClassification.progression,
+    "Birdramon":   ItemClassification.progression,
+    "Palmon":      ItemClassification.progression,
+    "Shellmon":    ItemClassification.progression,
+    "Centarumon":  ItemClassification.progression,
+    # Useful — meaningful in-town role, no AP gate
+    "Vegiemon":    ItemClassification.useful,
+    "Kunemon":     ItemClassification.useful,
+    "Etemon":      ItemClassification.useful,
+    "Angemon":     ItemClassification.useful,
+    "Ninjamon":    ItemClassification.useful,
+    # Filler — "patrols the city" / "stands doing nothing"
+    "Bakemon":     ItemClassification.filler,
+    "Sukamon":     ItemClassification.filler,
+    "Leomon":      ItemClassification.filler,
+    "Andromon":    ItemClassification.filler,
+    "Kokatorimon": ItemClassification.filler,
+    "Monzaemon":   ItemClassification.filler,
+    "Elecmon":     ItemClassification.filler,
+    "Ogremon":     ItemClassification.filler,
+}
+assert len(_INDIVIDUAL_RECRUIT_CLASSIFICATIONS) == 18, len(_INDIVIDUAL_RECRUIT_CLASSIFICATIONS)
+
+# Bundled Digimon — these have no individual ``<X> Recruit`` AP item.
+# Their BEATEN bits (= city visibility) are set when the corresponding
+# Progressive ladder item is delivered. See :data:`PROGRESSIVE_BUNDLES`.
+_BUNDLED_RECRUITS: Final[frozenset[str]] = frozenset({
+    name for name in AP_RECRUIT_ITEM_DIGIMON
+    if name not in _INDIVIDUAL_RECRUIT_CLASSIFICATIONS
+})
+assert len(_BUNDLED_RECRUITS) == 26, len(_BUNDLED_RECRUITS)
 
 
 def _digimon_id_from_recruit_bit(byte_addr: int, bit: int) -> int:
@@ -188,14 +406,101 @@ def _digimon_id_from_recruit_bit(byte_addr: int, bit: int) -> int:
     return trigger_id - 200
 
 
+# Individual AP items for the 18 non-bundled recruits.
 _RECRUIT_ITEMS: Final[dict[str, ItemEntry]] = {
     f"{name} Recruit": ItemEntry(
         1000 + _digimon_id_from_recruit_bit(*RECRUIT_RAM_BITS[name]),
-        ItemClassification.progression,
+        classification,
     )
-    for name in AP_RECRUIT_ITEM_DIGIMON
+    for name, classification in _INDIVIDUAL_RECRUIT_CLASSIFICATIONS.items()
 }
-assert len(_RECRUIT_ITEMS) == 48, len(_RECRUIT_ITEMS)
+assert len(_RECRUIT_ITEMS) == 18, len(_RECRUIT_ITEMS)
+
+
+# =============================================================================
+# Progressive recruit-bundle items
+# =============================================================================
+#
+# Each Progressive item ships N copies in the pool. When the Nth copy
+# is received, all bundled Digimon up through tier N have their
+# BEATEN bits set (idempotent OR-write — already-set bits stay set).
+# This bundles many "this Digimon joined the city" recruit-bit grants
+# behind a smaller number of meaningful progression items.
+#
+# Tier composition follows the recruitment guide's "what does this
+# Digimon do" audit. Item Shop tiers were split so each tier mixes a
+# Digimon that "creates the shop" (early-game accessible) with one
+# that "joins the shop" (later). Secret Shop / Restaurant pair Digimon
+# with similar accessibility. Arena tier 1 must be Greymon alone —
+# vanilla DW1 won't open the Arena Lobby until Greymon is recruited.
+# Green Gym and Treasure Hunt are 1-Digimon-per-tier because each
+# only has 2 contributing Digimon.
+
+PROGRESSIVE_BUNDLES: Final[dict[str, tuple[tuple[str, ...], ...]]] = {
+    "Progressive Item Shop": (
+        ("Betamon", "Coelamon"),                  # T1: shop creators
+        ("Patamon", "Monochromon"),               # T2: shop joiners
+        ("Biyomon", "Unimon", "Piximon"),         # T3: late-game + Piximon
+    ),
+    "Progressive Secret Shop": (
+        ("Numemon", "Mojyamon"),                  # T1
+        ("Mamemon", "Devimon"),                   # T2
+    ),
+    "Progressive Restaurant": (
+        ("Meramon", "Tyrannomon"),                # T1: early chefs
+        ("Frigimon", "Garurumon"),                # T2: Freezeland chefs
+        ("Vademon", "Digitamamon"),               # T3: late + post-game
+    ),
+    "Progressive Arena": (
+        ("Greymon",),                             # T1: creates the Arena
+        ("SkullGreymon", "Penguinmon"),           # T2
+        # T3 was meant to be Gekomon + MetalMamemon, but Gekomon's
+        # in-game recruit-bit hasn't been mapped (he joins the Arena
+        # only, not the city, so RECRUIT_RAM_BITS doesn't have him
+        # yet). For now T3 = MetalMamemon alone; revisit when Arena
+        # has AP locations behind it. TODO(2026-05-09): add Gekomon.
+        ("MetalMamemon",),                        # T3
+        ("Megadramon", "MetalGreymon"),           # T4: late-game arena
+    ),
+    "Progressive Green Gym": (
+        ("Kabuterimon",),                         # T1
+        ("Kuwagamon",),                           # T2
+    ),
+    "Progressive Treasure Hunt": (
+        ("Drimogemon",),                          # T1: creates shop
+        ("Gabumon",),                             # T2: rare-find boost
+    ),
+}
+
+_PROGRESSIVE_ITEMS: Final[dict[str, ItemEntry]] = {
+    "Progressive Item Shop":      ItemEntry(6001, ItemClassification.progression),
+    "Progressive Secret Shop":    ItemEntry(6002, ItemClassification.progression),
+    "Progressive Restaurant":     ItemEntry(6003, ItemClassification.progression),
+    "Progressive Arena":          ItemEntry(6004, ItemClassification.progression),
+    "Progressive Green Gym":      ItemEntry(6005, ItemClassification.progression),
+    "Progressive Treasure Hunt":  ItemEntry(6006, ItemClassification.progression),
+}
+assert set(_PROGRESSIVE_ITEMS) == set(PROGRESSIVE_BUNDLES), (
+    "Progressive item table and bundle table must have the same keys"
+)
+
+# Pool-copy counts: ship one copy per tier.
+PROGRESSIVE_COUNTS: Final[dict[str, int]] = {
+    name: len(tiers) for name, tiers in PROGRESSIVE_BUNDLES.items()
+}
+
+# Sanity: every bundled Digimon must appear in exactly one tier of
+# exactly one Progressive ladder.
+_bundle_members = {
+    name for tiers in PROGRESSIVE_BUNDLES.values() for tier in tiers for name in tier
+}
+# Digitamamon is in _AP_RECRUIT_EXCLUDED (post-game) but appears in
+# Progressive Restaurant T3 as a side-flag. Subtract him before the
+# equality check.
+assert _bundle_members - {"Digitamamon"} == _BUNDLED_RECRUITS, (
+    f"Bundle membership mismatch: in-bundles={sorted(_bundle_members)}, "
+    f"_BUNDLED_RECRUITS={sorted(_BUNDLED_RECRUITS)}"
+)
 
 
 # =============================================================================
@@ -239,13 +544,18 @@ assert len(_BIRDRAMON_FLIGHT_ITEMS) == 5, len(_BIRDRAMON_FLIGHT_ITEMS)
 
 _ITEM_TABLE: Final[dict[str, ItemEntry]] = {
     **_KEY_ITEMS,
-    **_DV_ITEMS,
-    **_CONSUMABLES,
+    **_BANK_ITEMS,
     **_BITS,
     **_PROSPERITY,
     **_RECRUIT_ITEMS,
     **_BIRDRAMON_FLIGHT_ITEMS,
+    **_PROGRESSIVE_ITEMS,
 }
+# Sanity: _BANK_ITEMS subsumes both _DV_ITEMS and _CONSUMABLES + _USEFUL_ITEMS,
+# so the older aliased dicts must be subsets of the assembled table.
+assert set(_DV_ITEMS) <= set(_ITEM_TABLE)
+assert set(_CONSUMABLES) <= set(_ITEM_TABLE)
+assert set(_USEFUL_ITEMS) <= set(_ITEM_TABLE)
 
 ITEM_NAME_TO_ID: Final[dict[str, int]] = {
     name: ITEM_ID_BASE + entry.dw_code for name, entry in _ITEM_TABLE.items()
@@ -289,6 +599,7 @@ ITEM_NAME_GROUPS: Final[dict[str, set[str]]] = {
     "Progression Keys": set(_KEY_ITEMS),
     "DV Items": set(_DV_ITEMS),
     "Consumables": set(_CONSUMABLES),
+    "Useful": set(_USEFUL_ITEMS),
     "Bits": set(_BITS),
     "Prosperity": set(_PROSPERITY),
     "Recruits": set(_RECRUIT_ITEMS),
@@ -308,28 +619,148 @@ def digimon_id_for_recruit_item(item_name: str) -> int | None:
         return None
     return entry.dw_code - 1000
 
+# =============================================================================
+# Filler distribution
+# =============================================================================
+#
+# Phase 8 (2026-05-09) per-seed filler shaping. Filler slots in the AP
+# pool are filled by sampling from named buckets in fixed proportions:
+#
+# * 15% — DV item to a Champion-tier digivolution (slots 71-98)
+# * 10% — DV item to an Ultimate-tier digivolution (slots 99-110)
+# * 10% — special pickups: Chain melon, Digiseabass
+# * 20% — permanent stat-boost items: chips + permanent-effect berries
+# * 10% — money: 1000 Bits or 5000 Bits
+# * 35% — "mixed bag": battle-stat disks, heals, food, fish
+#
+# Per-bucket contents come straight from :data:`_BANK_ITEMS` /
+# :data:`_BITS`. The proportions are quotas, not per-slot probabilities:
+# :func:`build_filler_pool` rounds the targets to integers, randomly
+# repairs rounding drift, then samples names within each bucket. This
+# keeps the *shape* of every seed predictable while still randomizing
+# which specific items appear.
+#
+# Items not in any bucket are intentionally never shipped as filler
+# (Auto Pilot, Port. potty, Gold Acorn, etc., per the omissions
+# documented at :data:`_BANK_ITEMS`).
+
+_FILLER_DV_CHAMPION: Final[tuple[str, ...]] = tuple(
+    name for name, entry in _BANK_ITEMS.items()
+    if 2071 <= entry.dw_code <= 2098
+)
+_FILLER_DV_ULTIMATE: Final[tuple[str, ...]] = tuple(
+    name for name, entry in _BANK_ITEMS.items()
+    if 2099 <= entry.dw_code <= 2110
+)
+_FILLER_SPECIAL: Final[tuple[str, ...]] = ("Chain melon", "Digiseabass")
+_FILLER_PERM_STAT_BOOST: Final[tuple[str, ...]] = (
+    # Chips (slots 23..31)
+    "Off. Chip", "Def. Chip", "Brain Chip", "Quick Chip", "HP Chip",
+    "MP Chip", "DV Chip A", "DV Chip D", "DV Chip E",
+    # Permanent stat-boost berries (slots 56..61)
+    "Power fruit", "Power Ice", "Speed Leaf", "Sage Fruit", "Muscle Yam",
+    "Calm berry",
+)
+_FILLER_MONEY: Final[tuple[str, ...]] = ("1000 Bits", "5000 Bits")
+_FILLER_MIXED: Final[tuple[str, ...]] = (
+    # Heals (slots 0..14)
+    "SM Recovery", "Med Recovery", "Lrg Recovery", "Sup Recovery",
+    "MP Floppy", "Medium MP", "Large MP", "Double flop",
+    "Various", "Omnipotent", "Protection", "Restore",
+    "Sup.restore", "Bandage", "Medicine",
+    # Battle-stat disks (slots 15..21)
+    "Off. Disk", "Def. Disk", "Hispeed dsk", "Omni Disk",
+    "S.Off.disk", "S.Def.disk", "S.speed.disk",
+    # Food (slots 38..47)
+    "Meat", "Giant Meat", "Sirloin", "Supercarrot", "Hawk radish",
+    "Spiny green", "Digimushrm", "Ice mushrm", "Deluxmushrm", "Digipine",
+    # Non-permanent berries (slots 49..55, minus the perm-boost ones)
+    "Red Berry", "Big Berry", "Sweet Nut", "Super veggy", "Orange bana",
+    # Fish (slots 62..67) — Digiseabass is in _FILLER_SPECIAL, so skip it
+    "Digianchovy", "Digisnapper", "DigiTrout", "Black trout", "Digicatfish",
+)
+
+# (bucket, weight) — weights must sum to 1.0.
+FILLER_DISTRIBUTION: Final[tuple[tuple[tuple[str, ...], float], ...]] = (
+    (_FILLER_DV_CHAMPION,     0.15),
+    (_FILLER_DV_ULTIMATE,     0.10),
+    (_FILLER_SPECIAL,         0.10),
+    (_FILLER_PERM_STAT_BOOST, 0.20),
+    (_FILLER_MONEY,           0.10),
+    (_FILLER_MIXED,           0.35),
+)
+assert abs(sum(w for _, w in FILLER_DISTRIBUTION) - 1.0) < 1e-9
+# Every item in every bucket must be a real shippable AP item.
+for _bucket, _ in FILLER_DISTRIBUTION:
+    for _name in _bucket:
+        assert _name in _BANK_ITEMS or _name in _BITS, _name
+
+
+def build_filler_pool(rng, count: int) -> list[str]:
+    """Build a shuffled list of ``count`` filler item names whose bucket
+    proportions track :data:`FILLER_DISTRIBUTION`.
+
+    Rounding drift (e.g., ``count * 0.15`` is non-integer) is repaired by
+    bumping or trimming buckets at random until ``sum(targets) == count``.
+    Within each bucket the name is picked uniformly with replacement, so
+    duplicates within a bucket are expected and intentional (filler
+    diversity is a side effect, not a guarantee).
+    """
+
+    if count <= 0:
+        return []
+    targets: list[list] = [
+        [bucket, int(round(count * weight))]
+        for bucket, weight in FILLER_DISTRIBUTION
+    ]
+    delta = count - sum(t[1] for t in targets)
+    while delta > 0:
+        targets[rng.randrange(len(targets))][1] += 1
+        delta -= 1
+    while delta < 0:
+        idx = rng.randrange(len(targets))
+        if targets[idx][1] > 0:
+            targets[idx][1] -= 1
+            delta += 1
+    pool: list[str] = []
+    for bucket, target in targets:
+        for _ in range(target):
+            pool.append(rng.choice(bucket))
+    rng.shuffle(pool)
+    return pool
+
+
+def pick_random_filler(rng) -> str:
+    """Return a single filler item name sampled from
+    :data:`FILLER_DISTRIBUTION`. Used by ``World.get_filler_item_name``
+    so AP-internal filler insertions follow the same shape."""
+
+    bucket = rng.choices(
+        [b for b, _ in FILLER_DISTRIBUTION],
+        weights=[w for _, w in FILLER_DISTRIBUTION],
+        k=1,
+    )[0]
+    return rng.choice(bucket)
+
+
+# Stable fallback. Used by :data:`FILLER_ITEM_NAME` consumers that need a
+# single deterministic name (e.g., test fixtures); all real pool insertion
+# now goes through :func:`build_filler_pool`.
 FILLER_ITEM_NAME: Final = "1000 Bits"
 
 
 # =============================================================================
 # Itempool construction
 # =============================================================================
-# Pool composition (Phase 5 piece C):
+# Pool composition (Phase 8):
 #
-# 1. **Progression** (mandatory; every entry shipped exactly once
-#    unless noted): 8 keys + 49 recruit items + ``PROSPERITY_POINT_COUNT``
-#    Prosperity Points = 82 items.
-# 2. **Useful** (DV items, 30): shipped one each, trimmed if optional
-#    space runs out.
-# 3. **Filler** (consumables + bits, 27): shipped one each, trimmed if
-#    optional space runs out.
-# 4. **Padding** (generic filler, only when total < location count):
-#    extra copies of :data:`FILLER_ITEM_NAME` to fill remaining slots.
-#
-# When mandatory + optional > location count (the typical case once
-# recruits joined the pool — 82 + 57 = 139 vs ~116 locations), we trim
-# from the *back* of the optional list (filler before useful, since
-# consumables tend to be more redundant than DV items).
+# 1. **Mandatory** (progression + flight unlocks + Progressive bundles
+#    + Prosperity Points). Always shipped one copy per item except
+#    Prosperity Point and Progressive items (multi-copy).
+# 2. **Useful** (the 5 ``_USEFUL_ITEMS``). Shipped one copy each.
+# 3. **Filler** — fills any remaining capacity via
+#    :func:`build_filler_pool`, which respects
+#    :data:`FILLER_DISTRIBUTION` proportions per seed.
 
 
 def create_item(world: DigimonWorldWorld, name: str) -> DigimonWorldItem:
@@ -338,15 +769,14 @@ def create_item(world: DigimonWorldWorld, name: str) -> DigimonWorldItem:
 
 
 def create_all_items(world: DigimonWorldWorld) -> None:
-    """Submit the Phase 5 piece C itempool sized to the location count."""
+    """Submit the Phase 8 itempool sized to the location count."""
 
     locations_count = len(world.multiworld.get_unfilled_locations(world.player))
 
-    # Mandatory items (progression + useful flight items shipped one each).
     # Several "virtual access" key items only ship in their corresponding
     # ``shuffled`` mode; in other modes (vanilla / always_open) the gate
     # is handled differently and there's no AP item/location pair.
-    skip_keys = set()
+    skip_keys: set[str] = set()
     if int(world.options.lava_cave_access.value) == 0:  # 0 = vanilla
         skip_keys.add("Lava Cave Access")
     # BridgeUnlock / GreatCanyonUnlock: 0=always_open, 1=vanilla, 2=shuffled.
@@ -356,43 +786,48 @@ def create_all_items(world: DigimonWorldWorld) -> None:
     if int(world.options.great_canyon_unlock.value) != 2:
         skip_keys.add("Great Canyon Bridge")
 
-    mandatory: list[Item] = []
-    mandatory.extend(world.create_item(name) for name in _KEY_ITEMS if name not in skip_keys)
+    pool: list[Item] = []
+    pool.extend(world.create_item(name) for name in _KEY_ITEMS if name not in skip_keys)
     # When recruit_randomization is OFF, recruit items are locked to
-    # their own AP location in :meth:`DigimonWorldWorld.pre_fill` and
-    # must NOT enter the multiworld pool — pre_fill creates them
-    # fresh via ``world.create_item`` and calls ``place_locked_item``
-    # directly (the canonical AP self-locked-item pattern).
+    # their own AP location in :meth:`DigimonWorldWorld.create_regions`
+    # (via ``_lock_recruit_items_if_disabled``) and must NOT enter the
+    # multiworld pool.
     if int(world.options.recruit_randomization.value):
-        mandatory.extend(world.create_item(name) for name in _RECRUIT_ITEMS)
-    mandatory.extend(world.create_item(name) for name in _BIRDRAMON_FLIGHT_ITEMS)
-    mandatory.extend(
+        pool.extend(world.create_item(name) for name in _RECRUIT_ITEMS)
+    pool.extend(world.create_item(name) for name in _BIRDRAMON_FLIGHT_ITEMS)
+    pp_count = prosperity_point_count(int(world.options.prosperity_goal.value))
+    pool.extend(
         world.create_item(PROSPERITY_POINT_NAME)
-        for _ in range(PROSPERITY_POINT_COUNT)
+        for _ in range(pp_count)
     )
+    # Progressive recruit-bundle items — ship one copy per tier per
+    # ladder. Each delivery sets the BEATEN bits for the Digimon in
+    # tier ``count`` (handled by ``_reconcile_recruits`` in the client).
+    for name, copies in PROGRESSIVE_COUNTS.items():
+        pool.extend(world.create_item(name) for _ in range(copies))
 
-    if len(mandatory) > locations_count:
+    if len(pool) > locations_count:
         raise ValueError(
-            f"Mandatory items ({len(mandatory)}) exceed unfilled locations "
-            f"({locations_count}); reduce PROSPERITY_POINT_COUNT or expand "
-            f"the location pool.",
+            f"Mandatory items ({len(pool)}) exceed unfilled locations "
+            f"({locations_count}); lower prosperity_goal, expand "
+            f"the location pool, or reduce some of the other mandatory "
+            f"item categories.",
         )
 
-    # Optional items, in priority order: DV items (useful) before
-    # consumables/bits (filler).
-    optional: list[Item] = []
-    optional.extend(world.create_item(name) for name in _DV_ITEMS)
-    optional.extend(world.create_item(name) for name in _CONSUMABLES)
-    optional.extend(world.create_item(name) for name in _BITS)
+    # Useful items — one copy each. If the seed is too small to fit
+    # them all, drop from the back of the table; tests/the resolver
+    # treat the useful set as best-effort, not mandatory.
+    for name in _USEFUL_ITEMS:
+        if len(pool) >= locations_count:
+            break
+        pool.append(world.create_item(name))
 
-    pool = list(mandatory)
-    pool.extend(optional[: max(0, locations_count - len(pool))])
-
-    # Pad with generic filler if the explicit table didn't reach the
-    # location count (shouldn't happen with current numbers, but keep
-    # the safety net so future location-pool growth doesn't error out).
-    while len(pool) < locations_count:
-        pool.append(world.create_filler())
+    # Fill the rest with the proportional filler distribution.
+    remaining = locations_count - len(pool)
+    pool.extend(
+        world.create_item(name)
+        for name in build_filler_pool(world.random, remaining)
+    )
 
     assert len(pool) == locations_count, (len(pool), locations_count)
     world.multiworld.itempool += pool

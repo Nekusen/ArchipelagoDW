@@ -314,7 +314,14 @@ bytes `<N_LE> 18 00 <branch_LE> 19 00 ...`. For `addiu r4, r0,
   client recruit deliverer = "AP delivered ``<X> Recruit``". Read
   by city-visibility scripts after our patches.
 - `CURRENT_SCREEN`: byte at `0x80134DA8`.
-- `ITEMS_RECEIVED_COUNTER`: u16 LE at `0x801BDFEE`.
+- `ITEMS_RECEIVED_COUNTER`: 3 bytes (magic ``0xA5`` + u16 LE counter)
+  at `0x801BDF20..0x801BDF22`. Pre-bank scratch region; outside the
+  bank UI display range, the card-vending nibble array, and the
+  trigger bit-array. See the comment block on
+  ``ITEMS_RECEIVED_COUNTER_ADDR`` in ``client.py`` for the relocation
+  history (previously ``0x001BDFA9`` = bank slots 125-127, displayed
+  as phantom Giga Hand / Noble Mane in the bank UI; before that
+  ``0x001BDFEE`` = trigger 274 clobber zone).
 - Vanilla `setTrigger`: RAM `0x801065C0`.
 - Vanilla `isTriggerSet`: RAM `0x8010643C`.
 - Vanilla `scriptTickChangeMap`: RAM `0x800D8E64`.

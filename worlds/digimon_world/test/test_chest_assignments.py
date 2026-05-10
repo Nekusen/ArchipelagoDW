@@ -44,10 +44,10 @@ class TestChestGrants(DigimonWorldTestBase):
             "Meat", ItemClassification.filler,
             self.world.item_name_to_id["Meat"], self.world.player,
         )
-        _force_place(self.world, "Chest: Mt. Infinity 1", meat)
+        _force_place(self.world, "Chest: Grey Lord's Mansion 1", meat)
 
         grants = chest_assignments.build_chest_grants(self.world)
-        grant = grants["Chest: Mt. Infinity 1"]
+        grant = grants["Chest: Grey Lord's Mansion 1"]
 
         self.assertTrue(grant.vanilla_grant)
         self.assertEqual(grant.item_byte, dw1_internal_item_id("Meat"))
@@ -59,10 +59,10 @@ class TestChestGrants(DigimonWorldTestBase):
             "Prosperity Point", ItemClassification.progression,
             self.world.item_name_to_id["Prosperity Point"], self.world.player,
         )
-        _force_place(self.world, "Chest: Mt. Infinity 1", pp)
+        _force_place(self.world, "Chest: Grey Lord's Mansion 1", pp)
 
         grants = chest_assignments.build_chest_grants(self.world)
-        grant = grants["Chest: Mt. Infinity 1"]
+        grant = grants["Chest: Grey Lord's Mansion 1"]
 
         self.assertFalse(grant.vanilla_grant)
         self.assertEqual(grant.item_byte, AP_CHEST_SENTINEL_ITEM_ID)
@@ -73,10 +73,10 @@ class TestChestGrants(DigimonWorldTestBase):
             "Meat", ItemClassification.filler,
             self.world.item_name_to_id["Meat"], 99,
         )
-        _force_place(self.world, "Chest: Mt. Infinity 1", foreign)
+        _force_place(self.world, "Chest: Grey Lord's Mansion 1", foreign)
 
         grants = chest_assignments.build_chest_grants(self.world)
-        grant = grants["Chest: Mt. Infinity 1"]
+        grant = grants["Chest: Grey Lord's Mansion 1"]
 
         self.assertFalse(grant.vanilla_grant)
         self.assertEqual(grant.item_byte, AP_CHEST_SENTINEL_ITEM_ID)

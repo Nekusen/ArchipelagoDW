@@ -30,7 +30,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Final, NamedTuple
 
-from BaseClasses import Location
+from BaseClasses import ItemClassification, Location, LocationProgressType
 
 from .data.addresses import (
     CARD_LOCATION_NIBBLES,
@@ -75,14 +75,19 @@ class LocationEntry(NamedTuple):
 # Names match :data:`addresses.RECRUIT_RAM_BITS` keys exactly (note the
 # in-repo spelling "Vegiemon" — the in-game item table uses that form).
 _RECRUIT_REGIONS: Final[dict[str, str]] = {
+    # Airdramon (formerly a "File City" recruit) was dropped 2026-05-08
+    # — see addresses.py ``_AP_RECRUIT_EXCLUDED``. Greymon is back in
+    # the AP pool with his original 15-PP File-City placement.
     # File City
     "Greymon":      "File City",
-    "Airdramon":    "File City",
     # Native Forest
     "Palmon":       "Native Forest",
     "Kunemon":      "Native Forest",
     "Coelamon":     "Native Forest",
-    "Seadramon":    "Native Forest",
+    # Seadramon dropped 2026-05-09 (the cutscene IS the Blue Flute
+    # pickup; he doesn't really do anything in town). See addresses.py
+    # ``_AP_RECRUIT_EXCLUDED``. The cutscene now fires the
+    # ``Blue Flute Pickup`` keyitem AP location instead.
     "Ninjamon":     "Native Forest",
     "Etemon":       "Native Forest",
     # Tropical Jungle
@@ -129,11 +134,13 @@ _RECRUIT_REGIONS: Final[dict[str, str]] = {
     "Kokatorimon":  "Misty Trees",
     # Toy Town
     "Monzaemon":    "Toy Town",
-    "Nanimon":      "Toy Town",
+    # Nanimon dropped 2026-05-09 (per the recruitment guide, Nanimon
+    # drops keychains but never actually joins the city as an NPC).
     # Factorial Town
     "Numemon":      "Factorial Town",
     "Andromon":     "Factorial Town",
-    "Giromon":      "Factorial Town",
+    # Giromon dropped 2026-05-09 — his Restaurant Jukebox effect
+    # crashes the NTSC (US) build per the guide.
     "MetalMamemon": "Factorial Town",
     # Mt. Infinity
     "Devimon":      "Mt. Infinity",
@@ -163,9 +170,13 @@ _RECRUIT_DW_IDS: Final[dict[str, int]] = {
 }
 
 RECRUIT_NAMES: Final[tuple[str, ...]] = tuple(_RECRUIT_REGIONS)
-# Phase 6: 50 vanilla recruits minus Agumon (force-recruited bank NPC)
-# minus Digitamamon (post-game optional goal).
-assert len(RECRUIT_NAMES) == 48, len(RECRUIT_NAMES)
+# 50 vanilla recruits minus Agumon (force-recruited bank NPC), minus
+# Digitamamon (post-game optional goal), minus Airdramon (dropped
+# 2026-05-08), minus Seadramon (dropped 2026-05-09 — recruit cutscene
+# is the Blue Flute pickup), minus Nanimon and Giromon (dropped
+# 2026-05-09 — Nanimon never joins the city, Giromon's Jukebox crashes
+# the NTSC build). See addresses.py ``_AP_RECRUIT_EXCLUDED``.
+assert len(RECRUIT_NAMES) == 44, len(RECRUIT_NAMES)
 
 
 # =============================================================================
@@ -181,7 +192,7 @@ RECRUIT_PP_REQUIREMENTS: Final[dict[str, int]] = {
     "Palmon": 0,
     "Kunemon": 0,
     "Coelamon": 0,
-    "Seadramon": 0,
+    # Seadramon dropped 2026-05-09 — see _RECRUIT_REGIONS comment.
     "Betamon": 0,
     "Vegiemon": 0,
     "Centarumon": 0,
@@ -224,7 +235,7 @@ RECRUIT_PP_REQUIREMENTS: Final[dict[str, int]] = {
     "Leomon": 45,
     "Vademon": 45,
     # 50 PP
-    "Airdramon": 50,
+    # "Airdramon": 50,  # dropped 2026-05-08
     "Etemon": 50,
     "Ninjamon": 50,
     "Devimon": 50,
@@ -234,148 +245,169 @@ RECRUIT_PP_REQUIREMENTS: Final[dict[str, int]] = {
 
 
 # =============================================================================
-# Chest list (65 entries, Phase 5 region-aware naming)
+# Chest list (65 entries, region-aware naming)
 # =============================================================================
 # Names follow the chest-mapping document
 # (``references/chest_mapping_phase5.md``). DWAP slot indices 1..65 are
 # preserved as AP IDs (``69_001_000`` + slot-1) so the wire format stays
-# stable. Each slot is renamed to ``Chest: <Area> [N]`` for chests in
-# confirmed/strongly-inferred regions, or kept as ``Chest N`` for the
-# 17 chests whose region is not yet verified.
+# stable. Each slot has been verified against script + screen + DWAP
+# label + room-code (BIN MAP filename) as of the 2026-05-09 audit;
+# every chest gets a descriptive ``Chest: <Area> [N]`` name, no
+# bare ``Chest N`` placeholders remain.
 #
-# The region used here is the **chest's in-game region**, which informs
-# the per-chest PP gate (= min PP across recruits in that region; see
-# :data:`CHEST_PP_REQUIREMENTS`).
+# The region used here is the **chest's in-game region**. AP framework
+# inherits the region's entrance access rule onto every location inside
+# it (see :func:`create_all_locations` + the entrance rules in
+# :mod:`.rules`), so each chest's reachability is exactly its region's
+# reachability.
 
-# slot 1..65 → (chest name, in-game region)
-_CHEST_BY_SLOT: Final[dict[int, tuple[str, str]]] = {
-    1:  ("Chest: Mt. Infinity 1",        "Mt. Infinity"),
-    2:  ("Chest: Mt. Infinity 2",        "Mt. Infinity"),
-    3:  ("Chest: Mt. Infinity 3",        "Mt. Infinity"),
-    4:  ("Chest: Freezeland 1",          "Freezeland"),
-    5:  ("Chest: Freezeland 2",          "Freezeland"),
-    6:  ("Chest: Freezeland 3",          "Freezeland"),
-    7:  ("Chest: Freezeland 4",          "Freezeland"),
-    8:  ("Chest: Freezeland 5",          "Freezeland"),
-    9:  ("Chest: Drill Tunnel 1",        "Drill Tunnel"),
-    10: ("Chest: Drill Tunnel 2",        "Drill Tunnel"),
-    11: ("Chest 11",                     None),  # unknown region
-    12: ("Chest 12",                     None),
-    13: ("Chest: Freezeland 6",          "Freezeland"),
-    14: ("Chest: Freezeland 7",          "Freezeland"),
-    15: ("Chest: Freezeland 8",          "Freezeland"),
-    16: ("Chest: Freezeland 9",          "Freezeland"),
-    17: ("Chest: Drill Tunnel 3",        "Drill Tunnel"),
-    18: ("Chest: Drill Tunnel 4",        "Drill Tunnel"),
-    19: ("Chest: Toy Town",              "Toy Town"),
-    20: ("Chest 20",                     None),
-    21: ("Chest 21",                     None),
-    22: ("Chest 22",                     None),
-    23: ("Chest: Ogre Fortress",         "Great Canyon"),  # Ogre Fortress is Great Canyon's sub-area
-    24: ("Chest 24",                     None),
-    25: ("Chest 25",                     None),
-    26: ("Chest 26",                     None),
-    27: ("Chest: File City Cards 1",     "File City"),
-    28: ("Chest 28",                     None),
-    29: ("Chest 29",                     None),
-    30: ("Chest: File City Cards 2",     "File City"),
-    31: ("Chest: Mt. Infinity 4",        "Mt. Infinity"),
-    32: ("Chest: Mt. Infinity 5",        "Mt. Infinity"),
-    33: ("Chest: Mt. Infinity 6",        "Mt. Infinity"),
-    34: ("Chest 34",                     None),
-    35: ("Chest 35",                     None),
-    36: ("Chest 36",                     None),
-    37: ("Chest: Mt. Infinity 7",        "Mt. Infinity"),
-    38: ("Chest: Tower 1",               "Tower"),
-    39: ("Chest: Tower 2",               "Tower"),
-    40: ("Chest: Tower 3",               "Tower"),
-    41: ("Chest: Tower 4",               "Tower"),
-    42: ("Chest: Tower 5",               "Tower"),
-    43: ("Chest: Tropical Jungle",       "Tropical Jungle"),
-    44: ("Chest 44",                     None),
-    45: ("Chest 45",                     None),
-    46: ("Chest: Great Canyon 1",        "Great Canyon"),
-    47: ("Chest: Great Canyon 2",        "Great Canyon"),
-    48: ("Chest: Great Canyon 3",        "Great Canyon"),
-    49: ("Chest: Mt. Infinity 8",        "Mt. Infinity"),
-    50: ("Chest: Mt. Infinity 9",        "Mt. Infinity"),
-    51: ("Chest: Mt. Infinity 10",       "Mt. Infinity"),
-    52: ("Chest: Mt. Infinity 11",       "Mt. Infinity"),
-    53: ("Chest 53",                     None),
-    54: ("Chest 54",                     None),
-    55: ("Chest: Dragon Eye Lake",       "Native Forest"),
-    56: ("Chest: Mt. Infinity 12",       "Mt. Infinity"),
-    57: ("Chest: Tower 6",               "Tower"),
-    58: ("Chest: Tower 7",               "Tower"),
-    59: ("Chest: Tower 8",               "Tower"),
-    60: ("Chest: Tower 9",               "Tower"),
-    61: ("Chest: Tower 10",              "Tower"),
-    62: ("Chest: Tower 11",              "Tower"),
-    63: ("Chest: File City Remodel 1",   "File City"),
-    64: ("Chest: File City Remodel 2",   "File City"),
-    65: ("Chest: File City Remodel 3",   "File City"),
+# slot 1..65 → (chest name, in-game region or None)
+#
+# As of the 2026-05-09 audit (script + screen + DWAP + dialog cross-
+# reference; see the chest workflow in this module's docstring), every
+# chest has a confirmed region. The ``None`` sentinel is kept for any
+# future regression where a new chest is added before its location is
+# verified — in that case AP fill restricts placement to filler via
+# ``LocationProgressType.EXCLUDED`` (see :func:`create_all_locations`).
+#
+# Chests in :data:`_POSTGAME_CHEST_REGIONS` are also flagged EXCLUDED:
+# they're reachable in AP logic but only after the player has already
+# beaten Machinedramon, by which point under the default goal the seed
+# is already complete and the player has no incentive to return.
+_CHEST_BY_SLOT: Final[dict[int, tuple[str, str | None]]] = {
+    1:  ("Chest: Grey Lord's Mansion 4",  "Grey Lord's Mansion"),
+    2:  ("Chest: Grey Lord's Mansion 5",  "Grey Lord's Mansion"),
+    3:  ("Chest: Grey Lord's Mansion 6",  "Grey Lord's Mansion"),
+    4:  ("Chest: Grey Lord's Mansion 1",  "Overdell"),
+    5:  ("Chest: Grey Lord's Mansion 7",  "Grey Lord's Mansion"),
+    6:  ("Chest: Grey Lord's Mansion 8",  "Grey Lord's Mansion"),
+    7:  ("Chest: Grey Lord's Mansion 9",  "Grey Lord's Mansion"),
+    8:  ("Chest: Ice Sanctuary 1",        "Freezeland"),
+    9:  ("Chest: Lava Cave 5",            "Meramon Tunnel"),
+    10: ("Chest: Lava Cave 6",            "Meramon Tunnel"),
+    11: ("Chest: Ice Sanctuary 2",        "Freezeland"),
+    12: ("Chest: Ice Sanctuary 3",        "Freezeland"),
+    13: ("Chest: Ice Sanctuary 4",        "Freezeland"),
+    14: ("Chest: Ice Sanctuary 5",        "Freezeland"),
+    15: ("Chest: Ice Sanctuary 6",        "Freezeland"),
+    16: ("Chest: Ice Sanctuary 7",        "Freezeland"),
+    17: ("Chest: Great Canyon 1",         "Great Canyon"),
+    18: ("Chest: Leomon Ancestor Cave",   "Leomon Ancestor Cave"),
+    19: ("Chest: Toy Mansion",            "Toy Town"),
+    20: ("Chest: Ogre Fortress 1",        "Great Canyon"),
+    21: ("Chest: Ogre Fortress 2",        "Great Canyon"),
+    22: ("Chest: Ogre Fortress 3",        "Great Canyon"),
+    23: ("Chest: Secret Beach Cave",      "Secret Beach Cave"),
+    24: ("Chest: Ogre Fortress 4",        "Great Canyon"),
+    25: ("Chest: Ogre Fortress 5",        "Great Canyon"),
+    26: ("Chest: Ogre Fortress 6",        "Great Canyon"),
+    27: ("Chest: Lava Cave 1",            "Meramon Tunnel"),
+    28: ("Chest: Factorial Town 1",       "Factorial Town"),
+    29: ("Chest: Factorial Town 2",       "Factorial Town"),
+    30: ("Chest: Lava Cave 2",            "Meramon Tunnel"),
+    31: ("Chest: Mt. Infinity 1",         "Mt. Infinity"),
+    32: ("Chest: Mt. Infinity 2",         "Mt. Infinity"),
+    33: ("Chest: Mt. Infinity 3",         "Mt. Infinity"),
+    34: ("Chest: Ogre Fortress 7",        "Great Canyon"),
+    35: ("Chest: Mt. Infinity 4",         "Mt. Infinity"),
+    36: ("Chest: Mt. Infinity 5",         "Mt. Infinity"),
+    37: ("Chest: Mt. Infinity 6",         "Mt. Infinity"),
+    38: ("Chest: Mt. Infinity 7",         "Mt. Infinity"),
+    39: ("Chest: Mt. Infinity 8",         "Mt. Infinity"),
+    40: ("Chest: Mt. Infinity 9",         "Mt. Infinity"),
+    41: ("Chest: Mt. Infinity 10",        "Mt. Infinity"),
+    42: ("Chest: Mt. Infinity 11",        "Mt. Infinity"),
+    43: ("Chest: Tropical Jungle",        "Tropical Jungle"),
+    44: ("Chest: Lava Cave 3",            "Meramon Tunnel"),
+    45: ("Chest: Lava Cave 4",            "Meramon Tunnel"),
+    46: ("Chest: Mt. Panorama 1",         "Mt. Panorama"),
+    47: ("Chest: Mt. Panorama 2",         "Mt. Panorama"),
+    48: ("Chest: Mt. Panorama 3",         "Mt. Panorama"),
+    49: ("Chest: Grey Lord's Mansion 10", "Grey Lord's Mansion"),
+    50: ("Chest: Grey Lord's Mansion 11", "Grey Lord's Mansion"),
+    51: ("Chest: Grey Lord's Mansion 12", "Grey Lord's Mansion"),
+    52: ("Chest: Grey Lord's Mansion 13", "Grey Lord's Mansion"),
+    53: ("Chest: Grey Lord's Mansion 2",  "Overdell"),
+    54: ("Chest: Grey Lord's Mansion 3",  "Overdell"),
+    55: ("Chest: Dragon Eye Lake",        "Greatlake"),
+    56: ("Chest: Back Dimension 1",       "Back Dimension"),
+    57: ("Chest: Back Dimension 2",       "Back Dimension"),
+    58: ("Chest: Back Dimension 3",       "Back Dimension"),
+    59: ("Chest: Back Dimension 4",       "Back Dimension"),
+    60: ("Chest: Back Dimension 5",       "Back Dimension"),
+    61: ("Chest: Back Dimension 6",       "Back Dimension"),
+    62: ("Chest: Back Dimension 7",       "Back Dimension"),
+    63: ("Chest: Factorial Town 3",       "Factorial Town"),
+    64: ("Chest: Factorial Town 4",       "Factorial Town"),
+    65: ("Chest: Factorial Town 5",       "Factorial Town"),
 }
 assert len(_CHEST_BY_SLOT) == 65
 assert len({name for name, _ in _CHEST_BY_SLOT.values()}) == 65, "duplicate chest names"
 
-# AP-side, every chest still resides in File City (region access for
-# chests is governed by the PP gate alone in v7+). The "in-game region"
-# stored above is used only for the PP-gate computation in
-# :data:`CHEST_PP_REQUIREMENTS`.
+# Confirmed chests live in their actual in-game region so AP region
+# access drives the per-chest reachability rule (e.g. a chest in
+# ``Mt. Panorama`` requires Lava Cave Access transitively, a chest in
+# ``Grey Lord's Mansion`` requires Mansion Key, etc.). Unconfirmed
+# chests (region = None) fall back to ``File City`` (always reachable
+# from start) and are flagged ``LocationProgressType.EXCLUDED`` in
+# :func:`create_all_locations` so they only ever hold filler / useful
+# / trap items — fill never sends progression to a chest whose
+# physical location hasn't been verified.
 _CHEST_LOCATIONS: Final[dict[str, LocationEntry]] = {
-    _CHEST_BY_SLOT[_slot][0]: LocationEntry(69_001_000 + _slot - 1, "File City")
-    for _slot in range(1, 66)
+    name: LocationEntry(69_001_000 + _slot - 1, region or "File City")
+    for _slot, (name, region) in _CHEST_BY_SLOT.items()
 }
 
 CHEST_NAMES: Final[tuple[str, ...]] = tuple(_CHEST_LOCATIONS)
 assert len(CHEST_NAMES) == 65, len(CHEST_NAMES)
 
-
-def _build_chest_pp_requirements() -> dict[str, int]:
-    """Per-chest PP gate, derived from ``min(recruit PP) across the
-    chest's in-game region``. Chests with no inferred region get 0 PP
-    (always reachable in logic).
-    """
-
-    # Group recruit PPs by region.
-    recruits_by_region: dict[str, list[int]] = {}
-    for recruit_name, pp in RECRUIT_PP_REQUIREMENTS.items():
-        recruits_by_region.setdefault(_RECRUIT_REGIONS[recruit_name], []).append(pp)
-
-    out: dict[str, int] = {}
-    for chest_name, region in _CHEST_BY_SLOT.values():
-        if region is None or region not in recruits_by_region:
-            out[chest_name] = 0
-        else:
-            out[chest_name] = min(recruits_by_region[region])
-    return out
-
-
-CHEST_PP_REQUIREMENTS: Final[dict[str, int]] = _build_chest_pp_requirements()
-
-
-# =============================================================================
-# Starter pickup (1)
-# =============================================================================
-
-_STARTER_LOCATION: Final[dict[str, LocationEntry]] = {
-    "Start Game": LocationEntry(69_003_000, "File City"),
-}
+# Regions whose chests are only reachable post-game (after Machinedramon
+# defeat). Their chests are flagged ``LocationProgressType.EXCLUDED`` so
+# AP fill never places progression items there — under the default
+# Machinedramon goal the player wins before they'd ever return.
+_POSTGAME_CHEST_REGIONS: Final[frozenset[str]] = frozenset({
+    "Back Dimension",
+})
 
 
 # =============================================================================
 # Key-item pickups
 # =============================================================================
-# v1: just the Old Fishrod (Trash Mountain in Gear Savanna). Future
-# additions (Mansion Key, Blue Flute, Amazing Rod, Leomonstone, ...) will
-# go here once their flag addresses are verified the same way the rod's
-# was — the CE-table values are unreliable, see memory note
-# `dw1_keyitem_flag_block.md`.
+# Currently wired: Old Fishrod (Trash Mountain in Gear Savanna), Mansion
+# Key (Grey Lord's Mansion foyer — placed in Overdell because the
+# pickup site is in a non-key-gated area), Frig Key (Myotismon dialog
+# inside Grey Lord's Mansion proper, gated on Mansion Key by region
+# wiring), Steak (Overdell fridge interaction, gated on Frig Key by
+# in-game flow), Gear (Toy Town WaruMonzaemon defeat cutscene), Rain
+# Plant (Tanemon planter in Native Forest, gated on Palmon Recruit
+# and day-15 timer), Blue Flute (Seadramon friendship cutscene from
+# fishing in Greatlake; replaces the dropped Seadramon recruit
+# location), Leomonstone (Leomon's Ancestral Cave in Drill Tunnel
+# B3F, gated on Prosperity 45 since the cave entrance only opens
+# after Drimogemon digs through). Only Amazing Rod remains to be
+# wired up.
+#
+# Note: ``Lava Cave Access``, ``Tropical Jungle Bridge`` and
+# ``Great Canyon Bridge`` are AP **items** but **not AP locations**
+# (per user direction 2026-05-08). They are virtual access items
+# delivered to the player via trigger-bit writes — there is no
+# in-world "pickup site" for them. The previous ``Drill Tunnel
+# Boulder`` / ``Tropical Jungle Bridge Fixed`` / ``Great Canyon
+# Bridge Fixed`` locations were dropped at the same time.
 _KEYITEM_LOCATIONS: Final[dict[str, LocationEntry]] = {
     "Old Fishrod Pickup":            LocationEntry(69_004_000, "Gear Savanna"),
-    "Drill Tunnel Boulder":          LocationEntry(69_004_001, "Drill Tunnel"),
-    "Tropical Jungle Bridge Fixed":  LocationEntry(69_004_002, "Tropical Jungle"),
-    "Great Canyon Bridge Fixed":     LocationEntry(69_004_003, "Great Canyon"),
+    "Mansion Key Pickup":            LocationEntry(69_004_004, "Overdell"),
+    "Frig Key Pickup":               LocationEntry(69_004_005, "Grey Lord's Mansion"),
+    "Steak Pickup":                  LocationEntry(69_004_006, "Overdell"),
+    "Gear Pickup":                   LocationEntry(69_004_007, "Toy Town"),
+    "Rain Plant Pickup":             LocationEntry(69_004_008, "Native Forest"),
+    "Blue Flute Pickup":             LocationEntry(69_004_009, "Greatlake"),
+    "Leomonstone Pickup":            LocationEntry(69_004_010, "Drill Tunnel"),
+    # Volume Villa is reached after defeating Otamamon in Geko Swamp;
+    # we model it as part of the Geko Swamp region. Merit Shop's
+    # 300-Merit cost isn't modeled in AP rules — Merit is earned by
+    # trading cards, which the player can do once at the shop.
+    "Amazing Rod Pickup":            LocationEntry(69_004_011, "Geko Swamp"),
 }
 
 
@@ -428,7 +460,6 @@ assert len(_VENDING_LOCATIONS) == 12, len(_VENDING_LOCATIONS)
 # =============================================================================
 
 _LOCATION_TABLE: Final[dict[str, LocationEntry]] = {
-    **_STARTER_LOCATION,
     **{name: LocationEntry(_RECRUIT_DW_IDS[name], _RECRUIT_REGIONS[name])
        for name in RECRUIT_NAMES},
     **_CHEST_LOCATIONS,
@@ -444,7 +475,6 @@ LOCATION_NAME_TO_ID: Final[dict[str, int]] = {
 LOCATION_NAME_GROUPS: Final[dict[str, set[str]]] = {
     "Recruits": set(RECRUIT_NAMES),
     "Chests": set(_CHEST_LOCATIONS),
-    "Starter": set(_STARTER_LOCATION),
     "Key Items": set(_KEYITEM_LOCATIONS),
     "Cards": set(_CARD_LOCATIONS),
     "Vending": set(_VENDING_LOCATIONS),
@@ -458,23 +488,11 @@ def locations_in_region(region_name: str) -> tuple[str, ...]:
 def create_all_locations(world: DigimonWorldWorld) -> None:
     """Attach every v1 location to its parent region.
 
-    Some locations are conditional on player options:
-
-    * ``Drill Tunnel Boulder`` only exists in ``shuffled`` mode for
-      :class:`worlds.digimon_world.options.LavaCaveAccess`. In vanilla
-      mode the gate stays as the original digimon-stage whitelist and
-      there's no AP location/item pair for it.
+    Card and vending locations are option-gated; everything else is
+    unconditional.
     """
 
     skip_locations: set[str] = set()
-    if int(world.options.lava_cave_access.value) == 0:  # 0 = vanilla
-        skip_locations.add("Drill Tunnel Boulder")
-    # BridgeUnlock / GreatCanyonUnlock: 0=always_open, 1=vanilla, 2=shuffled.
-    # The AP location only exists in shuffled (=2).
-    if int(world.options.bridge_unlock.value) != 2:
-        skip_locations.add("Tropical Jungle Bridge Fixed")
-    if int(world.options.great_canyon_unlock.value) != 2:
-        skip_locations.add("Great Canyon Bridge Fixed")
     # CardLocations: opt-in, default off. When off, the 66 card AP
     # locations are excluded from the pool.
     if not int(world.options.card_locations.value):
@@ -497,13 +515,47 @@ def create_all_locations(world: DigimonWorldWorld) -> None:
     for region_name, names_with_ids in by_region.items():
         world.get_region(region_name).add_locations(names_with_ids, DigimonWorldLocation)
 
+    # Two classes of chest get :data:`LocationProgressType.EXCLUDED`,
+    # restricting placement to filler / useful / trap:
+    #
+    # * **Unconfirmed chests** (``region is None``): we don't know their
+    #   real in-game location yet, so AP fill might place a progression
+    #   item the player can't actually reach when logic predicts they
+    #   should. (As of 2026-05-09 every chest has a confirmed region —
+    #   this branch is kept for any future regressions.)
+    # * **Post-game-only regions** (``Back Dimension``): these chests
+    #   are reachable in AP logic, but only after the player has
+    #   defeated Machinedramon. Under the default ``machinedramon``
+    #   goal the player wins at that moment and has no incentive to
+    #   return for chests; placing progression here would leak
+    #   progression items into a region most players will never visit.
+    for chest_name, region in _CHEST_BY_SLOT.values():
+        if chest_name in skip_locations:
+            continue
+        if region is None or region in _POSTGAME_CHEST_REGIONS:
+            location = world.get_location(chest_name)
+            location.progress_type = LocationProgressType.EXCLUDED
+            # Post-game chests get a tighter rule: pure filler only,
+            # not even ``useful``. Players who reach Back Dimension
+            # have already cleared the seed under the default goal,
+            # so any non-filler item placed here is effectively
+            # wasted. ``ItemClassification.filler`` is the zero value
+            # of the IntFlag, so this matches items with no
+            # classification flags set.
+            if region in _POSTGAME_CHEST_REGIONS:
+                location.item_rule = (
+                    lambda item: item.classification == ItemClassification.filler
+                )
+
 
 # =============================================================================
 # Final-Battle event
 # =============================================================================
-# The endgame is gated on ``AS Decoder`` + the AP-PP item count (50). PP
+# The endgame is gated on the AP-PP item count (50 PP = 25 items). PP
 # is a real AP item now, not an event item — so we no longer create
-# per-location PP-grant events.
+# per-location PP-grant events. AS Decoder used to also be part of the
+# gate, but it is a no-op DW1 item that gates nothing — removed
+# 2026-05-08.
 
 def create_events(world: DigimonWorldWorld) -> None:
     """Create the Victory event."""

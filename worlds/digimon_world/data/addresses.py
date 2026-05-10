@@ -48,6 +48,7 @@ See also
 
 from __future__ import annotations
 
+import struct
 from typing import Final, NamedTuple
 
 # =============================================================================
@@ -188,6 +189,46 @@ RAM_MERAMON_TUNNEL_DRIMOGEMON_STATE: Final = 0x001BE042
 RAM_MERAMON_TUNNEL_STATE: Final = 0x001BE043
 RAM_MERAMON_TUNNEL_DIGGING_STATE: Final = 0x001BE04F
 
+# ----- Machinedramon / Analogman defeated goal trigger ---------------------
+#
+# Canonical "you beat the base game" flag is **trigger 50** (Analogman
+# defeated). It is set exactly once in the entire script dump — at
+# `references/digimon_world_randomizer_syd/script/DW1Script.txt:29210`
+# (offset 004406), inside Script 184 §51's post-Machinedramon victory
+# cutscene, immediately after the textboxes "Analogman is gone." /
+# "Peace has returned to File Island." and immediately before the
+# `warpTo 237 0 51` (line 29220) that triggers the C-level credits roll
+# (`Tamer_tickEnding` → `ENDI_tickEnding` at SLUS 0x80060d00, see
+# `references/DW1-SydPatches/SLUS_labels.asm:362-363`).
+#
+# Translation of trigger 50 via the standard formula
+# (``mem[0x001BDFCD + N/8] |= 1 << (N%8)``):
+#     byte = 0x001BDFCD + 6 = 0x001BDFD3
+#     bit  = 1 << 2 = 0x04
+#
+# Why this flag and not trigger 202 (the previous estimate):
+#   - `setTrigger 202` only appears in NPC apology dialogs at lines
+#     10663, 12301, 15998 ("All of a sudden, I passed out. I'm sorry.")
+#     — a transient conversational flag, NOT the win-cutscene marker.
+#   - Trigger 202 is even `unsetTrigger 202`'d at DW1Script.txt:24113.
+#   - Trigger 202's byte (0x001BDFE6) sits inside the changeMap-wrapper
+#     clobber range (0x001BDFE6..0x001BDFED), so it would be cleared on
+#     every screen transition anyway.
+# Trigger 50 has none of these problems: never unset, lives at
+# 0x001BDFD3 (outside the wrapper range), and is read 23+ times across
+# the script database as the canonical "post-game" gate (Digitamamon
+# NG+ spawn, Jijimon "you saved File Island" dialog, Airdramon city
+# visibility, etc.). The standalone randomizer documents it identically
+# (`references/digimon_world_randomizer_syd/info.txt:260` — "trigger(50)
+# aka beat the game").
+#
+# Save-persistent: the trigger bit-array is serialized to memory card,
+# so once `setTrigger 50` fires the bit survives power cycles and
+# save/reload. Polling-and-test from `_check_goal` is sufficient.
+
+RAM_MACHINEDRAMON_DEFEATED_BYTE: Final = 0x001BDFD3
+RAM_MACHINEDRAMON_DEFEATED_MASK: Final = 0x04
+
 # Story-event trigger bits (single bits inside the unified trigger
 # bit-array; see :data:`AP_TRIGGER_ARRAY_BASE`). Format: ``(byte_addr, bit)``.
 #
@@ -223,12 +264,194 @@ RAM_GREAT_CANYON_BRIDGE_UNLOCKED: Final = (0x001BDFD9, 7)
 # **OLD_FISHROD_FLAG** — trigger 320, set by the rod-give cutscene's
 # `setTrigger 320` at script offset 006820 in the Trash Mountain section
 # (Section_51 of the Gear Savanna script per
-# `references/digimon_world_randomizer/script/DW1Script.txt:23931`).
-# **OLD_FISHROD_GATE** — trigger 45, the cutscene's section gate. Flips
-# in the same instruction window. AP polls this as the location-check
-# signal for "player completed the rod cutscene".
+# `references/digimon_world_randomizer/script/DW1Script.txt:23931`). This
+# is the script's "rod-given" memory bit (gates whether the cutscene
+# replays); it is **not** what the fishing minigame reads. Kept as
+# documentation; AP delivery does NOT target this bit.
+# **OLD_FISHROD_GATE** — trigger 45, the cutscene's section gate, flipped
+# in the same instruction window as 320. **This is what the fishing
+# minigame actually checks** to enable the Old Rod
+# (`isTriggerSet(45)` in `references/DW1-SydPatches/src/Fishing.cpp:21`).
+# AP delivery of the "Old Fishrod" item writes here. **No longer used**
+# as the location-check signal: the rod cutscene is patched (see
+# :data:`ROM_OLD_FISHROD_REMAP_OFFSETS`) so that completion sets
+# trigger 902 (:data:`OLD_FISHROD_LOCATION_BIT`) instead, decoupling
+# vanilla cutscene completion from vanilla fishing-enable.
+# **AMAZING_ROD_GATE** — trigger 46, the Amazing Rod ownership flag read
+# by `getBestFishingRod()` in `Fishing.cpp:20`
+# (`isTriggerSet(46) -> GOOD_ROD`). AP delivery of the "Amazing rod"
+# item writes here. Trigger 46 lives at byte `0x001BDFCD + 46/8 =
+# 0x001BDFD2`, bit `46 % 8 = 6` — same byte as `OLD_FISHROD_GATE`,
+# different bit. No vanilla location is wired to this bit yet (no
+# "Amazing Rod Pickup" location); future RE work may add one.
 OLD_FISHROD_FLAG: Final[tuple[int, int]] = (0x001BDFF5, 0)
 OLD_FISHROD_GATE: Final[tuple[int, int]] = (0x001BDFD2, 5)
+AMAZING_ROD_GATE: Final[tuple[int, int]] = (0x001BDFD2, 6)
+
+# **OLD_FISHROD_LOCATION_BIT** — trigger 902, allocated bit for the AP
+# "Old Fishrod Pickup" location-check signal. The rod cutscene
+# (Script 159 Section_51) is patched to set trigger 902 in place of
+# trigger 45, AND the section's replay gate is patched to read trigger
+# 902. After the patch:
+#
+# * Cutscene plays -> trigger 902 set (location signal) + trigger 320
+#   set (rod-sprite-hidden flag, read by Section_254). Cutscene's gate
+#   now reads 902 -> won't replay.
+# * Trigger 45 is no longer set by the cutscene -> vanilla
+#   fishing-enable path is neutered. AP delivery of the "Old Fishrod"
+#   item is the only path to trigger 45 (and thus to fishing).
+#
+# Trigger 902 lives at byte ``0x001BDFCD + 902/8 = 0x001BE03D``,
+# bit ``902 % 8 = 6``. Same byte as the highest vending bits but the
+# next free bit (vending uses 890..901 = bits 2..7 of 0x001BE03C plus
+# bits 0..5 of 0x001BE03D).
+OLD_FISHROD_LOCATION_BIT: Final[tuple[int, int]] = (0x001BE03D, 6)
+OLD_FISHROD_LOCATION_TRIGGER_ID: Final = 902
+
+# **MANSION_KEY_LOCATION_BIT** — trigger 110, the section gate set by
+# the Mansion Key pickup cutscene at Script 54 Section_81 (cutscene
+# end at script offset 442; see DW1Script.txt:11602). Used directly as
+# the AP location-check signal — trigger 110 has only three
+# references in the entire DW1 script, all in Script 54 (set once at
+# cutscene end; read at Section_81 line 140 to gate replay; read at
+# Section_254 line 32 to gate sprite-state housekeeping for the
+# visible key object). Nothing else reads it, so reusing it as the
+# AP signal is safe.
+#
+# Trigger 110 lives at byte ``0x001BDFCD + 110/8 = 0x001BDFDA``,
+# bit ``110 % 8 = 6`` (gap A, the story-event bit range).
+MANSION_KEY_LOCATION_BIT: Final[tuple[int, int]] = (0x001BDFDA, 6)
+MANSION_KEY_LOCATION_TRIGGER_ID: Final = 110
+
+# **FRIG_KEY_LOCATION_BIT** — trigger 104, set inside the Myotismon
+# Frig-Key cutscene (Script 63 Section_5, script offset 238 — see
+# DW1Script.txt:12179). Trigger 104 has only three references in the
+# entire DW1 script, all in Script 63: set once mid-cutscene; read at
+# Section_254 line 12156 (post-event entry boilerplate); read at
+# Section_5 line 12175 to gate the first-time-meeting branch.
+# Nothing else reads it, so reusing it as the AP signal is safe.
+#
+# Trigger 104 lives at byte ``0x001BDFCD + 104/8 = 0x001BDFDA``,
+# bit ``104 % 8 = 0`` — same byte as Mansion Key but a different bit
+# (110 -> bit 6, 104 -> bit 0).
+FRIG_KEY_LOCATION_BIT: Final[tuple[int, int]] = (0x001BDFDA, 0)
+FRIG_KEY_LOCATION_TRIGGER_ID: Final = 104
+
+# **STEAK_LOCATION_BIT** — trigger 348, set by the fridge interaction
+# in Overdell (Script 55 Section_83 at script offset 848 — see
+# DW1Script.txt:11810). The fridge interaction is the canonical
+# "player obtained Steak" event in vanilla DW1: using Frig Key on the
+# fridge consumes the key, sets trigger 348, and (in vanilla) causes
+# a Steak object to spawn at coords (48, 32) on the Overdell map
+# (Script 35 Section_254). In AP rando the spawn is patched out (see
+# ROM_STEAK_SPAWN_NEUTER_*); only AP delivery puts Steak in the
+# player's bank. Trigger 348 has 5 references in the entire DW1
+# script — 4 in the fridge cutscene itself, 1 gating the spawn we
+# neuter — so it's safe to reuse as the AP signal.
+#
+# Trigger 348 lives at byte ``0x001BDFCD + 348/8 = 0x001BDFF8``,
+# bit ``348 % 8 = 4`` (gap B, the post-recruit-block trigger range).
+STEAK_LOCATION_BIT: Final[tuple[int, int]] = (0x001BDFF8, 4)
+STEAK_LOCATION_TRIGGER_ID: Final = 348
+
+# **GEAR_LOCATION_BIT** — trigger 270, set at the end of the Gear
+# acquisition cutscene in Toy Town (Script 144 Section_83 at script
+# offset 4518 — see DW1Script.txt:22436). The cutscene plays after
+# the player defeats WaruMonzaemon. **Unlike Mansion/Frig Key's
+# section gates, trigger 270 is NOT isolated** — it has 11
+# references across Toy Town scripts (Scripts 139, 140, 142, 143,
+# 144, 145) that read it to suppress duplicate WaruMonzaemon
+# encounter dialog and gate the Section_254 boilerplate's replay
+# checks. Setting trigger 270 IS the correct "Gear obtained" signal,
+# so the existing reads continue to work as intended after our
+# patch — but be aware that NPC dialog elsewhere in Toy Town can
+# also branch on trigger 270 + ``item(120)`` checks. Cosmetic: the
+# player will have trigger 270 set but no Gear in inventory until
+# AP delivers, so some NPC dialogs may behave as if the Gear is
+# "missing despite being obtained" until AP delivery + bank retrieval.
+#
+# Trigger 270 lives at byte ``0x001BDFCD + 270/8 = 0x001BDFEE``,
+# bit ``270 % 8 = 6`` (gap B).
+GEAR_LOCATION_BIT: Final[tuple[int, int]] = (0x001BDFEE, 6)
+GEAR_LOCATION_TRIGGER_ID: Final = 270
+
+# **RAIN_PLANT_LOCATION_BIT** — trigger 76, set at the end of the Rain
+# Plant pickup cutscene at Tanemon's planters in Native Forest
+# (Script 162 Section_83 at script offset 6238 — see
+# DW1Script.txt:24519). The cutscene fires only when the player
+# enters the planter area on the 15th of any month
+# (``pstat(106) == 14``) AND has already recruited Palmon
+# (``trigger(246) == true``). Trigger 76 has 4 references in the
+# entire DW1 script, all in Script 162 — set + read inside the
+# Rain Plant section, plus an ``unsetTrigger 76`` on day transitions
+# that makes the Rain Plant **renewable** (vanilla DW1 lets the
+# player pick up a fresh Rain Plant each month). Renewability is
+# fine for AP — the location fires the first time trigger 76 sets
+# and AP server-side dedup ignores subsequent re-flips.
+#
+# Trigger 76 lives at byte ``0x001BDFCD + 76/8 = 0x001BDFD6``,
+# bit ``76 % 8 = 4`` (gap A).
+RAIN_PLANT_LOCATION_BIT: Final[tuple[int, int]] = (0x001BDFD6, 4)
+RAIN_PLANT_LOCATION_TRIGGER_ID: Final = 76
+
+# **BLUE_FLUTE_LOCATION_BIT** — trigger 210, set by the Seadramon
+# friendship cutscene (Script 7 Section_82 at script offset 1998 —
+# see DW1Script.txt:4734). The cutscene plays when the player hooks
+# Seadramon while fishing in Dragon Eye Lake (Greatlake region) and
+# selects the "Let's be friends" dialog option. Trigger 210 lives in
+# the recruit-bit block (``RECRUIT_RAM_BITS["Seadramon"]``); in
+# vanilla DW1 it doubles as Seadramon's "joined city" flag.
+#
+# **Important context:** Seadramon was an AP recruit until 2026-05-09;
+# he's now in :data:`_AP_RECRUIT_EXCLUDED` because he doesn't really
+# do anything in town and his recruit cutscene IS the Blue Flute
+# pickup event. The single in-game event now fires only the
+# ``Blue Flute Pickup`` AP location (no Seadramon recruit location
+# anymore). The recruit-bit poll for Seadramon is removed via
+# ``client._DROPPED_RECRUITS_BLACKLIST`` so the bit poll happens
+# exclusively under this keyitem name.
+#
+# Trigger 210 lives at byte ``0x001BDFCD + 210/8 = 0x001BDFE7``,
+# bit ``210 % 8 = 2`` — same as ``RECRUIT_RAM_BITS["Seadramon"]``.
+BLUE_FLUTE_LOCATION_BIT: Final[tuple[int, int]] = (0x001BDFE7, 2)
+BLUE_FLUTE_LOCATION_TRIGGER_ID: Final = 210
+# Sanity check that BLUE_FLUTE_LOCATION_BIT == RECRUIT_RAM_BITS["Seadramon"]
+# is asserted at module-load time below, after RECRUIT_RAM_BITS is defined.
+
+# **LEOMONSTONE_LOCATION_BIT** — trigger 135, set by the Leomonstone
+# pickup cutscene at Leomon's Ancestral Cave (deepest chamber of
+# Drill Tunnel B3F; Script 109 Section_52 at script offset 676 — see
+# DW1Script.txt:17867). The cutscene plays automatically when the
+# player enters the cave and approaches the visible stone tablet.
+# In vanilla DW1, reaching this cave requires Drimogemon to dig
+# through a wall on Drill Tunnel B3F, which only happens after the
+# city's Prosperity reaches 45.
+#
+# Trigger 135 has 4 references — 3 in Script 109 (the cutscene's own
+# section gate, the post-pickup obj-visibility gate, and the
+# setTrigger), plus 1 in Script 211 (Leomon's NPC dialogue checks if
+# the tablet has been found to provide post-pickup context). All
+# reads continue to work correctly after our patch since the
+# cutscene still sets trigger 135.
+#
+# Trigger 135 lives at byte ``0x001BDFCD + 135/8 = 0x001BDFDD``,
+# bit ``135 % 8 = 7`` (gap A).
+LEOMONSTONE_LOCATION_BIT: Final[tuple[int, int]] = (0x001BDFDD, 7)
+LEOMONSTONE_LOCATION_TRIGGER_ID: Final = 135
+
+# **AMAZING_ROD_LOCATION_BIT** — trigger 903, set by an injected MIPS
+# wrapper that intercepts the Merit Shop's give-item callsite (see
+# :data:`ROM_MERIT_SHOP_WRAPPER_*`). Unlike every other key item,
+# Amazing Rod has no script-bytecode site we could surgically patch
+# — the merit shop's purchase logic lives in the PSX engine code,
+# not the script bytecode. The wrapper compares the give-item $a0
+# argument against item 117 (Amazing Rod) and, on match, calls
+# ``setTrigger(903)`` before tail-calling the vanilla give-item
+# function. Trigger 903 is in gap C, byte 0x001BE03D bit 7 — the
+# only free bit in that byte (bits 0..5 used by vending 896..901,
+# bit 6 by Old Fishrod 902).
+AMAZING_ROD_LOCATION_BIT: Final[tuple[int, int]] = (0x001BE03D, 7)
+AMAZING_ROD_LOCATION_TRIGGER_ID: Final = 903
 
 # **LAVA_CAVE_ACCESS_FLAG** — trigger 145, AP-controlled. Set when the AP
 # delivers the ``Lava Cave Access`` item; read by the patched boulder
@@ -249,23 +472,95 @@ LAVA_CAVE_ACCESS_GATE: Final[tuple[int, int]] = (0x001BDFDC, 0)
 # of `RECRUIT_RAM_BITS` / `DWAP_CHEST_RAM_BITS`; consumed by the client
 # via `LOCATION_RAM_BITS`.
 #
-# In shuffled mode, the bridge "Fixed" locations re-use the same trigger
-# bit as their corresponding ``always_open`` flag (185 / 103). Two paths
-# can set the bit: (1) AP item delivery — client OR-pins the bit on
-# receipt; (2) the vanilla cutscene path — only reachable for the TJ
-# bridge, since the GC cutscene is patcher-disabled in shuffled mode.
+# Note: Lava Cave Access / Tropical Jungle Bridge / Great Canyon
+# Bridge are AP **items only**, not AP locations (per user direction
+# 2026-05-08). They are virtual access items delivered via trigger-
+# bit writes — there's no in-world pickup site for them. The
+# previous ``Drill Tunnel Boulder`` / ``Tropical Jungle Bridge Fixed``
+# / ``Great Canyon Bridge Fixed`` location entries were removed at
+# the same time.
 KEYITEM_LOCATION_RAM_BITS: Final[dict[str, tuple[int, int]]] = {
-    "Old Fishrod Pickup":          OLD_FISHROD_GATE,
-    "Drill Tunnel Boulder":        LAVA_CAVE_ACCESS_GATE,
-    "Tropical Jungle Bridge Fixed": RAM_TROPICAL_JUNGLE_BRIDGE_FIXED,
-    "Great Canyon Bridge Fixed":    RAM_GREAT_CANYON_BRIDGE_UNLOCKED,
+    # "Old Fishrod Pickup" used to poll OLD_FISHROD_GATE (trigger 45),
+    # but trigger 45 is now also the AP delivery target for the rod
+    # item — sharing the bit would make AP delivery self-trigger the
+    # location. The cutscene is patched to set trigger 902 instead
+    # (see ROM_OLD_FISHROD_REMAP_*); we poll that bit.
+    "Old Fishrod Pickup":          OLD_FISHROD_LOCATION_BIT,
+    # "Mansion Key Pickup" polls trigger 110 (the cutscene's section
+    # gate). The two giveItem 119 instructions are neutered (see
+    # ROM_MANSION_KEY_GIVEITEM_*); the cutscene's existing setTrigger
+    # 110 still fires on completion, but no key enters the player's
+    # inventory — only AP delivery puts Mansion Key in the bank.
+    "Mansion Key Pickup":          MANSION_KEY_LOCATION_BIT,
+    # "Frig Key Pickup" polls trigger 104 (Myotismon Frig-Key
+    # cutscene's "first meeting" flag). Trigger 104 is set at script
+    # offset 238 (during the cutscene's intro); the two giveItem 123
+    # instructions at offsets 670 and 780 are neutered (see
+    # ROM_FRIG_KEY_GIVEITEM_*) and rewritten as setTrigger 104
+    # (idempotent; the bit was already flipped at offset 238). No key
+    # enters the player's inventory — only AP delivery does.
+    "Frig Key Pickup":             FRIG_KEY_LOCATION_BIT,
+    # "Steak Pickup" polls trigger 348 (set by the Overdell fridge
+    # interaction when the player uses Frig Key on the fridge). The
+    # vanilla Steak spawn that follows (in Script 35 Section_254) is
+    # patched out — see ROM_STEAK_SPAWN_NEUTER_*. AP delivery via
+    # bank slot 122 is the only path to actually obtain Steak.
+    "Steak Pickup":                STEAK_LOCATION_BIT,
+    # "Gear Pickup" polls trigger 270 (Toy Town WaruMonzaemon defeat
+    # cutscene's section gate, set at script offset 4518 in Script
+    # 144 Section_83). The two giveItem 120 instructions at offsets
+    # 4334 and 4476 are neutered (see ROM_GEAR_GIVEITEM_*) and
+    # rewritten as setTrigger 270 (idempotent — bit was set at offset
+    # 4518 in vanilla anyway). No Gear enters the player's inventory
+    # — only AP delivery via bank slot 120 does.
+    "Gear Pickup":                 GEAR_LOCATION_BIT,
+    # "Rain Plant Pickup" polls trigger 76 (Tanemon planter cutscene
+    # in Native Forest, set at script offset 6238 in Script 162
+    # Section_83). The single giveItem 121 at offset 6116 is neutered
+    # (see ROM_RAIN_PLANT_GIVEITEM_*) and rewritten as setTrigger 76
+    # (idempotent — bit was set at offset 6238 in vanilla anyway).
+    # No Rain Plant enters the player's inventory — only AP delivery
+    # via bank slot 121 does. The cutscene only fires on day 15 of
+    # any month and only after Palmon is recruited (trigger 246).
+    "Rain Plant Pickup":           RAIN_PLANT_LOCATION_BIT,
+    # "Blue Flute Pickup" polls trigger 210 (Seadramon friendship
+    # cutscene in Greatlake, set at script offset 1998 in Script 7
+    # Section_82). The two giveItem 115 instances are neutered (see
+    # ROM_BLUE_FLUTE_GIVEITEM_*) and rewritten as setTrigger 210
+    # (idempotent). Trigger 210 is the same bit as Seadramon's recruit
+    # flag in vanilla — Seadramon was dropped from AP recruit coverage
+    # 2026-05-09 because the cutscene IS the Blue Flute pickup; the
+    # bit poll has been moved here.
+    "Blue Flute Pickup":           BLUE_FLUTE_LOCATION_BIT,
+    # "Leomonstone Pickup" polls trigger 135 (Leomon's Ancestral Cave
+    # cutscene in Drill Tunnel B3F, set at script offset 676 in Script
+    # 109 Section_52). The seven giveItem 118 1 instances across 3
+    # ROM copies + 1 orphan are neutered (see ROM_LEOMONSTONE_GIVEITEM_*)
+    # and rewritten as setTrigger 135 (idempotent — bit was set by the
+    # cutscene's own setTrigger anyway). No Leomonstone enters the
+    # player's inventory — only AP delivery via bank slot 118 does.
+    "Leomonstone Pickup":          LEOMONSTONE_LOCATION_BIT,
+    # "Amazing Rod Pickup" polls trigger 903 — set by an injected
+    # MIPS wrapper that intercepts the Merit Shop's give-item callsite
+    # (see ROM_MERIT_SHOP_WRAPPER_*). The wrapper checks the item ID
+    # being purchased and, on match for item 117, calls setTrigger(903)
+    # before tail-calling vanilla give-item. The wrapper itself is
+    # extensible: more (item_id, trigger_id) pairs in
+    # MERIT_SHOP_DISPATCH would let other shop items become AP
+    # locations too.
+    "Amazing Rod Pickup":          AMAZING_ROD_LOCATION_BIT,
 }
 
 # Per-AP-item delivery flags for AP-side delivery of key items. Mirrors
 # the recruit deliverer pattern: when AP delivers the matching item, set
 # this bit in RAM.
 KEYITEM_DELIVERY_RAM_BITS: Final[dict[str, tuple[int, int]]] = {
-    "Old Fishrod":            OLD_FISHROD_FLAG,
+    # Rod items target the trigger bits the fishing minigame actually
+    # reads (`getBestFishingRod()` in DW1-SydPatches' `Fishing.cpp` checks
+    # triggers 45 and 46). Setting trigger 320 — the script's rod-given
+    # memory bit — does not enable fishing.
+    "Old Fishrod":            OLD_FISHROD_GATE,
+    "Amazing rod":            AMAZING_ROD_GATE,
     "Lava Cave Access":       LAVA_CAVE_ACCESS_FLAG,
     "Tropical Jungle Bridge": RAM_TROPICAL_JUNGLE_BRIDGE_FIXED,
     "Great Canyon Bridge":    RAM_GREAT_CANYON_BRIDGE_UNLOCKED,
@@ -539,6 +834,13 @@ RECRUIT_RAM_BITS: Final[dict[str, tuple[int, int]]] = {
     "Ninjamon":     (0x001BDFED, 2),
 }
 
+# Sanity: ``BLUE_FLUTE_LOCATION_BIT`` (above) must equal Seadramon's
+# recruit bit — they refer to the same in-game event (the Seadramon
+# friendship cutscene). Catches drift if either side is edited.
+assert BLUE_FLUTE_LOCATION_BIT == RECRUIT_RAM_BITS["Seadramon"], (
+    BLUE_FLUTE_LOCATION_BIT, RECRUIT_RAM_BITS["Seadramon"],
+)
+
 # Per-chest completion bits, keyed by AP location name. Names follow the
 # Phase 5 chest-mapping document (``references/chest_mapping_phase5.md``):
 # chests in confirmed or strongly-inferred regions are renamed
@@ -549,64 +851,75 @@ RECRUIT_RAM_BITS: Final[dict[str, tuple[int, int]]] = {
 # we only rename the keys.
 DWAP_CHEST_RAM_BITS: Final[dict[str, tuple[int, int]]] = {
     # Trigger 650..652 → Mt. Infinity 1..3 (Script ID 50)
-    "Chest: Mt. Infinity 1":  (0x001BE01E, 2),
-    "Chest: Mt. Infinity 2":  (0x001BE01E, 3),
-    "Chest: Mt. Infinity 3":  (0x001BE01E, 4),
+    "Chest: Grey Lord's Mansion 4": (0x001BE01E, 2),
+    "Chest: Grey Lord's Mansion 5": (0x001BE01E, 3),
+    "Chest: Grey Lord's Mansion 6": (0x001BE01E, 4),
     # Trigger 653..657 → Freezeland 1..5 (Script IDs 55, 58, 61, 94)
-    "Chest: Freezeland 1":    (0x001BE01E, 5),
-    "Chest: Freezeland 2":    (0x001BE01E, 6),
-    "Chest: Freezeland 3":    (0x001BE01E, 7),
-    "Chest: Freezeland 4":    (0x001BE01F, 0),
-    "Chest: Freezeland 5":    (0x001BE01F, 1),
-    # Trigger 658..659 → Drill Tunnel 1..2 (Script ID 33)
-    "Chest: Drill Tunnel 1":  (0x001BE01F, 2),
-    "Chest: Drill Tunnel 2":  (0x001BE01F, 3),
-    # Trigger 660..661 → unknown (Script ID 98 — Cherrymon-area dialog)
-    "Chest 11":               (0x001BE01F, 4),
-    "Chest 12":               (0x001BE01F, 5),
+    "Chest: Grey Lord's Mansion 1": (0x001BE01E, 5),
+    "Chest: Grey Lord's Mansion 7": (0x001BE01E, 6),
+    "Chest: Grey Lord's Mansion 8": (0x001BE01E, 7),
+    "Chest: Grey Lord's Mansion 9": (0x001BE01F, 0),
+    "Chest: Ice Sanctuary 1": (0x001BE01F, 1),
+    # Triggers 658-659 → Lava Cave 5, 6 (Script ID 33; chamber sub-area
+    # with "Are you still hot?... Lava has hardened" NPC dialog —
+    # spawnChest verified at DW1Script.txt:9094-9095).
+    "Chest: Lava Cave 5":      (0x001BE01F, 2),
+    "Chest: Lava Cave 6":      (0x001BE01F, 3),
+    # Trigger 660..661 → Ice Sanctuary 2..3 (Script ID 98)
+    "Chest: Ice Sanctuary 2": (0x001BE01F, 4),
+    "Chest: Ice Sanctuary 3": (0x001BE01F, 5),
     # Trigger 662..665 → Freezeland 6..9 (Script IDs 99, 94, 97)
-    "Chest: Freezeland 6":    (0x001BE01F, 6),
-    "Chest: Freezeland 7":    (0x001BE01F, 7),
-    "Chest: Freezeland 8":    (0x001BE020, 0),
-    "Chest: Freezeland 9":    (0x001BE020, 1),
-    # Trigger 666..667 → Drill Tunnel 3..4 (Script IDs 39/122, 110)
-    "Chest: Drill Tunnel 3":  (0x001BE020, 2),
-    "Chest: Drill Tunnel 4":  (0x001BE020, 3),
-    # Trigger 668 → Toy Town (Script ID 145)
-    "Chest: Toy Town":        (0x001BE020, 4),
-    # Trigger 669..671 → unknown
-    "Chest 20":               (0x001BE020, 5),
-    "Chest 21":               (0x001BE020, 6),
-    "Chest 22":               (0x001BE020, 7),
-    # Trigger 672 → Ogre Fortress (Script ID 137)
-    "Chest: Ogre Fortress":   (0x001BE021, 0),
-    # Trigger 673..675 → unknown (Script ID 125 cluster)
-    "Chest 24":               (0x001BE021, 1),
-    "Chest 25":               (0x001BE021, 2),
-    "Chest 26":               (0x001BE021, 3),
-    # Trigger 676 → File City Cards 1 (Script ID 119, Meramon-card NPC)
-    "Chest: File City Cards 1": (0x001BE021, 4),
-    # Trigger 677..678 → unknown (Script ID 155)
-    "Chest 28":               (0x001BE021, 5),
-    "Chest 29":               (0x001BE021, 6),
-    # Trigger 679 → File City Cards 2 (Script ID 121, Meramon-card NPC)
-    "Chest: File City Cards 2": (0x001BE021, 7),
-    # Trigger 680..682 → Mt. Infinity 4..6 (Script IDs 160, 161, 170)
-    "Chest: Mt. Infinity 4":  (0x001BE022, 0),
-    "Chest: Mt. Infinity 5":  (0x001BE022, 1),
-    "Chest: Mt. Infinity 6":  (0x001BE022, 2),
-    # Trigger 683..685 → unknown
-    "Chest 34":               (0x001BE022, 3),
-    "Chest 35":               (0x001BE022, 4),
-    "Chest 36":               (0x001BE022, 5),
-    # Trigger 686 → Mt. Infinity 7 (Script ID 194)
-    "Chest: Mt. Infinity 7":  (0x001BE022, 6),
-    # Trigger 687..691 → Tower 1..5 (Script IDs 195, 196, 197, 198)
-    "Chest: Tower 1":         (0x001BE022, 7),
-    "Chest: Tower 2":         (0x001BE023, 0),
-    "Chest: Tower 3":         (0x001BE023, 1),
-    "Chest: Tower 4":         (0x001BE023, 2),
-    "Chest: Tower 5":         (0x001BE023, 3),
+    "Chest: Ice Sanctuary 4": (0x001BE01F, 6),
+    "Chest: Ice Sanctuary 5": (0x001BE01F, 7),
+    "Chest: Ice Sanctuary 6": (0x001BE020, 0),
+    "Chest: Ice Sanctuary 7": (0x001BE020, 1),
+    # Trigger 666 → Great Canyon 1 (Script IDs 39/122; live-confirmed
+    # in-game — the chest sits in Great Canyon despite the original
+    # "Drill Tunnel" inference from the Tablet/Leomon dialog).
+    # Trigger 667 → Leomon Ancestor Cave (Script ID 110, screen 114;
+    # "Oh no! I hit something that looks like a Tablet." dialog —
+    # the Leomonstone-tablet sub-area, gated by 45 PP).
+    "Chest: Great Canyon 1":     (0x001BE020, 2),
+    "Chest: Leomon Ancestor Cave": (0x001BE020, 3),
+    # Trigger 668 → Toy Mansion / WaruMonzaemon Screen (Script ID 145,
+    # screen 151; renamed from "Toy Town" — sub-area is Toy Mansion
+    # within Toy Town).
+    "Chest: Toy Mansion":     (0x001BE020, 4),
+    # Trigger 669..671 → Ogre Fortress 1..3 (live-confirmed in-game)
+    "Chest: Ogre Fortress 1": (0x001BE020, 5),
+    "Chest: Ogre Fortress 2": (0x001BE020, 6),
+    "Chest: Ogre Fortress 3": (0x001BE020, 7),
+    # Trigger 672 → Secret Beach Cave (Script ID 137, screen 143;
+    # Whamon-gated sub-area).
+    "Chest: Secret Beach Cave": (0x001BE021, 0),
+    # Trigger 673..675 → Ogre Fortress 4..6 (live-confirmed in-game)
+    "Chest: Ogre Fortress 4": (0x001BE021, 1),
+    "Chest: Ogre Fortress 5": (0x001BE021, 2),
+    "Chest: Ogre Fortress 6": (0x001BE021, 3),
+    # Trigger 676 → Lava Cave 1 (Script ID 119; live-confirmed)
+    "Chest: Lava Cave 1":     (0x001BE021, 4),
+    # Trigger 677..678 → Factorial Town 1, 2 (Script ID 155, screen 161 —
+    # Main Building Entrance; "Hey, wait! You can't go through here!"
+    # guards. Whamon-gated since the entire Factorial Town is.)
+    "Chest: Factorial Town 1": (0x001BE021, 5),
+    "Chest: Factorial Town 2": (0x001BE021, 6),
+    # Trigger 679 → Lava Cave 2 (Script ID 121; live-confirmed)
+    "Chest: Lava Cave 2":     (0x001BE021, 7),
+    # Trigger 680..682 → Mt. Infinity 1..3
+    "Chest: Mt. Infinity 1":  (0x001BE022, 0),
+    "Chest: Mt. Infinity 2":  (0x001BE022, 1),
+    "Chest: Mt. Infinity 3":  (0x001BE022, 2),
+    # Trigger 683 → Ogre Fortress 7 (live-confirmed in-game)
+    "Chest: Ogre Fortress 7": (0x001BE022, 3),
+    # Trigger 684..691 → Mt. Infinity 4..11
+    "Chest: Mt. Infinity 4":  (0x001BE022, 4),
+    "Chest: Mt. Infinity 5":  (0x001BE022, 5),
+    "Chest: Mt. Infinity 6":  (0x001BE022, 6),
+    "Chest: Mt. Infinity 7":  (0x001BE022, 7),
+    "Chest: Mt. Infinity 8":  (0x001BE023, 0),
+    "Chest: Mt. Infinity 9":  (0x001BE023, 1),
+    "Chest: Mt. Infinity 10": (0x001BE023, 2),
+    "Chest: Mt. Infinity 11": (0x001BE023, 3),
     # Trigger 693 → Tropical Jungle (Script ID 13). Live-confirmed
     # 2026-04-29: opening this chest in-game placed the player in the
     # Tropical Jungle screen, contradicting the earlier dialog-based
@@ -614,36 +927,49 @@ DWAP_CHEST_RAM_BITS: Final[dict[str, tuple[int, int]]] = {
     # Mamemon-style cutscene shares Script ID 13 with this Tropical
     # Jungle chest, but the chest itself is in Tropical Jungle.
     "Chest: Tropical Jungle": (0x001BE023, 5),
-    # Trigger 694..695 → unknown (Script IDs 31/120)
-    "Chest 44":               (0x001BE023, 6),
-    "Chest 45":               (0x001BE023, 7),
-    # Trigger 696..698 → Great Canyon 1..3 (Script IDs 22/190, Birdramon)
-    "Chest: Great Canyon 1":  (0x001BE024, 0),
-    "Chest: Great Canyon 2":  (0x001BE024, 1),
-    "Chest: Great Canyon 3":  (0x001BE024, 2),
+    # Trigger 694..695 → Lava Cave 3..4 (Script IDs 31/120; live-confirmed
+    # in-game — both chests sit in the Lava Cave area, behind the
+    # Meramon fight and so behind the Lava Cave Access gate).
+    "Chest: Lava Cave 3":     (0x001BE023, 6),
+    "Chest: Lava Cave 4":     (0x001BE023, 7),
+    # Trigger 696..698 → Mt. Panorama 1..2 + Great Canyon 2
+    # (Script IDs 22/190; the first two were live-confirmed in-game to
+    # be in Mt. Panorama, despite the original "Birdramon area" dialog
+    # inference. Trigger 698 stays as Great Canyon pending verification —
+    # renumbered from "3" to "2" once trigger 666 was confirmed as
+    # Great Canyon 1.)
+    "Chest: Mt. Panorama 1":  (0x001BE024, 0),
+    "Chest: Mt. Panorama 2":  (0x001BE024, 1),
+    "Chest: Mt. Panorama 3":   (0x001BE024, 2),
     # Trigger 700..703 → Mt. Infinity 8..11 (Script ID 188)
-    "Chest: Mt. Infinity 8":  (0x001BE024, 4),
-    "Chest: Mt. Infinity 9":  (0x001BE024, 5),
-    "Chest: Mt. Infinity 10": (0x001BE024, 6),
-    "Chest: Mt. Infinity 11": (0x001BE024, 7),
+    "Chest: Grey Lord's Mansion 10": (0x001BE024, 4),
+    "Chest: Grey Lord's Mansion 11": (0x001BE024, 5),
+    "Chest: Grey Lord's Mansion 12": (0x001BE024, 6),
+    "Chest: Grey Lord's Mansion 13": (0x001BE024, 7),
     # Trigger 704..705 → unknown (Script ID 53)
-    "Chest 53":               (0x001BE025, 0),
-    "Chest 54":               (0x001BE025, 1),
+    "Chest: Grey Lord's Mansion 2": (0x001BE025, 0),
+    "Chest: Grey Lord's Mansion 3": (0x001BE025, 1),
     # Trigger 706 → Dragon Eye Lake (Script ID 9, Vending Machine)
     "Chest: Dragon Eye Lake": (0x001BE025, 2),
-    # Trigger 707 → Mt. Infinity 12 (Script ID 185)
-    "Chest: Mt. Infinity 12": (0x001BE025, 3),
-    # Trigger 708..713 → Tower 6..11 (Script IDs 186, 187)
-    "Chest: Tower 6":         (0x001BE025, 4),
-    "Chest: Tower 7":         (0x001BE025, 5),
-    "Chest: Tower 8":         (0x001BE025, 6),
-    "Chest: Tower 9":         (0x001BE025, 7),
-    "Chest: Tower 10":        (0x001BE026, 0),
-    "Chest: Tower 11":        (0x001BE026, 1),
-    # Trigger 714..716 → File City Remodel 1..3 (Script ID 156)
-    "Chest: File City Remodel 1": (0x001BE026, 2),
-    "Chest: File City Remodel 2": (0x001BE026, 3),
-    "Chest: File City Remodel 3": (0x001BE026, 4),
+    # Trigger 707..713 → Back Dimension 1..7 (Script IDs 185/186/187,
+    # screens 226/227/228 — post-game-only area unlocked after defeating
+    # Machinedramon. The dialogs identify it: Section_60 of script 185
+    # has "What kind of place is this?... In the back of this place...";
+    # script 186 has "Get him! I'll stomp you!"; script 187 has
+    # "Attack! Aim and fire!". See `dw1_back_dimension.md` memory.)
+    "Chest: Back Dimension 1": (0x001BE025, 3),
+    "Chest: Back Dimension 2": (0x001BE025, 4),
+    "Chest: Back Dimension 3": (0x001BE025, 5),
+    "Chest: Back Dimension 4": (0x001BE025, 6),
+    "Chest: Back Dimension 5": (0x001BE025, 7),
+    "Chest: Back Dimension 6": (0x001BE026, 0),
+    "Chest: Back Dimension 7": (0x001BE026, 1),
+    # Trigger 714..716 → Factorial Town 3..5 (Script ID 156, screen 162
+    # — Remodelling Workshop; "We are going to remodel. The fee is two
+    # thous bits." NPC dialog.)
+    "Chest: Factorial Town 3": (0x001BE026, 2),
+    "Chest: Factorial Town 4": (0x001BE026, 3),
+    "Chest: Factorial Town 5": (0x001BE026, 4),
 }
 
 # Bit gaps (intentional, mirrored from DWAP):
@@ -683,71 +1009,71 @@ DWAP_CHEST_RAM_BITS: Final[dict[str, tuple[int, int]]] = {
 # directly via vanilla flow).
 
 CHEST_NAME_TO_ROM_OFFSETS: Final[dict[str, tuple[int, ...]]] = {
-    "Chest: Mt. Infinity 1":      (0x14000EDC,),
-    "Chest: Mt. Infinity 2":      (0x14000EE8,),
-    "Chest: Mt. Infinity 3":      (0x14000EF4,),
-    "Chest: Freezeland 1":        (0x14005868,),
-    "Chest: Freezeland 2":        (0x140073E8,),
-    "Chest: Freezeland 3":        (0x140073F4,),
-    "Chest: Freezeland 4":        (0x14008F7C,),
-    "Chest: Freezeland 5":        (0x14021168,),
-    "Chest: Drill Tunnel 1":      (0x13FF6978,),
-    "Chest: Drill Tunnel 2":      (0x13FF6984,),
-    "Chest 11":                   (0x14023624,),
-    "Chest 12":                   (0x14023630,),
-    "Chest: Freezeland 6":        (0x14023F54,),
-    "Chest: Freezeland 7":        (0x14023F60,),
-    "Chest: Freezeland 8":        (0x14021174,),
-    "Chest: Freezeland 9":        (0x14022D04,),
-    "Chest: Drill Tunnel 3":      (0x13FFA098, 0x13FFA508, 0x14039338, 0x140396CA),
-    "Chest: Drill Tunnel 4":      (0x14030964,),
-    "Chest: Toy Town":            (0x1404A6DC,),
-    "Chest 20":                   (0x13FFD7BC,),
-    "Chest 21":                   (0x13FFE0F0,),
-    "Chest 22":                   (0x13FFF35C,),
-    "Chest: Ogre Fortress":       (0x14045424,),
-    "Chest 24":                   (0x1403AEC4,),
-    "Chest 25":                   (0x1403AED0,),
-    "Chest 26":                   (0x1403AEDC,),
-    "Chest: File City Cards 1":   (0x140377A8,),
-    "Chest 28":                   (0x140539EC,),
-    "Chest 29":                   (0x140539F8,),
-    "Chest: File City Cards 2":   (0x14038A04,),
-    "Chest: Mt. Infinity 4":      (0x1405836C,),
-    "Chest: Mt. Infinity 5":      (0x14058C9C,),
-    "Chest: Mt. Infinity 6":      (0x14067B7C,),
-    "Chest 34":                   (0x1403AEE8,),
-    "Chest 35":                   (0x1406970C,),
-    "Chest 36":                   (0x14073334,),
-    "Chest: Mt. Infinity 7":      (0x1407F430,),
-    "Chest: Tower 1":             (0x1407FD54,),
-    "Chest: Tower 2":             (0x14080688,),
-    "Chest: Tower 3":             (0x14080FB4,),
-    "Chest: Tower 4":             (0x140818F4,),
-    "Chest: Tower 5":             (0x14081900,),
+    "Chest: Grey Lord's Mansion 4": (0x14000EDC,),
+    "Chest: Grey Lord's Mansion 5": (0x14000EE8,),
+    "Chest: Grey Lord's Mansion 6": (0x14000EF4,),
+    "Chest: Grey Lord's Mansion 1": (0x14005868,),
+    "Chest: Grey Lord's Mansion 7": (0x140073E8,),
+    "Chest: Grey Lord's Mansion 8": (0x140073F4,),
+    "Chest: Grey Lord's Mansion 9": (0x14008F7C,),
+    "Chest: Ice Sanctuary 1":     (0x14021168,),
+    "Chest: Lava Cave 5":          (0x13FF6978,),
+    "Chest: Lava Cave 6":          (0x13FF6984,),
+    "Chest: Ice Sanctuary 2":     (0x14023624,),
+    "Chest: Ice Sanctuary 3":     (0x14023630,),
+    "Chest: Ice Sanctuary 4":     (0x14023F54,),
+    "Chest: Ice Sanctuary 5":     (0x14023F60,),
+    "Chest: Ice Sanctuary 6":     (0x14021174,),
+    "Chest: Ice Sanctuary 7":     (0x14022D04,),
+    "Chest: Great Canyon 1":      (0x13FFA098, 0x13FFA508, 0x14039338, 0x140396CA),
+    "Chest: Leomon Ancestor Cave": (0x14030964,),
+    "Chest: Toy Mansion":          (0x1404A6DC,),
+    "Chest: Ogre Fortress 1":     (0x13FFD7BC,),
+    "Chest: Ogre Fortress 2":     (0x13FFE0F0,),
+    "Chest: Ogre Fortress 3":     (0x13FFF35C,),
+    "Chest: Secret Beach Cave":    (0x14045424,),
+    "Chest: Ogre Fortress 4":     (0x1403AEC4,),
+    "Chest: Ogre Fortress 5":     (0x1403AED0,),
+    "Chest: Ogre Fortress 6":     (0x1403AEDC,),
+    "Chest: Lava Cave 1":         (0x140377A8,),
+    "Chest: Factorial Town 1":     (0x140539EC,),
+    "Chest: Factorial Town 2":     (0x140539F8,),
+    "Chest: Lava Cave 2":         (0x14038A04,),
+    "Chest: Mt. Infinity 1":      (0x1405836C,),
+    "Chest: Mt. Infinity 2":      (0x14058C9C,),
+    "Chest: Mt. Infinity 3":      (0x14067B7C,),
+    "Chest: Ogre Fortress 7":     (0x1403AEE8,),
+    "Chest: Mt. Infinity 4":      (0x1406970C,),
+    "Chest: Mt. Infinity 5":      (0x14073334,),
+    "Chest: Mt. Infinity 6":      (0x1407F430,),
+    "Chest: Mt. Infinity 7":      (0x1407FD54,),
+    "Chest: Mt. Infinity 8":      (0x14080688,),
+    "Chest: Mt. Infinity 9":      (0x14080FB4,),
+    "Chest: Mt. Infinity 10":     (0x140818F4,),
+    "Chest: Mt. Infinity 11":     (0x14081900,),
     "Chest: Tropical Jungle":     (0x13FE6844,),
-    "Chest 44":                   (0x13FF4DE8, 0x13FF58AA),
-    "Chest 45":                   (0x13FF4DF4, 0x13FF58B6),
-    "Chest: Great Canyon 1":      (0x13FEE01E, 0x1407BD46),
-    "Chest: Great Canyon 2":      (0x13FEE02A, 0x1407BD52),
-    "Chest: Great Canyon 3":      (0x13FEE036, 0x1407BD5E),
-    "Chest: Mt. Infinity 8":      (0x1407AA94,),
-    "Chest: Mt. Infinity 9":      (0x1407AAA0,),
-    "Chest: Mt. Infinity 10":     (0x1407AAAC,),
-    "Chest: Mt. Infinity 11":     (0x1407AAB8,),
-    "Chest 53":                   (0x14003398,),
-    "Chest 54":                   (0x140033A4,),
+    "Chest: Lava Cave 3":         (0x13FF4DE8, 0x13FF58AA),
+    "Chest: Lava Cave 4":         (0x13FF4DF4, 0x13FF58B6),
+    "Chest: Mt. Panorama 1":      (0x13FEE01E, 0x1407BD46),
+    "Chest: Mt. Panorama 2":      (0x13FEE02A, 0x1407BD52),
+    "Chest: Mt. Panorama 3":      (0x13FEE036, 0x1407BD5E),
+    "Chest: Grey Lord's Mansion 10": (0x1407AA94,),
+    "Chest: Grey Lord's Mansion 11": (0x1407AAA0,),
+    "Chest: Grey Lord's Mansion 12": (0x1407AAAC,),
+    "Chest: Grey Lord's Mansion 13": (0x1407AAB8,),
+    "Chest: Grey Lord's Mansion 2": (0x14003398,),
+    "Chest: Grey Lord's Mansion 3": (0x140033A4,),
     "Chest: Dragon Eye Lake":     (0x13FE3118,),
-    "Chest: Mt. Infinity 12":     (0x14078F1C,),
-    "Chest: Tower 6":             (0x14079854,),
-    "Chest: Tower 7":             (0x14079848,),
-    "Chest: Tower 8":             (0x14079860,),
-    "Chest: Tower 9":             (0x1407986C,),
-    "Chest: Tower 10":            (0x1407A178,),
-    "Chest: Tower 11":            (0x1407A184,),
-    "Chest: File City Remodel 1": (0x1405430C,),
-    "Chest: File City Remodel 2": (0x14054318,),
-    "Chest: File City Remodel 3": (0x14054324,),
+    "Chest: Back Dimension 1":     (0x14078F1C,),
+    "Chest: Back Dimension 2":     (0x14079854,),
+    "Chest: Back Dimension 3":     (0x14079848,),
+    "Chest: Back Dimension 4":     (0x14079860,),
+    "Chest: Back Dimension 5":     (0x1407986C,),
+    "Chest: Back Dimension 6":     (0x1407A178,),
+    "Chest: Back Dimension 7":     (0x1407A184,),
+    "Chest: Factorial Town 3":     (0x1405430C,),
+    "Chest: Factorial Town 4":     (0x14054318,),
+    "Chest: Factorial Town 5":     (0x14054324,),
 }
 assert len(CHEST_NAME_TO_ROM_OFFSETS) == 65, len(CHEST_NAME_TO_ROM_OFFSETS)
 assert sum(len(v) for v in CHEST_NAME_TO_ROM_OFFSETS.values()) == 73, (
@@ -1537,13 +1863,12 @@ ROM_GABU_PATCH_OFFSETS: Final = (
 # not overlap the Birdramon flight bits (trigger 880..884 at
 # 0x001BE03B bits 0..4) — see :data:`BIRDRAMON_FLIGHT_RAM_BITS`.
 #
-# Result text + menu text slot replacements are done by the patcher in
-# place (slot byte budgets verified against the vanilla content).
-# Replacement text shows the AP item's *classification* (Quest / Bonus
-# / Junk) instead of the vanilla item name, so the player can plan
-# without spoiling individual item identities. The Try gacha's menu is
-# only 24 bytes ("Try"/"Cancel") — too small for menu text — so for
-# that machine only the result text is rewritten.
+# Vanilla menu / preface / result text is left untouched. (An earlier
+# Quest/Bonus/Junk text-substitution pass was retired 2026-05-08
+# because DW1's script-engine PC-advance is fragile against shortened
+# textboxes — substitutions could and did intermittently cause the
+# engine to drop out of the script before reaching our setTrigger
+# overwrite, suppressing the AP location.)
 
 class _VendingItem(NamedTuple):
     """Per-purchase row for a vending machine."""
@@ -1566,37 +1891,12 @@ class _VendingItem(NamedTuple):
     vanilla_price: int           # vanilla cost in bits (informational)
 
 
-class _VendingTextSlot(NamedTuple):
-    """Text-slot range to overwrite with classification text.
-
-    The slot starts at the ``1A 00`` showTextbox opcode and the length
-    covers the full opcode+content+null block up to the next opcode.
-    The patcher writes ``1A 00 [encoded content] [zero-padding]`` to
-    fill the slot.
-    """
-    rel: int        # script-relative offset of the showTextbox opcode
-    length: int     # full slot byte budget (opcode + content + padding)
-    purpose: str    # "menu" | "result" | "preface"
-    item_indices: tuple[int, ...]
-    """For ``"menu"`` slots: indices into ``machine.items`` for each
-    purchase line in the menu (in display order). For ``"result"``
-    slots: a single-element tuple identifying which item's result
-    text this is. For ``"preface"`` slots: empty tuple — preface text
-    is rewritten with a generic 'AP-randomized prizes' line.
-    """
-
-
 class _VendingMachine(NamedTuple):
     """One vending machine: a script with N items and 1-2 ROM copies."""
     label: str                   # short region/name for diagnostics
     region: str                  # AP region (matches existing regions.py)
     script_bases: tuple[int, ...]  # .bin offset of each ROM copy's script base
     items: tuple[_VendingItem, ...]
-    text_slots: tuple[_VendingTextSlot, ...]
-    """Text-substitution slots. ``item_index=None`` means the slot is a
-    menu/preface (rewrite with one line per item, comma-separated).
-    ``item_index=k`` is the result-text slot for ``items[k]``.
-    """
 
 
 # Allocated trigger IDs for vending purchases. Gap C of the trigger
@@ -1625,11 +1925,6 @@ VENDING_MACHINES: Final[tuple[_VendingMachine, ...]] = (
                 vanilla_price=600,
             ),
         ),
-        text_slots=(
-            _VendingTextSlot(190, 126, "menu",   (0, 1)),
-            _VendingTextSlot(502, 38,  "result", (0,)),
-            _VendingTextSlot(646, 68,  "result", (1,)),
-        ),
     ),
     # ---- Script 11 — Tropical Jungle: Hund MP 200, Thous MP 1800
     _VendingMachine(
@@ -1652,18 +1947,13 @@ VENDING_MACHINES: Final[tuple[_VendingMachine, ...]] = (
                 vanilla_price=1800,
             ),
         ),
-        text_slots=(
-            _VendingTextSlot(192, 126, "menu",   (0, 1)),
-            _VendingTextSlot(352, 56,  "result", (0,)),
-            _VendingTextSlot(502, 56,  "result", (1,)),
-        ),
     ),
     # ---- Script 71 — Gear Savanna: Special Prizes (Small Recovery 200,
     #      Portable Potty 500) + MP Stand sub-vendor (Hund 200, Thous 1800)
     _VendingMachine(
         label="Gear Savanna",
         region="Gear Savanna",
-        script_bases=(0x1400FDE8, 0x1400FDE8 + 0xA44),
+        script_bases=(0x1400FDA8, 0x1400FDA8 + 0xA44),
         items=(
             _VendingItem(
                 "Vending: Gear Savanna Small Recovery", "Gear Savanna",
@@ -1694,21 +1984,12 @@ VENDING_MACHINES: Final[tuple[_VendingMachine, ...]] = (
                 vanilla_price=1800,
             ),
         ),
-        text_slots=(
-            _VendingTextSlot(530,  130, "preface", ()),         # Special Prizes preface
-            _VendingTextSlot(668,  142, "menu",    (0, 1)),
-            _VendingTextSlot(1054, 74,  "result",  (0,)),       # SR
-            _VendingTextSlot(1226, 64,  "result",  (1,)),       # PP
-            _VendingTextSlot(1600, 126, "menu",    (2, 3)),     # MP Stand menu
-            _VendingTextSlot(1762, 60,  "result",  (2,)),       # Hund MP result
-            _VendingTextSlot(1914, 60,  "result",  (3,)),       # Thous MP result
-        ),
     ),
     # ---- Script 78 — Ancient Dino Region: Try gacha (200 bits, random)
     _VendingMachine(
         label="Ancient Dino Region",
         region="Ancient Dino Region",
-        script_bases=(0x14015168,),  # single copy
+        script_bases=(0x14015188,),  # single copy
         items=(
             _VendingItem(
                 "Vending: Ancient Dino Gacha Meat", "Ancient Dino Region",
@@ -1738,14 +2019,6 @@ VENDING_MACHINES: Final[tuple[_VendingMachine, ...]] = (
                 price_offsets=(3664,),
                 vanilla_price=200,
             ),
-        ),
-        text_slots=(
-            # Menu is "Try"/"Cancel" only — too narrow for class hints.
-            # Per user spec, only result text gets rewritten for the gacha.
-            _VendingTextSlot(3052, 38, "result", (0,)),  # Meat
-            _VendingTextSlot(3244, 76, "result", (1,)),  # Small Recovery
-            _VendingTextSlot(3474, 42, "result", (2,)),  # Steak
-            _VendingTextSlot(3670, 56, "result", (3,)),  # MP Floppy
         ),
     ),
 )
@@ -1789,7 +2062,7 @@ assert all(
 # DW1's script-engine opcode constants used by the vending patcher.
 
 VENDING_OPCODE_SETTRIGGER: Final = 0x1C  # 4 bytes: 1C 00 [N_LE]
-VENDING_OPCODE_SHOWTEXTBOX: Final = 0x1A  # 1A 00 + content + null terminator
+VENDING_OPCODE_JUMPTO: Final = 0x16      # 4 bytes: 16 00 [target_LE]
 
 
 def encode_set_trigger(trigger_id: int) -> bytes:
@@ -1798,61 +2071,46 @@ def encode_set_trigger(trigger_id: int) -> bytes:
                   trigger_id & 0xFF, (trigger_id >> 8) & 0xFF))
 
 
-# DW1 fullwidth shift_jis encoding for ASCII letters/digits and basic
-# punctuation. The script engine's text rendering expects this encoding;
-# raw ASCII is NOT rendered correctly. Control codes (color, line break)
-# are passed through as raw bytes.
+# ----- Ancient Dino "Try" gacha vanilla-bug fix ----------------------------
+#
+# The MP Floppy outcome (gacha prize 4) is structured differently from the
+# other three prizes: its only ``giveItem`` opcode lives inside the
+# inventory-full recovery branch, so a player with free inventory space
+# (the common case) never gets the item — and the AP setTrigger 901 we
+# overwrite at offset 3840 is never reached either. Other three prizes
+# (Meat / Small Recovery / Steak) put ``giveItem`` *before* the inventory
+# check; their recovery branch is a duplicate write.
+#
+# Disassembly (DW1Script.txt:14330-14343, Section_81):
+#
+#     003660 setDialogOwner 255
+#     003662 reduceMoney 200
+#     003670 showTextbox An MP floppy came out!
+#     003726 if trigger(0) == false then 3846   <-- BUG: jumps to endSection
+#     003738 ... (inventory-full recovery branch) ...
+#     003840 giveItem 4 1                       <-- only reached if inventory full
+#     003844 endSection
+#
+# Fix: replace the 12-byte conditional at offset 3726 with a 4-byte
+# unconditional ``jumpTo 3840`` that lands directly on the giveItem (now
+# our setTrigger 901 overwrite). The 8 trailing bytes of the original
+# conditional become dead code — the engine never reaches them because
+# the jumpTo fires first. Skipped: the inventory-full recovery branch's
+# ``setTrigger 3 + callRoutine 0/13`` housekeeping, irrelevant for AP
+# delivery (the actual item arrives via the bank, not this vending site).
+#
+# Script base for Ancient Dino is 0x14015188 (single ROM copy). 3840 in
+# little-endian u16 = 0x00, 0x0F. Encoding: ``16 00 00 0F``.
 
-_DW1_PUNCT: Final[dict[str, bytes]] = {
-    " ": bytes((0x81, 0x40)),
-    ":": bytes((0x81, 0x46)),
-    ".": bytes((0x81, 0x44)),
-    "!": bytes((0x81, 0x49)),
-    "?": bytes((0x81, 0x48)),
-    ",": bytes((0x81, 0x43)),
-    "-": bytes((0x81, 0x7C)),
-    "/": bytes((0x81, 0x5E)),
-}
+_ANCIENT_DINO_SCRIPT_BASE: Final = 0x14015188
+_GACHA_MP_FLOPPY_GIVEITEM_OFFSET: Final = 3840
 
-
-def encode_dw1_text(text: str) -> bytes:
-    """Encode an ASCII string as DW1 fullwidth shift_jis bytes.
-
-    Each ASCII letter / digit / supported punctuation expands to 2
-    bytes. Unsupported characters are passed through as raw single
-    bytes (which DW1 will likely render as garbage — callers should
-    stick to the ASCII subset).
-    """
-    out = bytearray()
-    for c in text:
-        cv = ord(c)
-        if "A" <= c <= "Z":
-            out += bytes((0x82, 0x60 + (cv - 0x41)))
-        elif "a" <= c <= "z":
-            out += bytes((0x82, 0x81 + (cv - 0x61)))
-        elif "0" <= c <= "9":
-            out += bytes((0x82, 0x4F + (cv - 0x30)))
-        elif c in _DW1_PUNCT:
-            out += _DW1_PUNCT[c]
-        else:
-            out.append(cv & 0xFF)
-    return bytes(out)
-
-
-def build_vending_textbox(content: str, slot_length: int) -> bytes:
-    """Build a complete vending-text slot replacement.
-
-    Layout: ``1A 00 [encoded content] 0D 00 00...`` padded with NULs to
-    ``slot_length``. If the encoded content overflows the slot, raise.
-    """
-    body = encode_dw1_text(content) + b"\x0D\x00"
-    payload = bytes((VENDING_OPCODE_SHOWTEXTBOX, 0x00)) + body
-    if len(payload) > slot_length:
-        raise ValueError(
-            f"Encoded vending text (size {len(payload)}) exceeds slot "
-            f"length {slot_length}: content={content!r}",
-        )
-    return payload + b"\x00" * (slot_length - len(payload))
+ROM_GACHA_MP_FLOPPY_FIX_OFFSET: Final = _ANCIENT_DINO_SCRIPT_BASE + 3726
+ROM_GACHA_MP_FLOPPY_FIX_BYTES: Final = bytes((
+    VENDING_OPCODE_JUMPTO, 0x00,
+    _GACHA_MP_FLOPPY_GIVEITEM_OFFSET & 0xFF,
+    (_GACHA_MP_FLOPPY_GIVEITEM_OFFSET >> 8) & 0xFF,
+))
 
 
 # =============================================================================
@@ -2480,6 +2738,430 @@ ROM_COELAMON_GATE_VALUE: Final = bytes((0xFC, 0x05))  # 1532 LE
 
 
 # =============================================================================
+# Old Fishrod cutscene remap (always-on)
+# =============================================================================
+#
+# The rod-give cutscene (Script ID 159, Section_51, script offsets
+# 006718..006824 — see DW1Script.txt:23920) sets two trigger bits on
+# completion:
+#
+#     006718 if trigger(45) == true then 6824   <-- replay gate
+#     006732..006812 [textbox / animation / sound]
+#     006816 setTrigger 45     <-- ALSO the bit `getBestFishingRod()`
+#                                  reads to enable Old Rod fishing
+#                                  (Fishing.cpp:21).
+#     006820 setTrigger 320    <-- script-side "rod-given" memory bit;
+#                                  read by Script 159 Section_254 to
+#                                  hide the rod sprite on the trash
+#                                  heap (DW1Script.txt:23690).
+#     006824 endSection
+#
+# Sharing trigger 45 between "cutscene played" and "rod owned" means
+# AP delivery of the Old Fishrod item (which writes trigger 45) would
+# self-trigger the AP location and vanilla cutscene completion would
+# enable fishing without AP delivery. Both are wrong for AP rando.
+#
+# Fix: surgical 4-byte rewrite redirecting the cutscene to a fresh
+# AP-allocated trigger (902, :data:`OLD_FISHROD_LOCATION_TRIGGER_ID`),
+# leaving trigger 45 (the fishing-enable bit) and trigger 320 (the
+# sprite-hide bit) alone:
+#
+#     006718 if trigger(902) == true then 6824   <-- gate now reads 902
+#     006816 setTrigger 902                      <-- cutscene now sets 902
+#     006820 setTrigger 320                      <-- unchanged
+#
+# After the patch:
+#
+# * Cutscene plays -> sets trigger 902 (location signal) + trigger 320
+#   (sprite hidden). Gate now reads 902 -> won't replay. Fishing is NOT
+#   enabled by the cutscene anymore.
+# * AP delivers Old Fishrod -> client writes trigger 45 -> fishing
+#   enabled. Trigger 902 is untouched -> location does not self-fire.
+#
+# Encoded as two 2-byte writes (trigger ID = 902 = 0x0386, LE = ``86 03``):
+#
+# * Conditional trigger ID: at the conditional's offset 4..5 (the
+#   12-byte encoding lays the trigger ID at offset 4-5; same shape as
+#   :data:`ROM_LAVA_CAVE_GATE_VALUE`). Script base 0x14056218 + script
+#   offset 0x1A3E + 4 = 0x14057C5A.
+# * setTrigger trigger ID: at the setTrigger opcode's offset 2..3 (the
+#   4-byte encoding lays the trigger ID at offset 2-3; see
+#   :func:`encode_set_trigger`). Script base 0x14056218 + script
+#   offset 0x1AA0 + 2 = 0x14057CBA.
+#
+# Single ROM copy (Script 159 unique in the BIN — verified by scanning
+# the .bin for the 8-byte signature ``1C 00 2D 00 1C 00 40 01``: one
+# hit at 0x14057CB8). Patch is always emitted (no option flag); the
+# vanilla cutscene flow is incompatible with AP rando regardless of
+# other settings.
+
+ROM_OLD_FISHROD_REMAP_OFFSETS: Final = (
+    0x14057C5A,  # if trigger(45) ...   trigger ID byte position
+    0x14057CBA,  # setTrigger 45         trigger ID byte position
+)
+ROM_OLD_FISHROD_REMAP_VALUE: Final = bytes((
+    OLD_FISHROD_LOCATION_TRIGGER_ID & 0xFF,
+    (OLD_FISHROD_LOCATION_TRIGGER_ID >> 8) & 0xFF,
+))
+
+
+# =============================================================================
+# Mansion Key giveItem neuter (always-on)
+# =============================================================================
+#
+# The Mansion Key pickup cutscene (Script 54, Section_81 — see
+# DW1Script.txt:11583-11604) calls ``giveItem 119 1`` twice:
+#
+#     000140 if trigger(110) == true then 450      <-- replay gate
+#     000154..000174 [textbox / animation / sprite housekeeping]
+#     000178 giveItem 119 1                        <-- PRIMARY (succeeds when bag has space)
+#     000182..000352 [textbox / "I used the Mansion Key!"]
+#     000352 if trigger(0) == false then 442       <-- skip retry on success
+#     000364..000436 ["I gotta get rid of something" + cleanup]
+#     000438 giveItem 119 1                        <-- RETRY (after player frees bag space)
+#     000442 setTrigger 110                        <-- gate set
+#     000446 jumpTo 452
+#     000450 endSection
+#     000452 endSection
+#
+# In AP rando the vanilla giveItem must be neutered — the player
+# receives Mansion Key only via AP delivery (bank slot 119, routed by
+# :func:`_make_bank_deliverer`). Both giveItem sites are rewritten
+# with ``setTrigger 110`` (same 4-byte length: ``1C 00 6E 00``); the
+# cutscene's existing ``setTrigger 110`` at offset 442 becomes
+# redundant but harmless. Net effect: the cutscene plays normally
+# (textbox, animation, "I found a key!" message) but no item enters
+# inventory, and the AP location ``Mansion Key Pickup`` fires when
+# trigger 110 transitions 0->1.
+#
+# Two ROM copies of Script 54 in the .bin (verified by scanning for
+# the 4-byte signature ``28 00 77 01``: four hits, paired by the
+# script-relative 0x104 byte distance between primary and retry).
+# Script 54 base copies: 0x14003CB8 and 0x14004F40 (delta 0x1288).
+# Patch is always emitted (no option flag); the vanilla in-game
+# Mansion Key grant is incompatible with AP rando.
+
+ROM_MANSION_KEY_GIVEITEM_OFFSETS: Final = (
+    0x14003D6A,  # Copy 1 primary  (script-offset 178 = 0xB2)
+    0x14003E6E,  # Copy 1 retry    (script-offset 438 = 0x1B6)
+    0x14004FF2,  # Copy 2 primary
+    0x140050F6,  # Copy 2 retry
+)
+# Replacement: ``setTrigger 110`` (opcode 0x1C, sub 0x00, trigger ID 110 LE).
+ROM_MANSION_KEY_GIVEITEM_NEUTER_VALUE: Final = bytes((
+    VENDING_OPCODE_SETTRIGGER, 0x00,
+    MANSION_KEY_LOCATION_TRIGGER_ID & 0xFF,
+    (MANSION_KEY_LOCATION_TRIGGER_ID >> 8) & 0xFF,
+))
+
+
+# =============================================================================
+# Frig Key giveItem neuter (always-on)
+# =============================================================================
+#
+# The Frig Key cutscene (Myotismon dialog inside Grey Lord's Mansion;
+# Script 63 Section_5 — see DW1Script.txt:12166-12222) is a more
+# elaborate dialog tree than Mansion Key. Approximate flow:
+#
+#     000146 if item(122) < 1 then 164      <-- skip Steak handover branch
+#     000164 if trigger(104) == false then 238   <-- first meeting?
+#     000176..000234 [repeat-visit branch — quick line, no giveItem]
+#     000238 setTrigger 104                  <-- AP location signal fires here
+#     000242..000496 [intro dialog + meat check]
+#     000652..000654 [Myotismon: "Here."]
+#     000670 giveItem 123 1                  <-- PRIMARY key give
+#     000674..000694 ["A key?" + inventory check]
+#     000706..000778 [retry path]
+#     000780 giveItem 123 1                  <-- RETRY key give
+#     000784 showTextbox I got a Frige Key!
+#     000832..001008 [outro]
+#     001012 endSection
+#
+# Both giveItem 123 sites are rewritten with ``setTrigger 104``
+# (idempotent — the bit was already set at script offset 238 during
+# the cutscene intro). Two ROM copies of Script 63 in the .bin
+# (verified by scanning for the 4-byte signature ``28 00 7B 01``:
+# four hits, paired by the script-relative 0x6E byte distance
+# between primary and retry). Script 63 base copies: 0x1400A1C8
+# and 0x1400AC96 (delta 0xACE).
+#
+# **Corner case (documented; not patched):** the cutscene's first
+# instruction at offset 146 checks for Steak (item 122) — if the
+# player has Steak when first approaching Myotismon, the script
+# jumps to the Steak handover path (offset 1014 onward) and trigger
+# 104 is NEVER set on that visit. In vanilla DW1 this never happens
+# (Steak comes from a fridge that requires Frig Key), but in AP
+# rando, Steak may be delivered from another world before Frig Key.
+# The AP location still fires on a subsequent visit — when the
+# player approaches Myotismon without Steak, Section_5 takes the
+# normal path and trigger 104 transitions 0->1. So the location is
+# reachable, just possibly delayed by one visit.
+
+ROM_FRIG_KEY_GIVEITEM_OFFSETS: Final = (
+    0x1400A466,  # Copy 1 primary  (script-offset 670 = 0x29E)
+    0x1400A4D4,  # Copy 1 retry    (script-offset 780 = 0x30C)
+    0x1400AF34,  # Copy 2 primary
+    0x1400AFA2,  # Copy 2 retry
+)
+# Replacement: ``setTrigger 104`` (opcode 0x1C, sub 0x00, trigger ID 104 LE).
+ROM_FRIG_KEY_GIVEITEM_NEUTER_VALUE: Final = bytes((
+    VENDING_OPCODE_SETTRIGGER, 0x00,
+    FRIG_KEY_LOCATION_TRIGGER_ID & 0xFF,
+    (FRIG_KEY_LOCATION_TRIGGER_ID >> 8) & 0xFF,
+))
+
+
+# =============================================================================
+# Steak spawn neuter (always-on)
+# =============================================================================
+#
+# Unlike the rod / Mansion Key / Frig Key cutscenes, Steak is **not**
+# given via a ``giveItem`` opcode anywhere in DW1's script
+# (zero ``giveItem 122`` calls). Instead, vanilla DW1 spawns Steak as a
+# **map item** (opcode 0x74 = ``spawnItem``) on the Overdell map, gated
+# on the fridge having been used. The relevant section
+# (Script 35 Section_254 — see DW1Script.txt:9184-9199):
+#
+#     000128 if trigger(348) == false OR trigger(128) == true then 150
+#     000144 spawnItem 122 48 32   <-- 6 bytes: 74 7A 30 00 20 00
+#     000150 endSection
+#
+# Conditional gates the spawn on trigger 348 (fridge used) AND
+# trigger 128 not set (Steak not yet given to Myotismon). When both
+# conditions hold, Steak object spawns at coords (48, 32) on the
+# Overdell map; the player walks to it and picks it up.
+#
+# In AP rando the spawn is bypassed: vanilla Steak goes nowhere; the
+# player gets Steak only via AP delivery (bank slot 122). The 6-byte
+# ``spawnItem`` is replaced with ``jumpTo 150`` (4 bytes:
+# ``16 00 96 00``) plus 2 bytes of unreachable filler (``00 00``).
+# The jumpTo lands directly on the ``endSection`` at offset 150, so
+# Section_254 ends without spawning anything when entered.
+#
+# Why use trigger 348 as the AP location signal instead of patching a
+# new trigger in: trigger 348 is set during the fridge cutscene
+# itself (Script 55 Section_83 offset 848), which is the canonical
+# "player obtained Steak via fridge" event. The actual Steak walk-to
+# and pickup are merely consequences of this. Polling trigger 348
+# fires the AP location at the conceptually-correct moment.
+#
+# Two ROM copies of Script 35 in the .bin (verified by scanning for
+# the 6-byte signature ``74 7A 30 00 20 00``: two hits at
+# 0x13FF7C58 and 0x13FF81E2; delta 0x58A).
+
+ROM_STEAK_SPAWN_NEUTER_OFFSETS: Final = (
+    0x13FF7C58,  # Copy 1 (Script 35 Section_254, script-offset 144 = 0x90)
+    0x13FF81E2,  # Copy 2
+)
+# 6-byte replacement: jumpTo 150 (4 bytes) + 2 bytes unreachable filler.
+ROM_STEAK_SPAWN_NEUTER_VALUE: Final = bytes((
+    VENDING_OPCODE_JUMPTO, 0x00,
+    0x96, 0x00,    # target = 150 (= 0x96), little-endian
+    0x00, 0x00,    # filler — never executed because the jumpTo lands at offset 150
+))
+
+
+# =============================================================================
+# Gear giveItem neuter (always-on)
+# =============================================================================
+#
+# The Gear acquisition cutscene (Toy Town, post-WaruMonzaemon defeat;
+# Script 144 Section_83 — see DW1Script.txt:21930-22437) uses the same
+# 4-byte ``giveItem 120 1`` shape we've seen elsewhere:
+#
+#     [..., WaruMonzaemon dialogue, Gear hand-off setup ...]
+#     004334 giveItem 120 1                    <-- PRIMARY key give
+#     004338 if trigger(0) == false then 4480  <-- skip retry on success
+#     004350..004474 [retry path: "Oh no, I have too many..." + cleanup]
+#     004476 giveItem 120 1                    <-- RETRY key give
+#     004482 showTextbox I got a Gear!
+#     004518 setTrigger 270                    <-- AP location signal
+#     004522 endSection
+#
+# Both giveItem 120 sites rewritten with ``setTrigger 270``
+# (idempotent — the bit is already set at offset 4518 by the
+# cutscene's existing setTrigger). One ROM copy of Script 144 in the
+# .bin (verified by scanning for the 4-byte signature
+# ``28 00 78 01``: only one pair matched the script-relative
+# 0x8E byte distance between primary and retry; other unrelated
+# matches were filtered out). Script 144 base: 0x1404A928.
+
+ROM_GEAR_GIVEITEM_OFFSETS: Final = (
+    0x1404BA16,  # Primary  (script-offset 4334 = 0x10EE)
+    0x1404BAA4,  # Retry    (script-offset 4476 = 0x117C)
+)
+# Replacement: ``setTrigger 270`` (opcode 0x1C, sub 0x00, trigger ID 270 LE).
+ROM_GEAR_GIVEITEM_NEUTER_VALUE: Final = bytes((
+    VENDING_OPCODE_SETTRIGGER, 0x00,
+    GEAR_LOCATION_TRIGGER_ID & 0xFF,
+    (GEAR_LOCATION_TRIGGER_ID >> 8) & 0xFF,
+))
+
+
+# =============================================================================
+# Rain Plant giveItem neuter (always-on)
+# =============================================================================
+#
+# Rain Plant is given via a single ``giveItem 121 1`` in the Tanemon
+# planter cutscene (Native Forest; Script 162 Section_83 — see
+# DW1Script.txt:24504-24520). Pre-conditions: Palmon recruited
+# (trigger 246) AND day-15-of-month (``pstat(106) == 14``). Notably
+# the cutscene has **no retry path** — if the player's inventory is
+# full at giveItem time, the section ends without setting trigger 76,
+# and the player has to come back next month.
+#
+#     006044 if trigger(76) == false AND trigger(246) == true then 6062
+#     006062 if pstat(106) == 14 then 6076
+#     006076 setDialogOwner 253
+#     006078 showTextbox Oh, this is a...
+#     006116 giveItem 121 1                  <-- THE ONLY giveItem
+#     006120 if trigger(0) == false then 6172  <-- skip success path on inventory-full
+#     006132..006170 [inventory-full path: "Too many Items." + endSection]
+#     006172 setObjVisibility 72 1
+#     006178 showTextbox I got a Rain Plant Fruit!
+#     006238 setTrigger 76                    <-- AP location signal
+#     006242 endSection
+#
+# The single giveItem site is rewritten with ``setTrigger 76``
+# (idempotent — the bit is set at offset 6238 by the cutscene's own
+# setTrigger). One ROM copy of Script 162 in the .bin (verified by
+# scanning for the 4-byte signature ``28 00 79 01``: only one hit
+# matched the expected ``if trigger(0)`` conditional structure
+# following the giveItem; the other was unrelated data). Script 162
+# base: 0x14059808.
+#
+# Note: trigger 76 is **renewable** — Section_254 of Script 162
+# `unsetTrigger 76` on each day-15 transition (script offset 24134),
+# letting vanilla DW1 spawn a fresh Rain Plant each month. After our
+# patch the cutscene still re-runs each month (trigger 76 unsets,
+# then resets via our patched giveItem-as-setTrigger), but the AP
+# location only fires once thanks to server-side dedup.
+
+ROM_RAIN_PLANT_GIVEITEM_OFFSETS: Final = (
+    0x1405AFEC,  # Single ROM copy (Script 162 Section_83, script-offset 6116 = 0x17E4)
+)
+# Replacement: ``setTrigger 76`` (opcode 0x1C, sub 0x00, trigger ID 76 LE).
+ROM_RAIN_PLANT_GIVEITEM_NEUTER_VALUE: Final = bytes((
+    VENDING_OPCODE_SETTRIGGER, 0x00,
+    RAIN_PLANT_LOCATION_TRIGGER_ID & 0xFF,
+    (RAIN_PLANT_LOCATION_TRIGGER_ID >> 8) & 0xFF,
+))
+
+
+# =============================================================================
+# Blue Flute giveItem neuter (always-on)
+# =============================================================================
+#
+# The Blue Flute pickup is part of the Seadramon friendship cutscene
+# (Script 7 Section_82 — see DW1Script.txt:4727-4747). The player
+# hooks Seadramon while fishing in Dragon Eye Lake, picks the
+# "Let's be friends" dialog option, and Seadramon hands over the
+# Blue Flute. Approximate flow:
+#
+#     001998 setTrigger 210                    <-- AP location signal
+#     002002 addToPStat 1 2
+#     002006 giveItem 115 1                    <-- PRIMARY key give
+#     002010 if trigger(0) == false then 2140  <-- skip retry on success
+#     002022..002134 [retry path: "Too many Items." + cleanup]
+#     002136 giveItem 115 1                    <-- RETRY key give
+#     002140 setDialogOwner 255
+#     002142 showTextbox I got the Lake Guardian's Blue Flute!
+#     ... outro dialog ...
+#     002648 setTrigger 49 (selection prompt unrelated)
+#
+# Both giveItem 115 sites are rewritten with ``setTrigger 210``
+# (idempotent — the bit is set at offset 1998 already). Trigger 210
+# was Seadramon's recruit bit until 2026-05-09; with Seadramon now in
+# :data:`_AP_RECRUIT_EXCLUDED`, the bit is polled exclusively as
+# :data:`BLUE_FLUTE_LOCATION_BIT` for the ``Blue Flute Pickup``
+# location.
+#
+# Single ROM copy of Script 7 in the .bin (verified by scanning for
+# the 4-byte signature ``28 00 73 01`` and confirming surrounding
+# context: setTrigger 210 / addToPStat / "if trigger(0) == false"
+# conditional / setDialogOwner 255 / showTextbox "I got the Lake
+# Guardian's Blue Flute!" — see commit notes). Two giveItem sites in
+# the single copy. The .bin gap between primary (0x13FE1D4E) and
+# retry (0x13FE1F00) is wider than the script-relative gap (434 vs
+# 130 bytes); the disassembler's offset numbering for this script's
+# textboxes does not map 1:1 to .bin byte offsets. We trust the .bin
+# scan and patch both sites directly.
+
+ROM_BLUE_FLUTE_GIVEITEM_OFFSETS: Final = (
+    0x13FE1D4E,  # Primary (script-offset 2006 in dumper output; preceded by setTrigger 210 + addToPStat)
+    0x13FE1F00,  # Retry (followed by setDialogOwner 255 + "I got the Lake Guardian's Blue Flute!" textbox)
+)
+# Replacement: ``setTrigger 210`` (opcode 0x1C, sub 0x00, trigger ID 210 LE).
+ROM_BLUE_FLUTE_GIVEITEM_NEUTER_VALUE: Final = bytes((
+    VENDING_OPCODE_SETTRIGGER, 0x00,
+    BLUE_FLUTE_LOCATION_TRIGGER_ID & 0xFF,
+    (BLUE_FLUTE_LOCATION_TRIGGER_ID >> 8) & 0xFF,
+))
+
+
+# =============================================================================
+# Leomonstone giveItem neuter (always-on)
+# =============================================================================
+#
+# Leomon's Ancestral Cave (deepest chamber of Drill Tunnel B3F) holds
+# the Leomonstone — a stone tablet the player picks up via cutscene.
+# The cutscene (Script 109 Section_52 — see DW1Script.txt:17834-17869)
+# plays automatically on entering the cave with the visible tablet:
+#
+#     000126 if trigger(135) == true then 682     <-- replay gate
+#     000146 showTextbox Hey, there's a stone tablet.
+#     000260 playSound 1800
+#     000264 setObjVisibility 2 1
+#     ... [textboxes about reading the tablet] ...
+#     000460 showTextbox Let's take it.
+#     000494 giveItem 118 1                       <-- PRIMARY
+#     000498 if trigger(0) == false then 604      <-- skip retry on success
+#     000510..000598 [retry path: "Oops, I have to throw something away" + cleanup]
+#     000600 giveItem 118 1                       <-- RETRY
+#     000604 playSound 1792
+#     000610 showTextbox I got Leomon's Stone Tablet!
+#     000676 setTrigger 135                       <-- AP location signal
+#     000680 endSection
+#
+# Vanilla DW1 also gates ENTRY to this cave on Drimogemon's daily dig
+# completing, which in turn requires the city's Prosperity to reach
+# 45. AP fill models this via a ``_pp(45)`` rule in
+# ``rules._set_keyitem_pickup_rules``.
+#
+# Three ROM copies of Script 109 in the .bin (verified by scanning
+# for the 4-byte signature ``28 00 76 01``: 7 hits in the script
+# range, 3 of which are primaries with the expected
+# ``if trigger(0) == false then 604`` conditional following, 4 are
+# retries with the expected ``setDialogOwner 255 + showTextbox "I got
+# Leomon's Stone Tablet!"`` pattern. The 4th retry has no matching
+# primary 106 bytes earlier — it's a separate cutscene fragment in
+# the same script with a slightly different lead-in. Patching all 7
+# sites is safe since the substitution (setTrigger 135) is
+# idempotent everywhere it's applied.
+#
+# Script 109 base offsets:
+#   Copy 1: 0x14030028
+#   Copy 2: 0x14030504
+#   Copy 3: 0x140309DE
+
+ROM_LEOMONSTONE_GIVEITEM_OFFSETS: Final = (
+    0x14030216,  # Copy 1 primary  (script-offset 494 = 0x1EE)
+    0x14030280,  # Copy 1 retry    (script-offset 600 = 0x258)
+    0x140306F2,  # Copy 2 primary
+    0x1403075C,  # Copy 2 retry
+    0x14030BCC,  # Copy 3 primary
+    0x14030C36,  # Copy 3 retry
+    0x140316F6,  # Orphan retry — different cutscene fragment in Script 109
+)
+# Replacement: ``setTrigger 135`` (opcode 0x1C, sub 0x00, trigger ID 135 LE).
+ROM_LEOMONSTONE_GIVEITEM_NEUTER_VALUE: Final = bytes((
+    VENDING_OPCODE_SETTRIGGER, 0x00,
+    LEOMONSTONE_LOCATION_TRIGGER_ID & 0xFF,
+    (LEOMONSTONE_LOCATION_TRIGGER_ID >> 8) & 0xFF,
+))
+
+
+# =============================================================================
 # Great Canyon cutscene-disable patch (Great Canyon Bridge SHUFFLED mode)
 # =============================================================================
 #
@@ -2566,33 +3248,90 @@ ROM_CHEST_ITEM_VALUE: Final = AP_CHEST_SENTINEL_ITEM_ID
 ROM_ITEM_TABLE_BASE: Final = 0x14D676C4
 ROM_ITEM_TABLE_ENTRY_SIZE: Final = 32
 
-AP_ITEM_NAME: Final = b"AP ITEM"  # 7 bytes, padded to 20 with NULs
+AP_ITEM_NAME: Final = b"AP Item"  # 7 bytes, padded to 20 with NULs
 
-# 32 bytes: name (20) padded with NULs + 12 zero bytes for stats
+# Slot 83 is the universal "AP Item" — both the chest pickup sentinel
+# AND the merit shop's AP-purchase row. Sharing one slot means both
+# contexts always read the same name. ``meritValue = 300`` puts the
+# row in the merit shop (any non-zero value would; 300 is a sensible
+# in-game cost). Other stats (sortingValue, value, itemColor,
+# dropable, unk) stay zero — they don't affect the chest sentinel
+# (chestGiveItem wrapper short-circuits on slot 83 before any of
+# those are read) and don't matter for the merit shop's row render.
+#
+# Field layout (matches dw1.hpp Item struct):
+#   bytes  0..19: name (ASCII, NUL-padded)
+#   bytes 20..23: value (i32, money price)
+#   bytes 24..25: meritValue (i16) ← buyable price for the AP Item row
+#   bytes 26..27: sortingValue (i16)
+#   byte  28:     itemColor (u8)
+#   byte  29:     dropable  (u8)
+#   bytes 30..31: unk (u16)
+AP_ITEM_MERIT_PRICE: Final = 300
+
 ROM_AP_ITEM_ENTRY_BYTES: Final = (
-    AP_ITEM_NAME.ljust(20, b"\x00") + b"\x00" * 12
+    AP_ITEM_NAME.ljust(20, b"\x00")
+    + b"\x00\x00\x00\x00"                                          # value = 0
+    + AP_ITEM_MERIT_PRICE.to_bytes(2, "little", signed=True)       # meritValue
+    + b"\x00" * 6                                                  # sortingValue + itemColor + dropable + unk
 )
 assert len(ROM_AP_ITEM_ENTRY_BYTES) == ROM_ITEM_TABLE_ENTRY_SIZE, len(ROM_AP_ITEM_ENTRY_BYTES)
 
 
-def _table_byte_to_bin_flat(table_byte_offset: int) -> int:
+def _flat_to_user_data(base: int, table_byte_offset: int) -> int:
     """Translate a table-internal byte offset to a sector-aware flat BIN offset.
 
-    The item-data table starts at flat BIN ``ROM_ITEM_TABLE_BASE`` (sector
-    148639, user-data position 500) and continues for ``0x1260`` bytes
-    of user data. Because the BIN includes Mode2/2352 sector headers
-    (24 bytes) and EC blocks (280 bytes) interspersed, naive
-    ``base + offset`` arithmetic skips into EC zones for entries past
-    the first ~48. This helper hops over sector boundaries correctly.
+    Mode2/2352 sector geometry interleaves 24-byte sector headers and
+    280-byte EDC/ECC blocks with 2048-byte user-data regions. A flat
+    ``base + offset`` walk past one user-data region steps into the
+    next sector's EC zone instead of the next sector's user data.
+
+    This helper computes "the byte position N user-data-bytes into the
+    stream that begins at ``base``", correctly hopping the EC blocks.
+    Caller passes the table's flat-BIN base; ``table_byte_offset`` is
+    the user-data byte offset within the table.
     """
 
-    base_sector = ROM_ITEM_TABLE_BASE // SECTOR_SIZE_BYTES
-    base_pos_in_sector = ROM_ITEM_TABLE_BASE - base_sector * SECTOR_SIZE_BYTES
+    base_sector = base // SECTOR_SIZE_BYTES
+    base_pos_in_sector = base - base_sector * SECTOR_SIZE_BYTES
     base_pos_in_user_data = base_pos_in_sector - SECTOR_HEADER_BYTES
     pos = base_pos_in_user_data + table_byte_offset
     sector_advance, pos_within = divmod(pos, USER_DATA_BYTES)
     sector = base_sector + sector_advance
     return sector * SECTOR_SIZE_BYTES + SECTOR_HEADER_BYTES + pos_within
+
+
+def _table_byte_to_bin_flat(table_byte_offset: int) -> int:
+    """Backwards-compat shim — ITEM_PARA-specific sector-hop helper."""
+
+    return _flat_to_user_data(ROM_ITEM_TABLE_BASE, table_byte_offset)
+
+
+def _read_struct_block_user_data(rom: bytes, block: "StructBlock") -> bytes:
+    """Extract a ``StructBlock``'s user-data records from a flat BIN.
+
+    Reads ``count * record_size`` bytes of pure user data, hopping
+    sector boundaries via :func:`_flat_to_user_data`. The result is a
+    contiguous bytes view that can be unpacked with ``record_format``
+    at ``i * record_size`` for record ``i``.
+    """
+
+    record_size = struct.calcsize(block.record_format)
+    user_data_size = block.count * record_size
+    out = bytearray(user_data_size)
+    pos = 0
+    while pos < user_data_size:
+        flat = _flat_to_user_data(block.offset, pos)
+        sector_index = flat // SECTOR_SIZE_BYTES
+        sector_user_end = (
+            sector_index * SECTOR_SIZE_BYTES
+            + SECTOR_SIZE_BYTES
+            - SECTOR_EDC_ECC_BYTES
+        )
+        chunk = min(sector_user_end - flat, user_data_size - pos)
+        out[pos:pos + chunk] = rom[flat:flat + chunk]
+        pos += chunk
+    return bytes(out)
 
 
 ROM_AP_ITEM_ENTRY_OFFSET: Final = _table_byte_to_bin_flat(
@@ -2608,6 +3347,192 @@ assert (_entry_end - ROM_AP_ITEM_ENTRY_OFFSET) == ROM_ITEM_TABLE_ENTRY_SIZE - 1,
     f"AP ITEM entry crosses a sector boundary: "
     f"start=0x{ROM_AP_ITEM_ENTRY_OFFSET:08X}, end=0x{_entry_end:08X}"
 )
+
+
+ROM_ITEM_TABLE_ENTRY_COUNT: Final = 0x80  # 128 records in ITEM_PARA
+
+# RAM address where ITEM_PARA is loaded by the BIOS (per SydPatches'
+# SLUS_labels.asm). The merit-shop wrapper writes to this RAM region
+# at runtime to swap slot N's metadata with the "AP Item Bought"
+# sentinel after a purchase. The ROM-side patches (above) only affect
+# the disc image; the BIOS reloads the table from disc on each boot,
+# so save/reload would revert any RAM-only changes — handled by a
+# client-side ticker that pins the sentinel state when the
+# corresponding trigger is set.
+# Bare Nymashock MainRAM offset (no kuseg prefix), matching the
+# convention of every other ``RAM_*`` constant. The wrapper builder
+# (which encodes lui/addiu) ORs in the 0x80000000 prefix to recover
+# the CPU-visible kuseg address.
+RAM_ITEM_PARA: Final = 0x001269DC
+RAM_ITEM_PARA_KUSEG: Final = 0x80000000 | RAM_ITEM_PARA
+
+
+# =============================================================================
+# Merit-Shop AP "AP Item Bought" sentinel slot (always-on)
+# =============================================================================
+#
+# To give the player a visual "you've already bought this AP location"
+# indicator in the Merit Shop, we use a second ITEM_PARA sentinel slot
+# (paralleling the existing chest sentinel at slot 83). The merit-shop
+# wrapper, on a successful AP-tracked purchase, copies this 32-byte
+# entry over the dispatched slot's entry in RAM. The shop's next
+# render then displays the new name + price (= 0).
+#
+# Slot 114 (vanilla "Moon mirror") is documented as "reserved for
+# future use" in :ref:`memory dw1_item_table_layout` — safe to
+# repurpose here. Choosing 114 keeps the chest sentinel (slot 83)
+# uncoupled from the merit-shop sentinel; a player could see both
+# sentinel names in different contexts without confusion.
+#
+# **Pre-purchase rename of dispatched slots** — for each item in
+# :data:`MERIT_SHOP_DISPATCH`, we ALSO patch the .bin's slot-N name
+# field to "AP Item" (without zeroing the rest of the entry — vanilla
+# meritValue and other fields stay). The shop's pre-purchase display
+# becomes "AP Item — vanilla_price". After purchase the wrapper
+# replaces slot-N entirely with slot 114's contents → "AP Item
+# Bought — 0".
+
+AP_SHOP_BOUGHT_SENTINEL_ITEM_ID: Final = 0x72  # 114 = vanilla "Moon mirror"
+AP_SHOP_BOUGHT_NAME: Final = b"AP Item Bought"  # 14 bytes, padded to 20 with NULs
+
+# Two sentinels — same name, different visibility:
+#
+# 1. **ROM sentinel** (:data:`ROM_AP_SHOP_BOUGHT_ENTRY_BYTES`): written
+#    to slot 114 at gen time. ``meritValue == 0`` so the merit shop
+#    filters it out — we replace the gamebreaking vanilla "Moon
+#    mirror" without leaving a visible row.
+# 2. **Visible sentinel** (:data:`AP_SHOP_BOUGHT_VISIBLE_BYTES`):
+#    written *only* by the client-side reconciler to the *bought*
+#    slot. ``meritValue == 0x7FFF`` so the shop renders the row but
+#    the player can never afford it (vanilla merit cap is 9999).
+#
+# Two sentinels are needed because slot 114 (the ROM sentinel) is one
+# of the merit shop's hardcoded inventory entries — making slot 114
+# visible would make the source of the memcpy show up alongside any
+# bought slot, displaying "AP Item Bought" twice. Keeping slot 114
+# hidden and using a different visible sentinel for bought slots
+# avoids the duplicate.
+#
+# Field layout (matches dw1.hpp Item struct):
+#   bytes  0..19: name (ASCII, NUL-padded)
+#   bytes 20..23: value (i32, money price — irrelevant for merit shop)
+#   bytes 24..25: meritValue (i16)
+#   bytes 26..27: sortingValue (i16)
+#   byte  28:     itemColor (u8)
+#   byte  29:     dropable  (u8)
+#   bytes 30..31: unk (u16)
+ROM_AP_SHOP_BOUGHT_ENTRY_BYTES: Final = (
+    AP_SHOP_BOUGHT_NAME.ljust(20, b"\x00") + b"\x00" * 12
+)
+AP_SHOP_BOUGHT_VISIBLE_BYTES: Final = (
+    AP_SHOP_BOUGHT_NAME.ljust(20, b"\x00")
+    + b"\x00\x00\x00\x00"  # value = 0
+    + b"\xFF\x7F"          # meritValue = 32767 (max int16, unaffordable but visible)
+    + b"\x00" * 6          # sortingValue + itemColor + dropable + unk
+)
+assert len(AP_SHOP_BOUGHT_VISIBLE_BYTES) == 32, len(AP_SHOP_BOUGHT_VISIBLE_BYTES)
+
+# --- Post-purchase visible-but-unbuyable meritValue --------------------
+# After a merit-shop AP-Item purchase the client-side reconciler bumps
+# *just* the meritValue field of the dispatched slot (offset 24-25
+# within the 32-byte ITEM_PARA entry) to this value. The shop keeps
+# rendering the row (because meritValue != 0), the player can navigate
+# to it, but they can never afford it (vanilla merit cap is 9999).
+# **Crucially the row's name is left untouched** — for slot 83 that
+# means it stays "AP Item" everywhere, including chest pickup
+# textboxes where slot 83 is the chest sentinel.
+AP_ITEM_BOUGHT_MERIT_VALUE: Final = 0x7FFF  # max int16
+AP_ITEM_BOUGHT_MERIT_VALUE_BYTES: Final = (
+    AP_ITEM_BOUGHT_MERIT_VALUE.to_bytes(2, "little", signed=True)
+)
+ITEM_PARA_MERIT_VALUE_OFFSET: Final = 24  # bytes 24..25 of the 32-byte entry
+assert len(ROM_AP_SHOP_BOUGHT_ENTRY_BYTES) == ROM_ITEM_TABLE_ENTRY_SIZE, (
+    len(ROM_AP_SHOP_BOUGHT_ENTRY_BYTES)
+)
+
+ROM_AP_SHOP_BOUGHT_ENTRY_OFFSET: Final = _table_byte_to_bin_flat(
+    AP_SHOP_BOUGHT_SENTINEL_ITEM_ID * ROM_ITEM_TABLE_ENTRY_SIZE,
+)
+# Sanity: 32-byte slot must not straddle a sector boundary.
+_bought_entry_end = _table_byte_to_bin_flat(
+    AP_SHOP_BOUGHT_SENTINEL_ITEM_ID * ROM_ITEM_TABLE_ENTRY_SIZE
+    + ROM_ITEM_TABLE_ENTRY_SIZE - 1,
+)
+assert (_bought_entry_end - ROM_AP_SHOP_BOUGHT_ENTRY_OFFSET) == ROM_ITEM_TABLE_ENTRY_SIZE - 1, (
+    f"slot 114 entry crosses a sector boundary: "
+    f"start=0x{ROM_AP_SHOP_BOUGHT_ENTRY_OFFSET:08X}, end=0x{_bought_entry_end:08X}"
+)
+
+# RAM address of slot 114's entry (= source for the runtime memcpy).
+# Bare Nymashock offset; the wrapper builder ORs in the kuseg prefix
+# when emitting the lui/addiu pair.
+AP_SHOP_BOUGHT_SENTINEL_RAM: Final = (
+    RAM_ITEM_PARA + AP_SHOP_BOUGHT_SENTINEL_ITEM_ID * ROM_ITEM_TABLE_ENTRY_SIZE
+)
+assert AP_SHOP_BOUGHT_SENTINEL_RAM == 0x0012781C
+
+# Pre-purchase name "AP Item" written into each dispatched slot's name
+# field at gen time. Just the name (20 bytes) — leaves the slot's
+# original price/sort/etc. intact so the pre-purchase shop display is
+# "AP Item — vanilla_price". Currently MERIT_SHOP_DISPATCH only
+# contains slot 83, whose name is already "AP Item" via
+# :data:`ROM_AP_ITEM_ENTRY_BYTES`, so this rewrite is idempotent for
+# slot 83. Kept in place because future MERIT_SHOP_DISPATCH entries
+# that target *real* item slots (which we don't want to fully
+# overwrite) will need just the name override.
+AP_SHOP_PRESALE_NAME: Final = b"AP Item"
+ROM_AP_SHOP_PRESALE_NAME_BYTES: Final = AP_SHOP_PRESALE_NAME.ljust(20, b"\x00")
+assert len(ROM_AP_SHOP_PRESALE_NAME_BYTES) == 20
+
+
+# =============================================================================
+# Hide vanilla Amazing Rod from the merit shop
+# =============================================================================
+#
+# Vanilla DW1 sells Amazing Rod (slot 117) at the merit shop. With the
+# AP Item now living at slot 83, we don't want vanilla Amazing Rod to
+# also appear in the shop's row list. The merit shop's row scan
+# (function 0x801072C4) walks ITEM_PARA and includes any entry whose
+# ``meritValue > 0``. Zeroing slot 117's ``meritValue`` (i16 at
+# entry-byte offset 24-25) removes it from the scan without disturbing
+# any other field — so the rod's name, icon, description, and money
+# ``value`` (used by the regular money shops, if any) all stay vanilla.
+
+# Slot 117's meritValue field at sector-aware .bin offset.
+ROM_AMAZING_ROD_HIDE_OFFSET: Final = _table_byte_to_bin_flat(
+    117 * ROM_ITEM_TABLE_ENTRY_SIZE + 24,  # offset 24 = meritValue
+)
+ROM_AMAZING_ROD_HIDE_BYTES: Final = b"\x00\x00"  # meritValue = 0 (i16 LE)
+
+
+def read_item_table_user_data(rom: bytes) -> bytes:
+    """Extract ITEM_PARA's 4 KiB of user data from a flat BIN.
+
+    Convenience wrapper around :func:`_read_struct_block_user_data`
+    pinned to :data:`ROM_ITEM_DATA`.
+    """
+
+    return _read_struct_block_user_data(rom, ROM_ITEM_DATA)
+
+
+def read_digimon_table_user_data(rom: bytes) -> bytes:
+    """Extract DIGIMON_PARA's user-data records from a flat BIN.
+
+    180 records of 52 bytes each = 9360 bytes. Caller unpacks per-record
+    via ``ROM_DIGIMON_DATA.record_format``.
+    """
+
+    return _read_struct_block_user_data(rom, ROM_DIGIMON_DATA)
+
+
+def read_technique_table_user_data(rom: bytes) -> bytes:
+    """Extract TECH_PARA's user-data records from a flat BIN.
+
+    121 records of 16 bytes each = 1936 bytes. Caller unpacks via
+    ``ROM_TECHNIQUE_DATA.record_format``.
+    """
+
+    return _read_struct_block_user_data(rom, ROM_TECHNIQUE_DATA)
 
 # Each entry below is the ROM offset of the chest's spawnChest opcode
 # (byte 0). The item-ID byte we want to overwrite lives at offset+1.
@@ -2761,6 +3686,399 @@ assert ROM_SETTRIGGER_PATCH_VALUE[0] == 0x080255F7, hex(ROM_SETTRIGGER_PATCH_VAL
 
 
 # =============================================================================
+# Merit Shop give-item wrapper (always-on)
+# =============================================================================
+#
+# The ShogunGekomon Merit Shop in Volume Villa is engine-driven (not
+# script-bytecode driven), so we can't use the ``giveItem N → setTrigger N'``
+# substitution that worked for the cutscene-style key items. The shop's
+# give-item callsite was located by static RE: at .bin flat 0x14D48C04
+# (RAM 0x8010BF3C, verified live 2026-05-09 via RAM dump signature scan
+# in `worlds/digimon_world/tools/dw1_ram_dump.lua` and a 28-byte unique
+# signature match) the merit-shop function does ``jal 0x800C5240`` (the
+# vanilla give-item function) with $a0=item_id, $a1=count.
+#
+# We hijack that jal to point at our wrapper in SydPatches' Cave6 free
+# space. The wrapper:
+#
+#   1. Saves $ra, $a0 (item_id), $a1 (count) to a temporary stack frame.
+#   2. For each (item_id, trigger_id) in :data:`MERIT_SHOP_DISPATCH`:
+#      compares $a0 to item_id; if equal, calls ``setTrigger(trigger_id)``
+#      and restores $a0 from the saved slot afterward.
+#   3. Restores $ra and $a1, tears down the frame, and tail-calls
+#      vanilla give-item via ``j 0x800C5240`` (NOT jal — the inherited
+#      $ra goes back to the merit-shop function, exactly as if the
+#      wrapper weren't there).
+#
+# Per-item dispatch is **extensible**: append entries to
+# :data:`MERIT_SHOP_DISPATCH` to wire other Merit-Shop items as AP
+# locations. Each entry adds 6 instructions (24 bytes) to the wrapper.
+# Cave6 has ~5012 bytes free after our existing wrappers, so all 12
+# Merit-Shop items would fit (+288 bytes for 12 entries × 24).
+#
+# The wrapper sits at RAM 0x80095800 (.bin offset 0x14CC0C88 — sector
+# hop required, see ROM_MERIT_SHOP_WRAPPER_OFFSET below), 64 bytes
+# past the chest wrapper (28 B used at 0x800957C0) and the
+# setTrigger wrapper (32 B at 0x800957DC). 4-byte aligned.
+# Caller-saved convention: setTrigger may clobber $a0/$a1, so the
+# wrapper saves both around the setTrigger call.
+
+# Each entry = (item_id, trigger_id). The wrapper iterates these in
+# order at the give-item callsite. If the in-game item ID matches an
+# entry's item_id, the wrapper calls setTrigger(trigger_id) before
+# the vanilla give-item runs. Add entries here to extend AP-location
+# coverage to other Merit-Shop items.
+MERIT_SHOP_DISPATCH: Final[tuple[tuple[int, int], ...]] = (
+    # Slot 83 (universal "AP Item" sentinel — also the chest sentinel)
+    # is the merit shop's AP-purchase row. Setting trigger 903 fires
+    # the AP location ``Amazing Rod Pickup``. Uses slot 83 instead of
+    # slot 117 (vanilla Amazing Rod) so the rod's ITEM_PARA entry stays
+    # untouched (icon/name/desc preserved for fishing UI etc.). The
+    # merit shop scans ITEM_PARA for entries with non-zero
+    # ``meritValue``; slot 83 has ``meritValue = AP_ITEM_MERIT_PRICE``
+    # (set in :data:`ROM_AP_ITEM_ENTRY_BYTES`), and slot 117 is hidden
+    # by zeroing its meritValue (see :data:`ROM_AMAZING_ROD_HIDE_*`).
+    (AP_CHEST_SENTINEL_ITEM_ID, AMAZING_ROD_LOCATION_TRIGGER_ID),
+)
+
+ROM_MERIT_SHOP_WRAPPER_RAM: Final = 0x80095800
+# Bin offset must hop the Mode2/2352 sector boundary at RAM 0x80095800.
+# RAM 0x800957C0..0x80095800 fits inside sector 148348's user data; RAM
+# 0x80095800 is the first byte of sector 148349's user data. A flat
+# ``chest_wrapper_offset + 0x40`` (= 0x14CC0B58) lands inside sector
+# 148348's EDC region, which is *never* loaded into RAM as code — the
+# wrapper bytes get written to disc but the CPU never executes them, so
+# the merit shop's ``jal wrapper`` jumps to whatever uninitialized data
+# happens to be at RAM 0x80095800 and the game freezes. The sector-hop
+# helper computes the correct destination.
+ROM_MERIT_SHOP_WRAPPER_OFFSET: Final = _flat_to_user_data(
+    ROM_CHEST_GIVEITEM_WRAPPER_OFFSET,
+    ROM_MERIT_SHOP_WRAPPER_RAM - ROM_CHEST_GIVEITEM_WRAPPER_RAM,
+)
+assert ROM_MERIT_SHOP_WRAPPER_OFFSET == 0x14CC0C88, hex(ROM_MERIT_SHOP_WRAPPER_OFFSET)
+
+
+def _build_merit_shop_wrapper_bytes() -> bytes:
+    """Build the merit-shop wrapper's MIPS bytecode from the
+    :data:`MERIT_SHOP_DISPATCH` table.
+
+    **Behavior:**
+
+    * Item NOT in dispatch table → fall through to ``j giveItem`` →
+      vanilla item delivery happens normally.
+    * Item IS in dispatch table → ``setTrigger(trigger_id)`` fires
+      (AP location signal) → 32-byte memcpy of slot 114
+      ("AP Item Bought" sentinel) over the dispatched slot in RAM
+      ITEM_PARA → ``jr $ra`` returns to caller WITHOUT delivering the
+      item. After this, the shop's next render shows
+      ``AP Item Bought — 0`` for that slot.
+
+    Layout (N = ``len(MERIT_SHOP_DISPATCH)`` → 38 + 7N instructions):
+
+        prologue (4 instrs, 16 B):
+            addiu $sp, $sp, -0x10
+            sw    $ra, 0x0C($sp)
+            sw    $a0, 0x08($sp)
+            sw    $a1, 0x04($sp)
+
+        per-entry block (7 instrs, 28 B):
+            addiu $at, $0, item_id
+            bne   $a0, $at, +5     ; skip 5 instrs if no match
+            nop                     ; bne delay slot
+            jal   0x801065C0       ; setTrigger(trigger_id)
+            addiu $a0, $0, trigger_id  ; jal delay slot
+            j     mark_bought      ; on match: copy sentinel + return
+            nop                     ; j delay slot
+
+        give_item path (6 instrs, 24 B) — fall-through for unmatched:
+            lw    $ra, 0x0C($sp)
+            lw    $a0, 0x08($sp)
+            lw    $a1, 0x04($sp)
+            addiu $sp, $sp, 0x10
+            j     0x800C5240       ; tail-call vanilla giveItem
+            nop
+
+        mark_bought path (28 instrs, 112 B) — match jumps here:
+            lw    $a0, 0x08($sp)   ; restore item_id (clobbered by setTrigger)
+            sll   $t2, $a0, 5      ; t2 = item_id * 32
+            lui   $t1, 0x8012
+            addiu $t1, $t1, 0x69DC ; t1 = ITEM_PARA base
+            addu  $t2, $t2, $t1    ; t2 = ITEM_PARA + item_id*32 (dest)
+            lui   $t0, 0x8012
+            addiu $t0, $t0, 0x781C ; t0 = AP_SHOP_BOUGHT_SENTINEL_RAM (source)
+            (8 × {lw $t3, +N($t0); sw $t3, +N($t2)}  for N in {0,4,8,...,28})
+            lw    $ra, 0x0C($sp)
+            lw    $a1, 0x04($sp)
+            addiu $sp, $sp, 0x10
+            jr    $ra              ; return without item delivery
+            nop
+
+    Calling convention: the wrapper preserves $ra/$a1. On the
+    fall-through (no match) path it also restores $a0 before
+    tail-calling giveItem. On the match path $a0 is restored from
+    stack (since setTrigger clobbered it) so we can compute the
+    destination ITEM_PARA slot.
+    """
+
+    import struct as _struct
+
+    SETTRIGGER_RAM = 0x801065C0
+    GIVEITEM_RAM = 0x800C5240
+    # MIPS lui/addiu encoding needs the CPU-visible kuseg address; the
+    # bare RAM_ITEM_PARA / AP_SHOP_BOUGHT_SENTINEL_RAM constants are
+    # for client-side bizhawk.read calls (which use bare offsets).
+    ITEM_PARA_BASE = 0x80000000 | RAM_ITEM_PARA          # 0x801269DC
+    SENTINEL_RAM = 0x80000000 | AP_SHOP_BOUGHT_SENTINEL_RAM  # 0x8012781C
+
+    n_entries = len(MERIT_SHOP_DISPATCH)
+    # mark_bought RAM address = wrapper start + prologue (16) + per-entry
+    # blocks (28 * N) + give_item path (24).
+    mark_bought_offset = 0x10 + 28 * n_entries + 0x18
+    mark_bought_ram = ROM_MERIT_SHOP_WRAPPER_RAM + mark_bought_offset
+    j_mark = 0x08000000 | ((mark_bought_ram >> 2) & 0x03FFFFFF)
+    j_giveitem = 0x08000000 | ((GIVEITEM_RAM >> 2) & 0x03FFFFFF)
+    jal_settrigger = 0x0C000000 | ((SETTRIGGER_RAM >> 2) & 0x03FFFFFF)
+
+    # ITEM_PARA_BASE and SENTINEL_RAM are loaded via lui+addiu — verify
+    # that the lower 16 bits would sign-extend correctly.
+    if (ITEM_PARA_BASE & 0xFFFF) >= 0x8000:
+        raise ValueError(
+            f"ITEM_PARA_BASE low half 0x{ITEM_PARA_BASE & 0xFFFF:04X} would "
+            f"need sign-extension; the addiu encoding here assumes a "
+            f"non-negative 16-bit literal."
+        )
+    if (SENTINEL_RAM & 0xFFFF) >= 0x8000:
+        raise ValueError(
+            f"SENTINEL_RAM low half 0x{SENTINEL_RAM & 0xFFFF:04X} would "
+            f"need sign-extension"
+        )
+
+    out = bytearray()
+
+    # --- Prologue -----------------------------------------------------------
+    out += _struct.pack("<I", 0x27BDFFF0)  # addiu $sp, $sp, -0x10
+    out += _struct.pack("<I", 0xAFBF000C)  # sw    $ra, 0x0C($sp)
+    out += _struct.pack("<I", 0xAFA40008)  # sw    $a0, 0x08($sp)
+    out += _struct.pack("<I", 0xAFA50004)  # sw    $a1, 0x04($sp)
+
+    # --- Per-entry blocks ---------------------------------------------------
+    # bne offset = 5: skip the next 5 instructions (= the 5 instructions
+    # after the bne delay slot in this block, landing on the next block's
+    # first instruction or the give_item path's first instruction).
+    BNE_OFFSET_5 = 0x14810005
+    for item_id, trigger_id in MERIT_SHOP_DISPATCH:
+        if not (0 <= item_id <= 0xFF):
+            raise ValueError(f"item_id {item_id} out of u8 range")
+        if not (0 <= trigger_id <= 0xFFFF):
+            raise ValueError(f"trigger_id {trigger_id} out of u16 range")
+        # addiu $at, $0, item_id
+        out += _struct.pack("<I", 0x24010000 | (item_id & 0xFFFF))
+        # bne $a0, $at, +5  (no-match: jump to next block / give_item path)
+        out += _struct.pack("<I", BNE_OFFSET_5)
+        # nop (bne delay slot)
+        out += _struct.pack("<I", 0x00000000)
+        # jal setTrigger
+        out += _struct.pack("<I", jal_settrigger)
+        # addiu $a0, $0, trigger_id (jal delay slot)
+        out += _struct.pack("<I", 0x24040000 | (trigger_id & 0xFFFF))
+        # j mark_bought (match path: copy sentinel + return without giveItem)
+        out += _struct.pack("<I", j_mark)
+        # nop (j delay slot)
+        out += _struct.pack("<I", 0x00000000)
+
+    # --- give_item path (no-match fall-through) ----------------------------
+    out += _struct.pack("<I", 0x8FBF000C)  # lw    $ra, 0x0C($sp)
+    out += _struct.pack("<I", 0x8FA40008)  # lw    $a0, 0x08($sp)
+    out += _struct.pack("<I", 0x8FA50004)  # lw    $a1, 0x04($sp)
+    out += _struct.pack("<I", 0x27BD0010)  # addiu $sp, $sp, 0x10
+    out += _struct.pack("<I", j_giveitem)  # j     0x800C5240
+    out += _struct.pack("<I", 0x00000000)  # nop   (j delay slot)
+
+    # --- mark_bought path (match jumps here) -------------------------------
+    # Compute dest = ITEM_PARA + item_id * 32, then memcpy 32 bytes from
+    # the AP-shop-bought sentinel into the dispatched slot. Returns
+    # without calling vanilla giveItem.
+    item_para_hi = (ITEM_PARA_BASE >> 16) & 0xFFFF  # 0x8012
+    item_para_lo = ITEM_PARA_BASE & 0xFFFF          # 0x69DC
+    sentinel_hi = (SENTINEL_RAM >> 16) & 0xFFFF     # 0x8012
+    sentinel_lo = SENTINEL_RAM & 0xFFFF             # 0x781C
+
+    # lw    $a0, 0x08($sp)        — restore item_id (clobbered by setTrigger).
+    out += _struct.pack("<I", 0x8FA40008)
+    # sll   $t2, $a0, 5            — t2 = item_id * 32 (= entry-byte offset).
+    out += _struct.pack("<I", 0x00045140)
+    # lui   $t1, item_para_hi      — t1 = ITEM_PARA_BASE upper half.
+    out += _struct.pack("<I", 0x3C090000 | item_para_hi)
+    # addiu $t1, $t1, item_para_lo — t1 = ITEM_PARA_BASE.
+    out += _struct.pack("<I", 0x25290000 | item_para_lo)
+    # addu  $t2, $t2, $t1          — t2 = dest = ITEM_PARA + item_id*32.
+    out += _struct.pack("<I", 0x01495021)
+    # lui   $t0, sentinel_hi       — t0 = SENTINEL_RAM upper half.
+    out += _struct.pack("<I", 0x3C080000 | sentinel_hi)
+    # addiu $t0, $t0, sentinel_lo  — t0 = source = AP_SHOP_BOUGHT_SENTINEL_RAM.
+    out += _struct.pack("<I", 0x25080000 | sentinel_lo)
+    # 8 × { lw $t3, +N($t0); sw $t3, +N($t2) }  for N in {0,4,...,28}.
+    for off in (0, 4, 8, 12, 16, 20, 24, 28):
+        # lw $t3, N($t0)  — opcode 0x23, rs=$t0(8), rt=$t3(11), imm=N
+        out += _struct.pack("<I", 0x8D0B0000 | off)
+        # sw $t3, N($t2)  — opcode 0x2B, rs=$t2(10), rt=$t3(11), imm=N
+        out += _struct.pack("<I", 0xAD4B0000 | off)
+    # lw    $ra, 0x0C($sp)
+    out += _struct.pack("<I", 0x8FBF000C)
+    # lw    $a1, 0x04($sp)
+    out += _struct.pack("<I", 0x8FA50004)
+    # addiu $sp, $sp, 0x10
+    out += _struct.pack("<I", 0x27BD0010)
+    # jr    $ra
+    out += _struct.pack("<I", 0x03E00008)
+    # addiu $v0, $0, 1  (jr delay slot — return success so the merit
+    # shop continues normally instead of taking the "no inventory
+    # space" failure branch on the AP-Item purchase. Mirrors the chest
+    # wrapper's success return at the same shape; vanilla giveItem
+    # returns 1 on success, and we want the shop to behave as if the
+    # item was successfully delivered even though we deliberately
+    # skipped the inventory write.)
+    out += _struct.pack("<I", 0x24020001)
+
+    return bytes(out)
+
+
+ROM_MERIT_SHOP_WRAPPER_BYTES: Final = _build_merit_shop_wrapper_bytes()
+
+# Sanity: 4 prologue + 6 give_item + 28 mark_bought + 7 per dispatch entry.
+assert len(ROM_MERIT_SHOP_WRAPPER_BYTES) == (38 + 7 * len(MERIT_SHOP_DISPATCH)) * 4, (
+    len(ROM_MERIT_SHOP_WRAPPER_BYTES), len(MERIT_SHOP_DISPATCH),
+)
+
+
+def _merit_shop_presale_name_offset(item_id: int) -> int:
+    """Sector-aware .bin offset of slot ``item_id``'s name field within
+    ITEM_PARA. Used by the patcher to rename each dispatched slot to
+    ``"AP Item"`` at gen time so the pre-purchase shop display reads
+    ``AP Item — vanilla_price`` instead of revealing the underlying
+    DW1 item."""
+    return _table_byte_to_bin_flat(item_id * ROM_ITEM_TABLE_ENTRY_SIZE)
+
+
+# Patch site: replace the merit-shop function's ``jal 0x800C5240`` with
+# ``jal ROM_MERIT_SHOP_WRAPPER_RAM``. Single 4-byte rewrite at the
+# in-RAM RAM 0x8010BF3C (= .bin flat 0x14D48C04). The post-jal nop
+# delay-slot at offset+4 stays as-is (vanilla nop, matches what we
+# need).
+
+ROM_MERIT_SHOP_PATCH_FORMAT: Final = "<I"
+ROM_MERIT_SHOP_PATCH_OFFSET: Final = 0x14D48C04
+ROM_MERIT_SHOP_PATCH_VALUE: Final = (
+    0x0C000000 | ((ROM_MERIT_SHOP_WRAPPER_RAM >> 2) & 0x03FFFFFF)
+)
+assert ROM_MERIT_SHOP_PATCH_VALUE == 0x0C025600, hex(ROM_MERIT_SHOP_PATCH_VALUE)
+
+
+# =============================================================================
+# AP Item description + icon blank (always-on)
+# =============================================================================
+#
+# DW1 displays an item's description from ``ITEM_DESC_PTR[item_id]`` (in
+# the inventory and merit-shop hover panels). For our AP-Item slot
+# (item 83 — was Electo Ring, now repurposed as the universal "AP
+# Item" sentinel for both chests and the merit shop), the vanilla
+# Electo Ring description doesn't fit. We replace it with a generic
+# "Item from the multiworld" string allocated in Cave6 free space and
+# redirect the ``ITEM_DESC_PTR[83]`` pointer to it.
+#
+# Similarly the merit shop (and inventory) renders item icons by
+# looking up ``ITEM.TIM`` at ``(col=item_id%16, row=item_id/16)`` (per
+# ``InventoryUI.cpp:setItemTexture``). For item 83 that's row 5,
+# col 3 — Electo Ring's icon. We just zero out the 16x16 region in
+# ITEM.TIM so the slot renders blank. Slot 83 is unused in normal
+# play (Electo Ring is gamebreaking and unobtainable), so blanking
+# its icon doesn't affect anything else.
+#
+# Slot 117 (Amazing Rod) stays completely untouched — its name,
+# description, and icon all remain vanilla, so the fishing UI etc.
+# render the rod normally.
+
+# --- Description string + pointer redirect ---------------------------------
+AP_ITEM_DESC_STRING: Final = b"Item from the multiworld\x00"  # 25 bytes incl NUL
+
+# Stored in Cave6 free space, immediately after the merit shop wrapper.
+# 4-byte aligned (wrapper size is a multiple of 4).
+AP_ITEM_DESC_RAM: Final = (
+    ROM_MERIT_SHOP_WRAPPER_RAM + len(ROM_MERIT_SHOP_WRAPPER_BYTES)
+)
+AP_ITEM_DESC_BIN_OFFSET: Final = _flat_to_user_data(
+    ROM_CHEST_GIVEITEM_WRAPPER_OFFSET,
+    AP_ITEM_DESC_RAM - ROM_CHEST_GIVEITEM_WRAPPER_RAM,
+)
+
+# ITEM_DESC_PTR is the 128-entry array of u32 pointers immediately
+# after ITEM_PARA in RAM: ITEM_PARA spans 0x801269DC..0x801279DC
+# (128 × 32 bytes), so ITEM_DESC_PTR starts at 0x801279DC. Entry 117's
+# pointer lives at byte_offset_from_ITEM_PARA = 128*32 + 117*4 = 4564
+# (= 0x11D4). We sector-translate via the same helper used for the
+# chest sentinel slot rewrites.
+AP_ITEM_DESC_PTR_INDEX: Final = 83
+AP_ITEM_DESC_PTR_BIN_OFFSET: Final = _table_byte_to_bin_flat(
+    128 * ROM_ITEM_TABLE_ENTRY_SIZE + AP_ITEM_DESC_PTR_INDEX * 4,
+)
+# CPU sees ITEM_DESC_PTR entries as kuseg addresses, so OR in the prefix.
+AP_ITEM_DESC_PTR_VALUE: Final = 0x80000000 | AP_ITEM_DESC_RAM
+ROM_AP_ITEM_DESC_PTR_PATCH_FORMAT: Final = "<I"
+
+# --- ITEM.TIM icon blanking ------------------------------------------------
+#
+# ITEM.TIM is a separate file in the disc filesystem
+# (``DIGIMON/ETCDAT/ITEM.TIM``). Its data starts at LBA 7470 in the
+# .bin (= ``LBA * 2352 + 24`` = bin offset 0x010C16B8). The TIM
+# header is 8 bytes; the CLUT block is 780 bytes (24 CLUTs × 16
+# colors × 2 bytes + 12-byte block header); the pixel block header is
+# 12 bytes. So pixel data starts at TIM file offset 800 (= 0x320).
+#
+# Pixel data is 4bpp (2 pixels per byte), arranged as a 256x128
+# texture (16 cols × 8 rows of 16x16 icons). Each scanline is
+# 256 / 2 = 128 bytes. Item N's icon occupies the 16x16 block at
+# pixel coords (col*16, row*16) where col = N%16, row = N/16.
+#
+# For each of the 16 rows of the icon, the 8 bytes (= 16 px wide × 4bpp)
+# live at file offset:
+#   PIXEL_DATA_OFFSET + (row*16 + r) * 128 + col * 8
+# for r in 0..15. We sector-translate each row offset to a .bin offset
+# (file offsets cross sector boundaries every 2048 bytes of user data).
+
+ITEM_TIM_LBA: Final = 7470
+ITEM_TIM_PIXEL_DATA_FILE_OFFSET: Final = 800
+
+AP_ITEM_ICON_INDEX: Final = 83
+AP_ITEM_ICON_ROW_BYTES: Final = bytes(8)  # 16 transparent pixels per icon row
+
+
+def _ap_item_icon_blank_offsets() -> tuple[int, ...]:
+    """Per-row .bin offsets for item 117's 16 icon rows (16x16 4bpp).
+
+    Sector-aware: each row's 8-byte chunk lives at a different sector
+    when the surrounding scanline crosses a 2048-byte user-data
+    boundary.
+    """
+
+    col = AP_ITEM_ICON_INDEX % 16
+    row = AP_ITEM_ICON_INDEX // 16
+    out: list[int] = []
+    for r in range(16):
+        scanline_pixel_offset = (row * 16 + r) * 128 + col * 8
+        file_offset = ITEM_TIM_PIXEL_DATA_FILE_OFFSET + scanline_pixel_offset
+        sector_advance, byte_in_sector = divmod(file_offset, USER_DATA_BYTES)
+        out.append(
+            (ITEM_TIM_LBA + sector_advance) * SECTOR_SIZE_BYTES
+            + SECTOR_HEADER_BYTES + byte_in_sector,
+        )
+    return tuple(out)
+
+
+AP_ITEM_ICON_BLANK_BIN_OFFSETS: Final = _ap_item_icon_blank_offsets()
+assert len(AP_ITEM_ICON_BLANK_BIN_OFFSETS) == 16
+
+
+# =============================================================================
 # Recruit-bit RAM addresses (per-Digimon, Phase 5 piece C)
 # =============================================================================
 #
@@ -2820,12 +4138,46 @@ assert _beaten_bytes.isdisjoint(_chest_bytes), (
 AGUMON_RECRUIT_BIT: Final[tuple[int, int]] = RECRUIT_RAM_BITS["Agumon"]
 
 # AP-item Digimon = every recruit *except* Agumon (force-recruited bank
-# NPC) and Digitamamon (post-game optional goal, not an AP location).
-_AP_RECRUIT_EXCLUDED: Final = frozenset({"Agumon", "Digitamamon"})
+# NPC), Digitamamon (post-game optional goal, not an AP location), and
+# the dropped recruits below.
+#
+# **Dropped 2026-05-08**: Airdramon is excluded from the AP pool because
+# its only recruit-bit set site is the endgame Analogman/Mt. Infinity
+# cutscene (Script 184 ``setTrigger 207``) — there is no in-town fight
+# or chained quest that would make a useful AP location. The name stays
+# in :data:`RECRUIT_RAM_BITS` (it's part of the vanilla recruit
+# bit-block) but is filtered out everywhere AP cares: no
+# ``Airdramon Recruit`` item, no AP location at the cutscene, no bit
+# poll in :data:`LOCATION_RAM_BITS`. Airdramon's bytecode reads of
+# ``trigger(207)`` are NOT in the visibility-patch tables below — vanilla
+# logic stays untouched, so Airdramon appears in town iff vanilla DW1
+# would show him.
+_AP_RECRUIT_EXCLUDED: Final = frozenset({
+    "Agumon", "Digitamamon", "Airdramon",
+    # Seadramon: dropped 2026-05-09 — Seadramon doesn't really do
+    # anything in town, and his "recruit" cutscene is the same in-game
+    # event as obtaining the Blue Flute. Per user direction, the
+    # AP-recruit reward goes away; the cutscene fires the new
+    # ``Blue Flute Pickup`` keyitem AP location instead (polls the
+    # same trigger 210 bit). See addresses.py
+    # ``BLUE_FLUTE_LOCATION_BIT``.
+    "Seadramon",
+    # 2026-05-09 — Phase-7 recruit-bundling rework:
+    # Nanimon — per the recruitment guide, Nanimon drops keychains but
+    # doesn't actually appear as a city NPC ("doesn't actually join
+    # the city"). No AP location, no AP item, no city-visibility bit
+    # tracking.
+    "Nanimon",
+    # Giromon — his in-town effect creates a Jukebox in the Restaurant
+    # which **crashes the NTSC (US) build** per the recruitment guide.
+    # Effectively non-functional in our target build, so dropping
+    # both the AP location and the AP item.
+    "Giromon",
+})
 AP_RECRUIT_ITEM_DIGIMON: Final[tuple[str, ...]] = tuple(
     name for name in RECRUIT_RAM_BITS if name not in _AP_RECRUIT_EXCLUDED
 )
-assert len(AP_RECRUIT_ITEM_DIGIMON) == 48, len(AP_RECRUIT_ITEM_DIGIMON)
+assert len(AP_RECRUIT_ITEM_DIGIMON) == 44, len(AP_RECRUIT_ITEM_DIGIMON)
 
 
 # =============================================================================
@@ -2955,6 +4307,115 @@ def _build_city_bitmap() -> bytes:
 
 ROM_CITY_BITMAP_BYTES: Final = _build_city_bitmap()
 assert len(ROM_CITY_BITMAP_BYTES) == 32, len(ROM_CITY_BITMAP_BYTES)
+
+
+# ----- Screen ID → MAP filename ---------------------------------------------
+#
+# DW1 stores each screen's ``.MAP`` filename (10 ASCII bytes) at the start of
+# every record in the ``MAP_ENTRIES[255]`` table at RAM ``0x801292D4`` (struct
+# layout: ``uint8_t filename[10]; int8_t num8bppImages; int8_t num4bppImages;
+# uint8_t flags; uint8_t doorsId; uint8_t toiletId; uint8_t loadingName;``,
+# 16 bytes per record — see ``references/DW1-SydPatches/src/extern/dw1.hpp:914``).
+#
+# These filenames are the **absolute ground truth** for what area each screen
+# is — superseding both DWAP's hand-maintained name list (which has stale or
+# missing entries — e.g. screen 21 = MIHA03 = Mt. Panorama is labeled
+# "Unused, Unknown" by DWAP) and script-text dialog inference (which can
+# match across copy-pasted dialogs).
+#
+# Captured from a live BizHawk RAM dump 2026-05-09 (any save state with the
+# table populated; the data never changes between BINs of vanilla USA
+# SLUS-01032). Entries 239..246 + 250..252 are blanked (no map at that
+# screen ID — likely cut content / placeholders).
+#
+# **Prefix decode** (Japanese romaji unless noted):
+#   * ``MAYO`` — Native Forest (Mayoi no Mori = "forest of wandering")
+#   * ``TROP`` — Tropical Jungle
+#   * ``MIHA`` — Mt. Panorama (Miharashi-yama = "lookout mountain")
+#   * ``TUNN`` — Drill / Meramon Tunnel / Lava Cave
+#   * ``GCAN`` — Great Canyon
+#   * ``OGRE`` — Ogre Fortress + Secret Beach Cave (the Ogremon files are
+#     reused for the secret cave despite the cave being a separate area)
+#   * ``YAKA`` — Grey Lord's Mansion (Yakata = "mansion")
+#   * ``OMOC`` — Toy Town / Toy Mansion (Omocha = "toy")
+#   * ``FACT`` — Factorial Town
+#   * ``GOMI`` — Trash Mountain (Gomi = "trash")
+#   * ``KODA`` — Ancient Speedy Region (Kodai = "ancient")
+#   * ``FRZL`` — Freezeland
+#   * ``ICSA`` — Ice Sanctuary
+#   * ``BETL`` — Beetle Land
+#   * ``LEOM`` — Leomon's Ancestor Cave / Native Forest sub-area
+#   * ``MIST`` — Misty Trees
+#   * ``GIAS`` — Gear Savanna (Giasabanna)
+#   * ``GKYO`` — Geko Swamp
+#   * ``TWNA`` / ``TWNB`` — File City Top / Bottom (Town A / Town B)
+#   * ``MGEN`` — Mt. Infinity + Back Dimension (Mugen = "infinity"; Back
+#     Dimension reuses Mt. Infinity-style maps as MGEN11..MGEN16)
+#   * ``ROOM`` — generic interiors (Jijimon's House variants, shops,
+#     clinic, restaurant). Notably:
+#       - screen 205 = ``ROOM10`` = Jijimon's House Expanded Model
+#       - screen 218 = ``ROOM08`` = Jijimon's House Base Model
+#       - screen 211 = ``ROOM02`` = Item Keeper
+#       - screen 213 = ``ROOM04`` = Centar Clinic
+#   * ``TEND`` / ``TOPN`` — Final / Initial cutscene rooms
+#   * ``STIC``, ``CHKA``, ``SAIB``, ``TRAI``, ``DGHA`` — minor sub-areas,
+#     prefix meaning not yet decoded.
+
+SCREEN_FILENAMES: Final[dict[int, str]] = {
+    0: "MAYO01",   1: "MAYO02",   2: "MAYO03",   3: "MAYO04A",  4: "MAYO04B",
+    5: "MAYO05",   6: "MAYO06",   7: "MAYO11",   8: "MAYO10",   9: "MAYO08A",
+    10: "MAYO08B", 11: "TROP00",  12: "TROP01",  13: "TROP02",  14: "TROP03",
+    15: "TROP04",  16: "TROP05",  17: "TROP06",  18: "MIHA00",  19: "MIHA01",
+    20: "MIHA02",  21: "MIHA03",  22: "MIHA04A", 23: "MIHA04B", 24: "TUNN01",
+    25: "TUNN02",  26: "TUNN03",  27: "TUNN04",  28: "TUNN05",  29: "TUNN06",
+    30: "TUNN07",  31: "TUNN08",  32: "TUNN09",  33: "TUNN10",  34: "DGHA01",
+    35: "DGHA02",  36: "GCAN01",  37: "GCAN02",  38: "GCAN03",  39: "GCAN04",
+    40: "GCAN05",  41: "GCAN06",  42: "GCAN07",  43: "GCAN08_1",44: "GCAN09",
+    45: "OGRE00",  46: "OGRE01",  47: "OGRE02",  48: "OGRE03",  49: "GCAN11",
+    50: "YAKA01",  51: "YAKA02",  52: "YAKA11A", 53: "YAKA11B", 54: "YAKA12",
+    55: "YAKA13",  56: "YAKA14",  57: "YAKA15",  58: "YAKA16",  59: "YAKA17",
+    60: "YAKA18",  61: "YAKA21",  62: "YAKA22",  63: "YAKA23",  64: "YAKA24",
+    65: "YAKA25",  66: "CHKA01",  67: "SAIB01",  68: "SAIB02",  69: "GIAS00",
+    70: "GIAS01",  71: "GIAS02",  72: "GIAS03",  73: "GIAS04",  74: "GIAS05",
+    75: "GIAS06A", 76: "GIAS07",  77: "GIAS08",  78: "GIAS09",  79: "KODA00",
+    80: "KODA01",  81: "KODA02",  82: "KODA03",  83: "KODA04",  84: "KODA05",
+    85: "KODA06",  86: "KODA07",  87: "KODA08",  88: "FRZL01",  89: "FRZL02",
+    90: "FRZL03",  91: "FRZL04",  92: "FRZL05",  93: "FRZL06",  94: "FRZL07",
+    95: "FRZL08",  96: "FRZL12",  97: "ICSA01",  98: "ICSA02",  99: "ICSA03",
+    100: "ICSA04", 101: "ICSA05", 102: "ICSA06", 103: "ICSA07", 104: "ICSA08",
+    105: "BETL01", 106: "BETL02", 107: "BETL03", 108: "BETL04", 109: "MAYO00",
+    110: "MAYO01_2", 111: "MAYO02_2", 112: "TRAI00", 113: "LEOM01", 114: "LEOM02",
+    115: "MIST01", 116: "MIST02", 117: "MIST03", 118: "MIST04", 119: "MIST05",
+    120: "MIST06", 121: "MIST07", 122: "TUNN07_2", 123: "TUNN07_3", 124: "TUNN08_2",
+    125: "TUNN08_3", 126: "TUNN03_2", 127: "GCAN04_2", 128: "GCAN08_2",
+    129: "GCAN10", 130: "OGRE04", 131: "GIAS06B", 132: "FRZL13", 133: "FRZL14",
+    134: "FRZL15", 135: "FRZL16", 136: "FRZL17", 137: "FRZL18", 138: "STIC01",
+    139: "STIC02", 140: "GKYO01", 141: "GKYO02", 142: "OGRE10", 143: "OGRE11",
+    144: "OMOC01", 145: "OMOC02", 146: "OMOC03", 147: "OMOC04", 148: "OMOC05",
+    149: "OMOC06", 150: "OMOC07", 151: "OMOC08", 152: "FACT01", 153: "FACT02",
+    154: "FACT03", 155: "FACT04", 156: "FACT05", 157: "FACT06", 158: "FACT07",
+    159: "FACT08A", 160: "FACT08B", 161: "FACT09", 162: "FACT10", 163: "FACT11A",
+    164: "GOMI01", 165: "GOMI02", 166: "MGEN01", 167: "MGEN02", 168: "TWNA02",
+    169: "TWNA03", 170: "TWNA04", 171: "TWNA05", 172: "TWNA06", 173: "TWNA07",
+    174: "TWNA08", 175: "TWNA09", 176: "TWNA10", 177: "TWNA11", 178: "TWNA12",
+    179: "TWNA13", 180: "TWNB01", 181: "TWNB02", 182: "TWNB03", 183: "TWNB04",
+    184: "TWNB05", 185: "TWNB06", 186: "TWNB07", 187: "TWNB08", 188: "TWNB09",
+    189: "TWNB10", 190: "TWNB11", 191: "TWNB12", 192: "TWNB13", 193: "TWNB14",
+    194: "TWNB15", 195: "TWNB16", 196: "TWNB17", 197: "TWNB18", 198: "TWNB19",
+    199: "TWNB20", 200: "TWNB21", 201: "TWNB22", 202: "TWNB23", 203: "TWNB24",
+    204: "TWNA01", 205: "ROOM10", 206: "ROOM11", 207: "ROOM12", 208: "ROOM13",
+    209: "ROOM14", 210: "MGEN03", 211: "ROOM02", 212: "MGEN04", 213: "ROOM04",
+    214: "ROOM05A", 215: "ROOM05B", 216: "ROOM06", 217: "ROOM07", 218: "ROOM08",
+    219: "MGEN05", 220: "FACT11B", 221: "SAIB03", 222: "MGEN98", 223: "ROOM19",
+    224: "YAKA26", 225: "MGEN99", 226: "MGEN11", 227: "MGEN12", 228: "MGEN13",
+    229: "MGEN14", 230: "MGEN15", 231: "MGEN16", 232: "YAKA25", 233: "MIHA05",
+    234: "MIHA06", 235: "ROOM20", 236: "TEND01", 237: "TEND02", 238: "TOPN01",
+    247: "MGEN06", 248: "MGEN07", 249: "MGEN08", 253: "MGEN09", 254: "MGEN10",
+}
+# Sanity check: every chest screen and every Jijimon's House variant the
+# AP world cares about must be in the table.
+assert 205 in SCREEN_FILENAMES and SCREEN_FILENAMES[205] == "ROOM10"
+assert 218 in SCREEN_FILENAMES and SCREEN_FILENAMES[218] == "ROOM08"
 
 
 # JAL-replacement at the vanilla call site. Vanilla had
@@ -3948,7 +5409,23 @@ ROM_FIELD_SPAWN_TRIGGER_PATCHES: Final = (
     # read in DW1Script.txt, exclude the cutscene-flow script (the
     # one containing setTrigger N), and verify each BIN address.
     # ====================================================================
-    # ----- Greymon (118 sites; excluded cutscene script [162]) -----
+    # ----- Greymon (115 sites; excluded cutscene script [162] and
+    #       arming-gate script [210]) -----
+    #
+    # Script 210 §51 holds three story-progression gates (offsets 0x138,
+    # 0x162, 0x952) that read trigger(205) to decide whether Jijimon
+    # arms the Greymon ambush, arms the Airdramon ambush, or shows the
+    # Mt. Infinity reminder. Those reads are LEFT VANILLA on purpose:
+    # if they were redirected to trigger(725) (= Greymon AP-delivered),
+    # then receiving the Greymon Recruit AP item before fighting Greymon
+    # would make the gate at 0x138 think Greymon is already recruited,
+    # skip ``setTrigger 87``, and the field-spawn ambush in Script 162
+    # §57 (gated on ``trigger(87)``) would never fire — softlocking the
+    # Greymon AP location and blocking the Airdramon flow downstream.
+    # Vanilla reads here mean: AP item drives city visibility (the ~115
+    # patches below), but the recruit *fight* is gated on the player
+    # actually winning it (vanilla setTrigger 205), exactly as DW1
+    # designed. Do not add Script 210 entries to this block.
     (0x13FD8716, 205, 725),  # script 0
     (0x13FE5092, 205, 725),  # script 10
     (0x13FE50B6, 205, 725),  # script 10
@@ -4062,16 +5539,21 @@ ROM_FIELD_SPAWN_TRIGGER_PATCHES: Final = (
     (0x1406DA66, 205, 725),  # script 176
     (0x1406DA8A, 205, 725),  # script 176
     (0x140766CC, 205, 725),  # script 183
-    (0x1409E4BA, 205, 725),  # script 210
-    (0x1409E4D6, 205, 725),  # script 210
-    (0x1409E7EC, 205, 725),  # script 210
     (0x140A092C, 205, 725),  # script 211
     (0x140B51F6, 205, 725),  # script 221
-    # ----- Airdramon (1 sites; excluded cutscene script [184]) -----
-    (0x140B672A, 207, 727),  # script 221
-    # ----- Seadramon (2 sites; excluded cutscene script [7]) -----
-    (0x14059D08, 210, 730),  # script 162
-    (0x140A104A, 210, 730),  # script 211
+    # Airdramon: dropped 2026-05-08 from AP coverage (see
+    # ``_AP_RECRUIT_EXCLUDED``). Vanilla bytecode for ``trigger(207)``
+    # reads is intentionally left UNPATCHED so the in-game cutscene
+    # flow (Script 184) drives Airdramon's town visibility on its own,
+    # exactly as vanilla DW1 does. Do not add Airdramon entries here.
+    # Seadramon: dropped 2026-05-09 from AP coverage (see
+    # ``_AP_RECRUIT_EXCLUDED``). Vanilla bytecode for ``trigger(210)``
+    # reads is intentionally left UNPATCHED so the in-game cutscene
+    # flow (Script 7) drives Seadramon's town visibility on its own,
+    # exactly as vanilla DW1 does. Same pattern as Airdramon. The
+    # cutscene IS the Blue Flute pickup; trigger 210 is now polled as
+    # the ``Blue Flute Pickup`` AP location signal via
+    # KEYITEM_LOCATION_RAM_BITS. Do not add Seadramon entries here.
     # ----- MetalGreymon (1 sites; excluded cutscene script [184]) -----
     (0x140B6316, 212, 732),  # script 221
     # ----- Monzaemon (23 sites; excluded cutscene script [140]) -----
@@ -4189,6 +5671,29 @@ ROM_FIELD_SPAWN_TRIGGER_PATCHES: Final = (
     (0x13FD8C9E, 254, 774),  # script 0
     (0x13FD8CD6, 254, 774),  # script 0
     (0x13FD9B62, 254, 774),  # script 0
+    # ====================================================================
+    # Greymon — script 162 visibility-warp reads (12 sites). User reported
+    # 2026-05-01 that Greymon's arena building does not appear when entering
+    # File City Bottom from the Top side. Cause: script 162 is the master
+    # Bottom-plaza variant selector (cascading recruit checks → warpTo
+    # 180/181/182/.../188/203). Our earlier blanket exclusion of script 162
+    # (because it also contains setTrigger 205) over-skipped these
+    # visibility reads. Each pair (181/188, 186/187, 182/185, 183/184,
+    # 180/203, 202/...) is the "no-Greymon / with-Greymon" split for a
+    # specific Top-plaza walk-out point.
+    # ====================================================================
+    (0x14059A98, 205, 725),  # script 162 byte 1260
+    (0x14059ABC, 205, 725),  # script 162 byte 1296
+    (0x14059AF8, 205, 725),  # script 162 byte 1356
+    (0x14059B1C, 205, 725),  # script 162 byte 1392
+    (0x14059B7C, 205, 725),  # script 162 byte 1488
+    (0x14059BA0, 205, 725),  # script 162 byte 1524
+    (0x14059BDC, 205, 725),  # script 162 byte 1584
+    (0x14059C00, 205, 725),  # script 162 byte 1620
+    (0x14059C60, 205, 725),  # script 162 byte 1716
+    (0x14059C84, 205, 725),  # script 162 byte 1752
+    (0x14059CC0, 205, 725),  # script 162 byte 1812
+    (0x14059CE4, 205, 725),  # script 162 byte 1848
 )
 
 
@@ -4345,6 +5850,37 @@ ROM_ISTRIGGERSET_PATCH_VALUE: Final = (
 assert ROM_ISTRIGGERSET_PATCH_VALUE[0] == 0x0802562C, hex(
     ROM_ISTRIGGERSET_PATCH_VALUE[0],
 )
+
+
+# =============================================================================
+# Mt. Infinity prosperity gate (Phase 9, 2026-05-10)
+# =============================================================================
+# Script 210 §51 line 162:
+#   ``if trigger(354) == true OR pstat(1) < 50 OR trigger(205) == false then 952``
+# This is the Jijimon dialog that arms the Airdramon ambush in File City
+# and announces Mt. Infinity. The literal ``50`` is the prosperity
+# threshold for opening Mt. Infinity. The ``ProsperityGoal`` AP
+# option rewrites this byte at generation time so the in-game gate and
+# the AP rules in :mod:`worlds.digimon_world.rules` stay in sync.
+#
+# Slot layout (4 bytes per IF primitive, encoding inferred from the
+# ``setTrigger`` opcode pattern of "ID-LE then value-LE"):
+#
+#   0x1409E4D2: pstat ID byte 0  (= 0x01)
+#   0x1409E4D3: pstat ID byte 1  (= 0x00)
+#   0x1409E4D4: comparand byte 0 (= 0x32 vanilla)  ← patch target
+#   0x1409E4D5: comparand byte 1 (= 0x00 vanilla)
+#
+# The bin offset 0x1409E4D2 is derived from the trigger(205) slot at
+# 0x1409E4D6 (= line 162 position 2), one of the three former Greymon
+# visibility patches that we removed 2026-05-08; pstat(1) is at
+# position 1, four bytes earlier. Threshold range is 20..100 so the
+# value fits in one byte; we still write 2 bytes LE to preserve the
+# 16-bit slot encoding.
+
+ROM_PROSPERITY_GOAL_OFFSET: Final = 0x1409E4D4
+ROM_PROSPERITY_GOAL_FORMAT: Final = "<H"
+ROM_PROSPERITY_GOAL_VANILLA: Final = 50  # script's vanilla literal
 
 
 # =============================================================================

@@ -82,26 +82,39 @@ class DigimonWorldWorld(World):
         when recruit randomization is off.
 
         With the option off, ``items.create_all_items`` separately
-        skips the 48 recruit items from the pool — they're created
-        fresh here and locked, so each recruit's join-city item is
-        delivered exclusively by the player completing that recruit's
-        encounter, never sourced from another player's slot. The
-        recruit AP location's other roles (firing on cutscene
-        completion, gating progression via ``Has(Birdramon Recruit)``
-        etc.) are unaffected.
+        skips the individual recruit items from the pool — they're
+        created fresh here and locked, so each recruit's join-city
+        item is delivered exclusively by the player completing that
+        recruit's encounter, never sourced from another player's
+        slot. The recruit AP location's other roles (firing on
+        cutscene completion, gating progression via
+        ``Has(Birdramon Recruit)`` etc.) are unaffected.
+
+        Bundled recruits (whose individual ``<X> Recruit`` item was
+        replaced by a Progressive ladder item per the Phase 7 rework
+        — see :data:`items.PROGRESSIVE_BUNDLES`) are skipped: their
+        AP location stays unlocked and AP fill places whatever it
+        wants there. The bundled Digimon's city visibility is
+        unlocked separately by collecting Progressive ladder items.
         """
 
         if int(self.options.recruit_randomization.value):
             return  # randomization on — nothing to lock
 
         for name in AP_RECRUIT_ITEM_DIGIMON:
+            recruit_item_name = f"{name} Recruit"
+            if recruit_item_name not in items.ITEM_NAME_TO_ID:
+                # Bundled recruit — no individual item to lock; the
+                # city-visibility bit is set by a Progressive ladder
+                # item, and the AP location stays unlocked for fill.
+                continue
             try:
                 location = self.get_location(name)
             except KeyError:
                 # Defensive: a recruit AP location should always exist
                 # in v7+, but skip if it's somehow been excluded.
                 continue
-            location.place_locked_item(self.create_item(f"{name} Recruit"))
+            location.place_locked_item(self.create_item(recruit_item_name))
 
     def create_items(self) -> None:
         items.create_all_items(self)
@@ -113,7 +126,11 @@ class DigimonWorldWorld(World):
         return items.create_item(self, name)
 
     def get_filler_item_name(self) -> str:
-        return items.FILLER_ITEM_NAME
+        # Phase 8: filler insertions go through the proportional
+        # distribution so AP-internal filler (e.g., when an item is
+        # removed mid-fill) follows the same per-seed shape as
+        # ``items.create_all_items``.
+        return items.pick_random_filler(self.random)
 
     @property
     def chest_grants(self) -> dict[str, chest_assignments.ChestGrant]:
@@ -140,6 +157,7 @@ class DigimonWorldWorld(World):
         # be shipped because their effect is baked into the .apdw1.
         slot_data = dict(self.options.as_dict(
             "goal",
+            "prosperity_goal",
             "fast_drimogemon",
             "easy_monochromon",
             "stat_gain_multiplier",

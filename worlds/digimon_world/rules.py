@@ -12,11 +12,16 @@ Rule layout
   Base rule = ``Has(Prosperity Point, count=ceil(pp/2))`` from
   :data:`RECRUIT_PP_REQUIREMENTS`. Five recruits have extra rules
   layered on top (Seadramon, Vegimon, SkullGreymon, Monzaemon, Leomon).
-* **No per-chest rules.** Per the Phase 6 user direction, chests are
-  treated as always available — the in-game region the chest lives in
-  may not actually be reachable yet, but AP fill ignores that for now.
-* **Final Battle** rule: AS Decoder + 50 PP (matches the Tower
-  entrance rule; redundant but keeps the goal explicit).
+* **No per-chest rules.** Each chest is in a confirmed in-game region
+  (verified via script + screen + room-code on 2026-05-09); the
+  region's entrance access rule transitively gates the chest. So
+  e.g. a chest in ``Factorial Town`` is reachable iff Whamon Recruit
+  is delivered, and a chest in ``Mt. Infinity`` requires 50 PP — no
+  per-chest rule is needed on top of the region rule.
+* **Final Battle** rule: 50 PP (matches the Tower entrance rule;
+  redundant but keeps the goal explicit). AS Decoder used to be part
+  of this rule but was removed 2026-05-08 — it does nothing in-game
+  and gates nothing.
 
 PP scaling
 ==========
@@ -32,10 +37,14 @@ from __future__ import annotations
 from math import ceil
 from typing import TYPE_CHECKING
 
+from BaseClasses import ItemClassification, LocationProgressType
 from rule_builder.rules import CanReachRegion, Has
 
 from .items import PROSPERITY_PER_ITEM
-from .locations import RECRUIT_PP_REQUIREMENTS
+from .locations import (
+    RECRUIT_PP_REQUIREMENTS,
+    _CHEST_BY_SLOT,
+)
 
 if TYPE_CHECKING:
     from .world import DigimonWorldWorld
@@ -76,6 +85,8 @@ def _set_entrance_rule(world: DigimonWorldWorld, source: str, target: str, rule)
 def set_all_rules(world: DigimonWorldWorld) -> None:
     _set_entrance_rules(world)
     _set_recruit_rules(world)
+    _set_keyitem_pickup_rules(world)
+    _apply_pp_cutoffs(world)
     _set_completion_condition(world)
 
 
@@ -94,10 +105,16 @@ def _set_entrance_rules(world: DigimonWorldWorld) -> None:
     bridge_mode = int(options.bridge_unlock.value)              # 0/1/2
     canyon_mode = int(options.great_canyon_unlock.value)        # 0/1/2
     lava_mode = int(options.lava_cave_access.value)             # 0/1
+    # Mt. Infinity / Tower / Back Dimension / Final Battle all share
+    # the player's configured threshold (the in-game
+    # ``pstat(1) < 50`` literal in Script 210 §51 is patched at
+    # generation time to the same value, so AP logic and the in-game
+    # gate stay in sync).
+    mt_threshold = int(options.prosperity_goal.value)
 
     # ------- File City direct entries -------
-    _set_entrance_rule(world, "File City", "Mt. Infinity", _pp(50))
-    _set_entrance_rule(world, "File City", "Big Store", _pp(50))
+    _set_entrance_rule(world, "File City", "Mt. Infinity", _pp(mt_threshold))
+    _set_entrance_rule(world, "File City", "Big Store", _pp(mt_threshold))
     _set_entrance_rule(world, "File City", "Factorial Town", Has("Whamon Recruit"))
 
     # Birdramon flights — alt entry from File City. Each requires
@@ -119,7 +136,52 @@ def _set_entrance_rules(world: DigimonWorldWorld) -> None:
     # ------- Mt. Infinity → Tower (endgame) -------
     _set_entrance_rule(
         world, "Mt. Infinity", "Tower",
-        Has("AS Decoder") & _pp(50),
+        _pp(mt_threshold),
+    )
+
+    # ------- Sub-area gates -------
+    # Drill Tunnel → Leomon Ancestor Cave: 45 PP (matches the
+    # Leomonstone Pickup gate; the Stone Tablet sits inside the cave).
+    # When ``prosperity_goal < 45`` the player can never trigger
+    # the cave entrance in-game (Drimogemon's daily dig is gated on the
+    # vanilla 45-PP check). We drop the AP rule so fill can still place
+    # filler at the cave's chest location, and ``_apply_pp_cutoffs``
+    # below marks that chest EXCLUDED + filler-only.
+    if 45 <= mt_threshold:
+        _set_entrance_rule(
+            world, "Drill Tunnel", "Leomon Ancestor Cave",
+            _pp(45),
+        )
+    # File City → Secret Beach Cave: Whamon Recruit (Whamon transports
+    # the player to the beach where the cave is).
+    _set_entrance_rule(
+        world, "File City", "Secret Beach Cave",
+        Has("Whamon Recruit"),
+    )
+    # File City → Back Dimension: post-game. All four gates are required:
+    #
+    #   1. ``_pp(prosperity_goal)`` — Mt. Infinity must be open in-game
+    #      (same threshold as the Airdramon ambush). Tracks the
+    #      ``prosperity_goal`` option so the tracker locks Back
+    #      Dimension chests until the player can actually fight
+    #      Machinedramon.
+    #   2-4. ``CanReachRegion(...)`` over the three physical Back-Dimension
+    #      portal regions — Grey Lord's Mansion, Freezeland's Ice
+    #      Sanctuary side, and Great Canyon's Ogre Fortress side. The
+    #      player must be able to reach **all three** to traverse the
+    #      complete Back Dimension (the seven chests are spread across
+    #      the regions reached via each portal, so missing any portal
+    #      means missing chests).
+    #
+    # All chests inside are flagged EXCLUDED + filler-only, so this
+    # rule is a tracker-correctness gate (locks the chests until all
+    # conditions are met) rather than an AP-fill constraint.
+    _set_entrance_rule(
+        world, "File City", "Back Dimension",
+        _pp(mt_threshold)
+        & CanReachRegion("Grey Lord's Mansion")
+        & CanReachRegion("Freezeland")
+        & CanReachRegion("Great Canyon"),
     )
 
     # ------- Left chain -------
@@ -174,17 +236,62 @@ def _set_entrance_rules(world: DigimonWorldWorld) -> None:
     #   * Gear Savanna machine — reachable when Gear Savanna is reachable.
     #     No extra rule on this entrance.
     #   * File City machine — only opens after both Betamon and Patamon
-    #     are in city. Player gets each Digimon "in city" by receiving
-    #     the corresponding ``<Name> Recruit`` AP item, so the rule is
-    #     ``Has(Betamon Recruit) & Has(Patamon Recruit)``.
+    #     are in city. Both Digimon are now bundled into Progressive
+    #     Item Shop (T1 = Betamon+Coelamon, T2 = Patamon+Monochromon),
+    #     so the rule is ``Has(Progressive Item Shop, count=2)``: T1
+    #     provides Betamon, T2 provides Patamon.
     # Either parent satisfies access (AP region access is OR over edges).
     # The "Card Vending" region exists unconditionally; rules and
     # locations only matter when the option is on.
     _set_entrance_rule(
         world, "File City", "Card Vending",
-        Has("Betamon Recruit") & Has("Patamon Recruit"),
+        Has("Progressive Item Shop", count=2),
     )
     # Gear Savanna → Card Vending: free (no rule)
+
+    # Tropical Jungle → Ancient Dino Region: free in AP terms. The
+    # vanilla in-game gate is "Centarumon's recruit fight completed"
+    # (= wild trigger 236 set), but that fight is itself in Tropical
+    # Jungle (Amida Forest), so reaching Tropical Jungle implies the
+    # player can do the fight; AP doesn't need an explicit item gate.
+    # Centarumon Recruit (the AP item) is required only for the
+    # Unimon recruit gate (see ``_unimon_extra``), not for Ancient
+    # Dino access.
+
+    # ------- Grey Lord's Mansion (Mansion Key gate) -------
+    # Locked sub-area inside Overdell. Holds the 6 mansion-internal
+    # chests (slots 1, 2, 3, 5, 6, 7 with current naming
+    # ``Chest: Grey Lord's Mansion 4..9``). The 3 unlocked-area chests
+    # (slots 4, 53, 54 named ``Grey Lord's Mansion 1..3``) live in
+    # Overdell and don't need the key.
+    _set_entrance_rule(
+        world, "Overdell", "Grey Lord's Mansion",
+        Has("Mansion Key"),
+    )
+
+    # ------- Reverse-direction rules -------
+    # Boulder gate applies in both directions: the only way into the
+    # Meramon Tunnel region (which holds Meramon and the Lava Cave
+    # chests) is through the boulder, regardless of approach side. With
+    # the Mt. Panorama → Meramon Tunnel reverse edge added, AP fill
+    # would otherwise consider Meramon Tunnel reachable for free via the
+    # Gear Savanna walk-back chain — so we replicate the Lava Cave
+    # Access gate here.
+    if lava_mode == _LCA_SHUFFLED:
+        _set_entrance_rule(
+            world, "Meramon Tunnel", "Drill Tunnel",
+            Has("Lava Cave Access"),
+        )
+        _set_entrance_rule(
+            world, "Mt. Panorama", "Meramon Tunnel",
+            Has("Lava Cave Access"),
+        )
+    # Beetle Land → Greatlake reverse: same fishing-rod / flute gate as
+    # the forward edge (it's the same body of water either way).
+    _set_entrance_rule(
+        world, "Beetle Land", "Greatlake",
+        Has("Old Fishrod") | Has("Amazing rod") | Has("Blue Flute"),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -196,19 +303,18 @@ def _set_entrance_rules(world: DigimonWorldWorld) -> None:
 # rule to AND with the base PP rule. We use a callable so we can build
 # ``CanReachRegion(...)`` rules that resolve at rule-attach time.
 
-def _seadramon_extra(_world: DigimonWorldWorld):
-    return Has("Old Fishrod") | Has("Amazing rod")
-
-
 def _vegimon_extra(_world: DigimonWorldWorld):
     return Has("Rain Plant")
 
 
 def _skullgreymon_extra(_world: DigimonWorldWorld):
-    # Mansion Key (mansion access) + Frig Key (refrigerator) + reach
-    # Freezeland (where the refrigerator lives). All three are AP-
-    # tracked progression items / regions.
-    return Has("Mansion Key") & Has("Frig Key") & CanReachRegion("Freezeland")
+    # Per user (2026-05-08): SkullGreymon is recruited by entering Grey
+    # Lord's Mansion (Mansion Key), feeding it Steak, and having
+    # Shellmon already recruited. Frig Key / Freezeland reachability —
+    # which the prior rule used as an approximation for "the player can
+    # actually obtain Steak" — are not part of the recruit gate and
+    # have been removed.
+    return Has("Mansion Key") & Has("Steak") & Has("Shellmon Recruit")
 
 
 def _monzaemon_extra(_world: DigimonWorldWorld):
@@ -216,12 +322,12 @@ def _monzaemon_extra(_world: DigimonWorldWorld):
 
 
 def _leomon_extra(_world: DigimonWorldWorld):
-    # Force the Stone-Tablet path: even if the player took the
-    # Birdramon Flight: Gear Savanna shortcut, they need to traverse
-    # Drill Tunnel + Meramon Tunnel to reach Ancestor's Cave for the
-    # Stone Tablet. Modeling reach(Meramon Tunnel) covers that whole
-    # left-chain prerequisite.
-    return CanReachRegion("Meramon Tunnel")
+    # Per user (2026-05-08): Leomon's recruit gate is the Leomonstone
+    # (Stone Tablet) item, full stop. Prior approximation via
+    # ``CanReachRegion("Meramon Tunnel")`` modeled the vanilla pickup
+    # site of the Stone Tablet, but with Leomonstone now an AP-tracked
+    # progression item the gate is direct.
+    return Has("Leomonstone")
 
 
 # Ogremon's 4-battle chain spans 3 regions: Great Canyon (Battle 1),
@@ -252,8 +358,39 @@ def _shellmon_extra(_world: DigimonWorldWorld):
     return CanReachRegion("Freezeland")
 
 
+# Ninjamon's recruit spawn is in Native Forest, but reaching that
+# spawn requires (a) crossing the Tropical Jungle bridge first (the
+# vanilla in-game path threads through Tropical Jungle to reach
+# Ninjamon's hangout), and (b) per the recruitment guide, "Recruit
+# a Digimon that opens the Secret Item Shop" — Ninjamon stands in
+# the Secret Shop after recruit. The Secret Shop is unlocked
+# progressively via ``Progressive Secret Shop`` (see
+# ``items.PROGRESSIVE_BUNDLES``); receiving 1 copy is enough.
+#
+# Only emit the bridge rule when ``bridge_unlock`` is in shuffled
+# mode — in vanilla / always_open the ``Tropical Jungle Bridge``
+# AP item isn't in the pool, so ``Has`` would never be satisfied
+# and the recruit would become permanently unreachable.
+def _ninjamon_extra(world: DigimonWorldWorld):
+    secret_shop_rule = Has("Progressive Secret Shop")
+    if int(world.options.bridge_unlock.value) == _OPT_SHUFFLED:
+        return Has("Tropical Jungle Bridge") & secret_shop_rule
+    return secret_shop_rule
+
+
+# Unimon's recruit per the guide: "Recruit and then talk to
+# Centarumon in the clinic." Centarumon must be recruited first
+# because the player can't enter the Clinic to talk to him until
+# he's built it. AP gate: ``Has(Centarumon Recruit)``.
+def _unimon_extra(_world: DigimonWorldWorld):
+    return Has("Centarumon Recruit")
+
+
 _RECRUIT_EXTRA_RULES = {
-    "Seadramon":    _seadramon_extra,
+    # Seadramon dropped 2026-05-09 (recruit cutscene IS Blue Flute pickup).
+    # The rod-required rule moved to ``Blue Flute Pickup`` in
+    # ``_set_keyitem_pickup_rules``. See addresses.py
+    # ``_AP_RECRUIT_EXCLUDED``.
     "Vegiemon":     _vegimon_extra,  # in-repo spelling
     "SkullGreymon": _skullgreymon_extra,
     "Monzaemon":    _monzaemon_extra,
@@ -262,27 +399,51 @@ _RECRUIT_EXTRA_RULES = {
     "Ogremon":      _ogremon_extra,
     "Whamon":       _whamon_extra,
     "Shellmon":     _shellmon_extra,
+    "Ninjamon":     _ninjamon_extra,
+    # Phase 7 (2026-05-09) additions:
+    # Unimon's spawn requires talking to Centarumon at the Clinic.
+    # Tyrannomon's spawn is in Ancient Dino Region, which is itself
+    # gated by Centarumon (see the entrance rule in
+    # ``_set_entrance_rules``); no extra rule on the Tyrannomon
+    # location needed because the region access already implies it.
+    "Unimon":       _unimon_extra,
 }
 
 
 def _set_recruit_rules(world: DigimonWorldWorld) -> None:
     """Attach the per-recruit rule to each recruit AP location.
 
-    Base rule: ``Has(Prosperity Point, count=ceil(pp/2))``. Five
-    recruits have an extra rule ANDed in (see ``_RECRUIT_EXTRA_RULES``).
-    Recruits at 0 PP with no extra rule are skipped (= no rule = always
-    reachable within their region).
+    Base rule: ``Has(Prosperity Point, count=ceil(pp/PROSPERITY_PER_ITEM))``.
+    Several recruits have an extra rule ANDed in (see
+    ``_RECRUIT_EXTRA_RULES``). Recruits at 0 PP with no extra rule are
+    skipped (= no rule = always reachable within their region).
+
+    Recruits whose PP requirement exceeds the configured Mt. Infinity
+    threshold get NO PP rule attached — the vanilla in-game gate stays
+    at the original PP value, so the player can never trigger the
+    recruit no matter what AP delivers; ``_apply_pp_cutoffs`` marks
+    those locations EXCLUDED + filler-only so AP fill places only
+    filler there.
     """
+
+    mt_threshold = int(world.options.prosperity_goal.value)
 
     for recruit_name, pp in RECRUIT_PP_REQUIREMENTS.items():
         extra_factory = _RECRUIT_EXTRA_RULES.get(recruit_name)
         if pp <= 0 and extra_factory is None:
             continue
         location = world.get_location(recruit_name)
-        rule = _pp(pp) if pp > 0 else None
+        # Only attach the PP gate if the player can actually reach that
+        # PP threshold in-game.
+        rule = _pp(pp) if 0 < pp <= mt_threshold else None
         if extra_factory is not None:
             extra = extra_factory(world)
-            rule = extra if rule is None else rule & extra
+            # Factory may return None when its rule is option-conditional
+            # (e.g. ``_ninjamon_extra`` only adds a rule in shuffled mode).
+            if extra is not None:
+                rule = extra if rule is None else rule & extra
+        if rule is None:
+            continue
         world.set_rule(location, rule)
 
 
@@ -290,13 +451,108 @@ def _set_recruit_rules(world: DigimonWorldWorld) -> None:
 # Completion condition
 # ---------------------------------------------------------------------------
 
-def _set_completion_condition(world: DigimonWorldWorld) -> None:
-    """Final Battle requires AS Decoder + 50 PP (= all 25 PP items).
-    Redundant with the Tower entrance rule but kept as the explicit
-    goal gate."""
+def _set_keyitem_pickup_rules(world: DigimonWorldWorld) -> None:
+    """Per-pickup access rules for keyitem AP locations.
 
+    Most keyitem pickups need no extra rule beyond region reach (Old
+    Fishrod Pickup, Mansion Key Pickup, Frig Key Pickup, Gear Pickup) —
+    region wiring covers the prerequisites. Four have additional
+    gates:
+
+    * ``Steak Pickup`` requires Frig Key in hand (the fridge cutscene
+      checks ``item(123) >= 1``).
+    * ``Rain Plant Pickup`` requires Palmon Recruit (the cutscene's
+      section gate is ``trigger(76) == false AND trigger(246) == true``,
+      and trigger 246 is set on Palmon recruit completion). The day-
+      15-of-month requirement isn't an AP item — the player advances
+      time by playing — so it isn't modeled here.
+    * ``Blue Flute Pickup`` requires a fishing rod (Old Fishrod or
+      Amazing Rod) — the Seadramon friendship cutscene only fires
+      from hooking him while fishing in Dragon Eye Lake.
+    * ``Leomonstone Pickup`` requires 45 Prosperity Points — Leomon's
+      Ancestral Cave is gated by Drimogemon's daily dig, which only
+      breaks through to the cave once city Prosperity reaches 45."""
+
+    mt_threshold = int(world.options.prosperity_goal.value)
+
+    world.set_rule(world.get_location("Steak Pickup"), Has("Frig Key"))
+    world.set_rule(world.get_location("Rain Plant Pickup"), Has("Palmon Recruit"))
+    world.set_rule(
+        world.get_location("Blue Flute Pickup"),
+        Has("Old Fishrod") | Has("Amazing rod"),
+    )
+    # Drop the Leomonstone Pickup gate when the cave is unreachable
+    # (threshold < 45). ``_apply_pp_cutoffs`` will mark the location
+    # EXCLUDED + filler-only.
+    if 45 <= mt_threshold:
+        world.set_rule(world.get_location("Leomonstone Pickup"), _pp(45))
+
+
+# ---------------------------------------------------------------------------
+# PP-cutoff cleanup (Phase 9)
+# ---------------------------------------------------------------------------
+
+# Vanilla in-game prosperity gate for the Leomon Ancestor Cave entrance
+# (Drimogemon's daily dig) and for the Leomonstone Pickup itself. Always
+# 45 in-game regardless of the AP option.
+_LEOMON_CAVE_PP: int = 45
+
+
+def _apply_pp_cutoffs(world: DigimonWorldWorld) -> None:
+    """Mark locations whose vanilla PP gate exceeds the configured
+    Mt. Infinity threshold as EXCLUDED + filler-only.
+
+    The 20% comfort margin in :func:`items.prosperity_point_count`
+    intentionally does **not** count toward the cutoff: the player
+    asked for "Mt. Infinity at threshold X", which means anything
+    vanilla DW1 itself gates above X is permanently inaccessible
+    in-game (the AP option only patches the one Mt. Infinity gate at
+    Script 210 §51 — the other 45/50 PP gates stay vanilla). Their
+    AP rules were already skipped by the per-rule passes above; here
+    we restrict their item placement to pure filler so AP fill
+    doesn't waste useful or progression items at AP locations the
+    player can never trigger.
+    """
+
+    mt_threshold = int(world.options.prosperity_goal.value)
+    excluded: list[str] = []
+
+    # Recruits whose vanilla PP gate is above the configured threshold.
+    for recruit_name, pp in RECRUIT_PP_REQUIREMENTS.items():
+        if pp > mt_threshold:
+            excluded.append(recruit_name)
+
+    # Leomonstone Pickup + every chest in Leomon Ancestor Cave —
+    # both share the in-game 45-PP cave entrance.
+    if _LEOMON_CAVE_PP > mt_threshold:
+        excluded.append("Leomonstone Pickup")
+        excluded.extend(
+            chest_name
+            for chest_name, region in _CHEST_BY_SLOT.values()
+            if region == "Leomon Ancestor Cave"
+        )
+
+    for name in excluded:
+        try:
+            location = world.get_location(name)
+        except KeyError:
+            continue  # location dropped by an unrelated option
+        location.progress_type = LocationProgressType.EXCLUDED
+        location.item_rule = (
+            lambda item: item.classification == ItemClassification.filler
+        )
+
+
+def _set_completion_condition(world: DigimonWorldWorld) -> None:
+    """Final Battle requires the configured Mt. Infinity prosperity
+    threshold (default 50). Redundant with the Tower entrance rule but
+    kept as the explicit goal gate. AS Decoder used to also be
+    required, but it is a no-op DW1 item that gates nothing —
+    removed 2026-05-08."""
+
+    mt_threshold = int(world.options.prosperity_goal.value)
     final_battle = world.get_location("Final Battle")
-    world.set_rule(final_battle, Has("AS Decoder") & _pp(50))
+    world.set_rule(final_battle, _pp(mt_threshold))
     world.set_completion_rule(Has("Victory"))
 
 

@@ -327,6 +327,9 @@ class TestQoLPatcherOptionsOn(DigimonWorldTestBase):
         "skip_intro": 1,
         "type_lock_unlocks": 1,
         "spawn_rate_boost": 50,
+        # Cards on so fill has enough progression-eligible locations
+        # alongside the 35 EXCLUDED unconfirmed chests.
+        "card_locations": True,
     }
 
     def test_skip_intro_tokens_present(self) -> None:
@@ -400,10 +403,14 @@ class TestQoLPatcherOptionsOn(DigimonWorldTestBase):
 
 
 class TestVendingPatcherOn(DigimonWorldTestBase):
-    """VendingLocations on: opcode overwrite + text substitution tokens
-    must reach the token blob."""
+    """VendingLocations on: setTrigger opcode-overwrite tokens land for
+    every (machine, ROM copy, item, overwrite-offset) tuple, plus the
+    one-line gacha MP Floppy fix."""
 
-    options: ClassVar[dict[str, Any]] = {"vending_locations": True}
+    options: ClassVar[dict[str, Any]] = {
+        "vending_locations": True,
+        "card_locations": True,  # fill capacity for EXCLUDED chests
+    }
 
     def test_vending_settrigger_overwrite_tokens_present(self) -> None:
         from ..data.addresses import VENDING_MACHINES, encode_set_trigger
@@ -420,25 +427,42 @@ class TestVendingPatcherOn(DigimonWorldTestBase):
                             f"{base + off:#x} for {item.location_name}",
                         )
 
-    def test_vending_text_slot_tokens_present(self) -> None:
-        """Every vending text slot gets a token whose first 2 bytes are
-        the showTextbox opcode (1A 00) and whose total length matches
-        the slot budget."""
+    def test_no_text_substitution_tokens_emitted(self) -> None:
+        """Vanilla menu / preface / result text is NOT touched. We
+        verify by checking the patcher emits no showTextbox-prefixed
+        (``1A 00``) tokens for any of the known former text-slot
+        offsets."""
         from ..data.addresses import VENDING_MACHINES
 
         observed = {off: data for off, data in _capture_tokens(self.world)}
-        for machine in VENDING_MACHINES:
-            for base in machine.script_bases:
-                for slot in machine.text_slots:
-                    addr = base + slot.rel
-                    self.assertIn(
-                        addr, observed,
-                        f"no text token at {addr:#x} ({machine.label}, "
-                        f"{slot.purpose})",
-                    )
-                    payload = observed[addr]
-                    self.assertEqual(len(payload), slot.length)
-                    self.assertEqual(payload[:2], b"\x1A\x00")
+        # Probe a couple of offsets that the previous text pass used to
+        # rewrite (Greatlake menu @ 190, Greatlake meat result @ 502,
+        # Ancient Dino MP Floppy result @ 3670). After the change none
+        # of these should carry a token.
+        greatlake_base = VENDING_MACHINES[0].script_bases[0]
+        ancient_dino_base = VENDING_MACHINES[3].script_bases[0]
+        for off in (greatlake_base + 190, greatlake_base + 502,
+                    ancient_dino_base + 3670):
+            self.assertNotIn(off, observed)
+
+    def test_gacha_mp_floppy_fix_token_present(self) -> None:
+        """Vanilla DW1 bug fix: ``jumpTo 3840`` overwrite of the buggy
+        conditional at offset 3726 (Ancient Dino script base + 3726).
+        Without this, MP Floppy's setTrigger 901 is unreachable except
+        when the player's bag is full."""
+        from ..data.addresses import (
+            ROM_GACHA_MP_FLOPPY_FIX_BYTES,
+            ROM_GACHA_MP_FLOPPY_FIX_OFFSET,
+        )
+
+        observed = _capture_tokens(self.world)
+        self.assertIn(
+            (ROM_GACHA_MP_FLOPPY_FIX_OFFSET, ROM_GACHA_MP_FLOPPY_FIX_BYTES),
+            observed,
+        )
+        # Sanity: the fix bytes are exactly 4 (``jumpTo 3840``).
+        self.assertEqual(len(ROM_GACHA_MP_FLOPPY_FIX_BYTES), 4)
+        self.assertEqual(ROM_GACHA_MP_FLOPPY_FIX_BYTES[:2], b"\x16\x00")
 
 
 class TestChestRandomizationOffPatcher(DigimonWorldTestBase):
@@ -457,13 +481,15 @@ class TestChestRandomizationOffPatcher(DigimonWorldTestBase):
     def test_chest_tokens_absent(self) -> None:
         from ..data.addresses import (
             CHEST_NAME_TO_ROM_OFFSETS,
-            ROM_AP_ITEM_ENTRY_OFFSET,
             ROM_CHEST_GIVEITEM_PATCH_OFFSET,
             ROM_CHEST_GIVEITEM_WRAPPER_OFFSET,
         )
 
         observed_offsets = {off for off, _ in _capture_tokens(self.world)}
-        self.assertNotIn(ROM_AP_ITEM_ENTRY_OFFSET, observed_offsets)
+        # Note: ROM_AP_ITEM_ENTRY_OFFSET is NOT asserted absent — slot 83's
+        # ITEM_PARA entry is also written by the always-on merit shop wrapper
+        # patcher (slot 83 is the merit shop's AP-purchase row), so it shows
+        # up in observed offsets regardless of chest randomization.
         self.assertNotIn(ROM_CHEST_GIVEITEM_PATCH_OFFSET, observed_offsets)
         self.assertNotIn(ROM_CHEST_GIVEITEM_WRAPPER_OFFSET, observed_offsets)
         # And no per-chest item byte writes either.
@@ -478,7 +504,10 @@ class TestVendingPatcherOff(DigimonWorldTestBase):
     options: ClassVar[dict[str, Any]] = {}
 
     def test_vending_tokens_absent(self) -> None:
-        from ..data.addresses import VENDING_MACHINES
+        from ..data.addresses import (
+            ROM_GACHA_MP_FLOPPY_FIX_OFFSET,
+            VENDING_MACHINES,
+        )
 
         observed_offsets = {off for off, _ in _capture_tokens(self.world)}
         for machine in VENDING_MACHINES:
@@ -486,8 +515,562 @@ class TestVendingPatcherOff(DigimonWorldTestBase):
                 for item in machine.items:
                     for off in item.overwrite_offsets:
                         self.assertNotIn(base + off, observed_offsets)
-                for slot in machine.text_slots:
-                    self.assertNotIn(base + slot.rel, observed_offsets)
+        # The gacha fix is gated on vending_locations being on.
+        self.assertNotIn(ROM_GACHA_MP_FLOPPY_FIX_OFFSET, observed_offsets)
+
+
+class TestMeritShopWrapperPatcher(DigimonWorldTestBase):
+    """Merit Shop give-item wrapper: always-on. Installs a small MIPS
+    wrapper into Cave6 free space and hijacks the merit-shop function's
+    ``jal 0x800C5240`` so every shop purchase routes through our
+    setTrigger dispatch. With the default
+    ``MERIT_SHOP_DISPATCH = ((117, 903),)``, item 117 (Amazing Rod)
+    fires AP location ``Amazing Rod Pickup`` (trigger 903). Other
+    items pass through unchanged."""
+
+    options: ClassVar[dict[str, Any]] = {}
+
+    def test_wrapper_bytes_emitted(self) -> None:
+        from ..data.addresses import (
+            MERIT_SHOP_DISPATCH,
+            ROM_MERIT_SHOP_WRAPPER_BYTES,
+            ROM_MERIT_SHOP_WRAPPER_OFFSET,
+        )
+
+        observed = _capture_tokens(self.world)
+        # Wrapper size = (38 + 7N) instructions × 4 bytes
+        # (4 prologue + 6 give_item + 28 mark_bought + 7 per entry).
+        self.assertEqual(
+            len(ROM_MERIT_SHOP_WRAPPER_BYTES),
+            (38 + 7 * len(MERIT_SHOP_DISPATCH)) * 4,
+        )
+        self.assertIn(
+            (ROM_MERIT_SHOP_WRAPPER_OFFSET, ROM_MERIT_SHOP_WRAPPER_BYTES), observed,
+            f"missing Merit-Shop wrapper at {ROM_MERIT_SHOP_WRAPPER_OFFSET:#x}",
+        )
+
+    def test_sentinel_entry_emitted(self) -> None:
+        from ..data.addresses import (
+            ROM_AP_SHOP_BOUGHT_ENTRY_BYTES,
+            ROM_AP_SHOP_BOUGHT_ENTRY_OFFSET,
+        )
+
+        observed = _capture_tokens(self.world)
+        self.assertEqual(len(ROM_AP_SHOP_BOUGHT_ENTRY_BYTES), 32)
+        self.assertTrue(ROM_AP_SHOP_BOUGHT_ENTRY_BYTES.startswith(b"AP Item Bought"))
+        self.assertIn(
+            (ROM_AP_SHOP_BOUGHT_ENTRY_OFFSET, ROM_AP_SHOP_BOUGHT_ENTRY_BYTES), observed,
+            f"missing AP-shop sentinel slot 114 at {ROM_AP_SHOP_BOUGHT_ENTRY_OFFSET:#x}",
+        )
+
+    def test_presale_name_rewrites_emitted(self) -> None:
+        from ..data.addresses import (
+            MERIT_SHOP_DISPATCH,
+            ROM_AP_SHOP_PRESALE_NAME_BYTES,
+            _merit_shop_presale_name_offset,
+        )
+
+        observed = _capture_tokens(self.world)
+        self.assertEqual(len(ROM_AP_SHOP_PRESALE_NAME_BYTES), 20)
+        self.assertTrue(ROM_AP_SHOP_PRESALE_NAME_BYTES.startswith(b"AP Item"))
+        for item_id, _trigger_id in MERIT_SHOP_DISPATCH:
+            offset = _merit_shop_presale_name_offset(item_id)
+            self.assertIn(
+                (offset, ROM_AP_SHOP_PRESALE_NAME_BYTES), observed,
+                f"missing presale rename for slot {item_id} at {offset:#x}",
+            )
+
+    def test_jal_hijack_emitted(self) -> None:
+        import struct as _struct
+
+        from ..data.addresses import (
+            ROM_MERIT_SHOP_PATCH_FORMAT,
+            ROM_MERIT_SHOP_PATCH_OFFSET,
+            ROM_MERIT_SHOP_PATCH_VALUE,
+        )
+
+        observed = _capture_tokens(self.world)
+        expected = _struct.pack(ROM_MERIT_SHOP_PATCH_FORMAT, ROM_MERIT_SHOP_PATCH_VALUE)
+        self.assertIn(
+            (ROM_MERIT_SHOP_PATCH_OFFSET, expected), observed,
+            f"missing Merit-Shop jal hijack at {ROM_MERIT_SHOP_PATCH_OFFSET:#x}",
+        )
+
+    def test_wrapper_decode_sanity(self) -> None:
+        """Spot-check that the assembled wrapper has the expected
+        opcodes at known offsets. Catches future edits that desync the
+        builder from the design."""
+        import struct as _struct
+
+        from ..data.addresses import (
+            MERIT_SHOP_DISPATCH,
+            ROM_MERIT_SHOP_WRAPPER_BYTES,
+            ROM_MERIT_SHOP_WRAPPER_RAM,
+        )
+
+        def word_at(off: int) -> int:
+            return _struct.unpack("<I", ROM_MERIT_SHOP_WRAPPER_BYTES[off:off + 4])[0]
+
+        # Prologue: addiu $sp, $sp, -0x10
+        self.assertEqual(word_at(0x00), 0x27BDFFF0)
+        # First per-entry block at +0x10: addiu $at, $0, item_id
+        item_id = MERIT_SHOP_DISPATCH[0][0]
+        trigger_id = MERIT_SHOP_DISPATCH[0][1]
+        self.assertEqual(word_at(0x10), 0x24010000 | (item_id & 0xFFFF))
+        # bne $a0, $at, +5 (skip 5 instructions after the delay slot to
+        # land on the next block / give_item path).
+        self.assertEqual(word_at(0x14), 0x14810005)
+        # jal setTrigger (RAM 0x801065C0)
+        self.assertEqual(word_at(0x1C), 0x0C041970)
+        # delay slot: addiu $a0, $0, trigger_id
+        self.assertEqual(word_at(0x20), 0x24040000 | (trigger_id & 0xFFFF))
+        # j mark_bought: target = wrapper_ram + 0x28 + 28*N
+        n = len(MERIT_SHOP_DISPATCH)
+        mark_ram = ROM_MERIT_SHOP_WRAPPER_RAM + 0x28 + 28 * n
+        expected_j_mark = 0x08000000 | ((mark_ram >> 2) & 0x03FFFFFF)
+        self.assertEqual(word_at(0x24), expected_j_mark)
+        # give_item path's j instruction (5th instruction after the per-entry
+        # blocks): j 0x800C5240
+        give_item_j_off = 0x10 + 28 * n + 0x10
+        self.assertEqual(word_at(give_item_j_off), 0x08031490)
+        # mark_bought path's jr $ra: located at the END of the path,
+        # one instruction before the trailing nop. 28-instr path; jr is
+        # the 27th instruction (0-indexed: 26), so at offset path_start + 26*4.
+        mark_jr_off = 0x10 + 28 * n + 0x18 + 26 * 4
+        self.assertEqual(word_at(mark_jr_off), 0x03E00008)
+
+    def test_amazing_rod_location_bit_matches_trigger_formula(self) -> None:
+        """Sanity: ``AMAZING_ROD_LOCATION_BIT`` is the canonical RAM bit
+        for trigger 903 derived from
+        ``mem[0x001BDFCD + N/8] |= 1 << (N % 8)``."""
+        from ..data.addresses import (
+            AMAZING_ROD_LOCATION_BIT,
+            AMAZING_ROD_LOCATION_TRIGGER_ID,
+            AP_TRIGGER_ARRAY_BASE,
+        )
+
+        n = AMAZING_ROD_LOCATION_TRIGGER_ID
+        self.assertEqual(
+            AMAZING_ROD_LOCATION_BIT,
+            (AP_TRIGGER_ARRAY_BASE + n // 8, n % 8),
+        )
+
+
+class TestLeomonstoneNeuterPatcher(DigimonWorldTestBase):
+    """Leomonstone giveItem neuter: always-on. All 7 ``giveItem 118 1``
+    calls in Script 109 (3 ROM copies of Section_52 + 1 orphan retry)
+    get rewritten with ``setTrigger 135``. Trigger 135 is the AP
+    location signal for ``Leomonstone Pickup``."""
+
+    options: ClassVar[dict[str, Any]] = {}
+
+    def test_neuter_tokens_present(self) -> None:
+        from ..data.addresses import (
+            LEOMONSTONE_LOCATION_TRIGGER_ID,
+            ROM_LEOMONSTONE_GIVEITEM_NEUTER_VALUE,
+            ROM_LEOMONSTONE_GIVEITEM_OFFSETS,
+            VENDING_OPCODE_SETTRIGGER,
+        )
+
+        observed = _capture_tokens(self.world)
+        self.assertEqual(len(ROM_LEOMONSTONE_GIVEITEM_OFFSETS), 7)
+        self.assertEqual(len(ROM_LEOMONSTONE_GIVEITEM_NEUTER_VALUE), 4)
+        self.assertEqual(
+            ROM_LEOMONSTONE_GIVEITEM_NEUTER_VALUE,
+            bytes((
+                VENDING_OPCODE_SETTRIGGER, 0x00,
+                LEOMONSTONE_LOCATION_TRIGGER_ID & 0xFF,
+                (LEOMONSTONE_LOCATION_TRIGGER_ID >> 8) & 0xFF,
+            )),
+        )
+        for offset in ROM_LEOMONSTONE_GIVEITEM_OFFSETS:
+            self.assertIn(
+                (offset, ROM_LEOMONSTONE_GIVEITEM_NEUTER_VALUE), observed,
+                f"missing Leomonstone giveItem neuter at {offset:#x}",
+            )
+
+    def test_location_bit_matches_trigger_formula(self) -> None:
+        """Sanity: ``LEOMONSTONE_LOCATION_BIT`` is the canonical RAM bit
+        for trigger 135 derived from
+        ``mem[0x001BDFCD + N/8] |= 1 << (N % 8)``."""
+        from ..data.addresses import (
+            AP_TRIGGER_ARRAY_BASE,
+            LEOMONSTONE_LOCATION_BIT,
+            LEOMONSTONE_LOCATION_TRIGGER_ID,
+        )
+
+        n = LEOMONSTONE_LOCATION_TRIGGER_ID
+        self.assertEqual(
+            LEOMONSTONE_LOCATION_BIT,
+            (AP_TRIGGER_ARRAY_BASE + n // 8, n % 8),
+        )
+
+
+class TestBlueFluteNeuterPatcher(DigimonWorldTestBase):
+    """Blue Flute giveItem neuter: always-on. Both ``giveItem 115 1`` calls
+    in Script 7 Section_82 (Seadramon friendship cutscene) get rewritten
+    with ``setTrigger 210``. Single ROM copy = 2 .bin offsets. Trigger
+    210 — same bit Seadramon's recruit used to poll (Seadramon is now in
+    ``_AP_RECRUIT_EXCLUDED``) — is the AP location signal for
+    ``Blue Flute Pickup``."""
+
+    options: ClassVar[dict[str, Any]] = {}
+
+    def test_neuter_tokens_present(self) -> None:
+        from ..data.addresses import (
+            BLUE_FLUTE_LOCATION_TRIGGER_ID,
+            ROM_BLUE_FLUTE_GIVEITEM_NEUTER_VALUE,
+            ROM_BLUE_FLUTE_GIVEITEM_OFFSETS,
+            VENDING_OPCODE_SETTRIGGER,
+        )
+
+        observed = _capture_tokens(self.world)
+        self.assertEqual(len(ROM_BLUE_FLUTE_GIVEITEM_OFFSETS), 2)
+        self.assertEqual(len(ROM_BLUE_FLUTE_GIVEITEM_NEUTER_VALUE), 4)
+        self.assertEqual(
+            ROM_BLUE_FLUTE_GIVEITEM_NEUTER_VALUE,
+            bytes((
+                VENDING_OPCODE_SETTRIGGER, 0x00,
+                BLUE_FLUTE_LOCATION_TRIGGER_ID & 0xFF,
+                (BLUE_FLUTE_LOCATION_TRIGGER_ID >> 8) & 0xFF,
+            )),
+        )
+        for offset in ROM_BLUE_FLUTE_GIVEITEM_OFFSETS:
+            self.assertIn(
+                (offset, ROM_BLUE_FLUTE_GIVEITEM_NEUTER_VALUE), observed,
+                f"missing Blue Flute giveItem neuter at {offset:#x}",
+            )
+
+    def test_location_bit_matches_seadramon_recruit_bit(self) -> None:
+        """Sanity: ``BLUE_FLUTE_LOCATION_BIT`` must equal Seadramon's
+        recruit bit — they are the same in-game event. Catches drift if
+        either side is edited (also asserted at module-load time in
+        addresses.py)."""
+        from ..data.addresses import (
+            AP_TRIGGER_ARRAY_BASE,
+            BLUE_FLUTE_LOCATION_BIT,
+            BLUE_FLUTE_LOCATION_TRIGGER_ID,
+            RECRUIT_RAM_BITS,
+        )
+
+        n = BLUE_FLUTE_LOCATION_TRIGGER_ID
+        self.assertEqual(
+            BLUE_FLUTE_LOCATION_BIT,
+            (AP_TRIGGER_ARRAY_BASE + n // 8, n % 8),
+        )
+        self.assertEqual(BLUE_FLUTE_LOCATION_BIT, RECRUIT_RAM_BITS["Seadramon"])
+
+
+class TestRainPlantNeuterPatcher(DigimonWorldTestBase):
+    """Rain Plant giveItem neuter: always-on. The single ``giveItem 121 1``
+    in Script 162 Section_83 (Tanemon planter cutscene in Native
+    Forest) gets rewritten with ``setTrigger 76``. Single ROM copy =
+    1 .bin offset. Trigger 76 is the AP location signal."""
+
+    options: ClassVar[dict[str, Any]] = {}
+
+    def test_neuter_tokens_present(self) -> None:
+        from ..data.addresses import (
+            RAIN_PLANT_LOCATION_TRIGGER_ID,
+            ROM_RAIN_PLANT_GIVEITEM_NEUTER_VALUE,
+            ROM_RAIN_PLANT_GIVEITEM_OFFSETS,
+            VENDING_OPCODE_SETTRIGGER,
+        )
+
+        observed = _capture_tokens(self.world)
+        self.assertEqual(len(ROM_RAIN_PLANT_GIVEITEM_OFFSETS), 1)
+        self.assertEqual(len(ROM_RAIN_PLANT_GIVEITEM_NEUTER_VALUE), 4)
+        self.assertEqual(
+            ROM_RAIN_PLANT_GIVEITEM_NEUTER_VALUE,
+            bytes((
+                VENDING_OPCODE_SETTRIGGER, 0x00,
+                RAIN_PLANT_LOCATION_TRIGGER_ID & 0xFF,
+                (RAIN_PLANT_LOCATION_TRIGGER_ID >> 8) & 0xFF,
+            )),
+        )
+        for offset in ROM_RAIN_PLANT_GIVEITEM_OFFSETS:
+            self.assertIn(
+                (offset, ROM_RAIN_PLANT_GIVEITEM_NEUTER_VALUE), observed,
+                f"missing Rain Plant giveItem neuter at {offset:#x}",
+            )
+
+    def test_location_bit_matches_trigger_formula(self) -> None:
+        """Sanity: ``RAIN_PLANT_LOCATION_BIT`` is the canonical RAM bit
+        for trigger 76 derived from
+        ``mem[0x001BDFCD + N/8] |= 1 << (N % 8)``."""
+        from ..data.addresses import (
+            AP_TRIGGER_ARRAY_BASE,
+            RAIN_PLANT_LOCATION_BIT,
+            RAIN_PLANT_LOCATION_TRIGGER_ID,
+        )
+
+        n = RAIN_PLANT_LOCATION_TRIGGER_ID
+        self.assertEqual(
+            RAIN_PLANT_LOCATION_BIT,
+            (AP_TRIGGER_ARRAY_BASE + n // 8, n % 8),
+        )
+
+
+class TestGearNeuterPatcher(DigimonWorldTestBase):
+    """Gear giveItem neuter: always-on. Both ``giveItem 120 1`` calls in
+    Script 144 Section_83 (Toy Town WaruMonzaemon defeat cutscene) get
+    rewritten with ``setTrigger 270``. Single ROM copy = 2 .bin offsets.
+    Trigger 270 is the AP location signal (set by the cutscene's own
+    ``setTrigger 270`` at script offset 4518)."""
+
+    options: ClassVar[dict[str, Any]] = {}
+
+    def test_neuter_tokens_present(self) -> None:
+        from ..data.addresses import (
+            GEAR_LOCATION_TRIGGER_ID,
+            ROM_GEAR_GIVEITEM_NEUTER_VALUE,
+            ROM_GEAR_GIVEITEM_OFFSETS,
+            VENDING_OPCODE_SETTRIGGER,
+        )
+
+        observed = _capture_tokens(self.world)
+        # 4-byte rewrite at each of the two sites (single ROM copy).
+        self.assertEqual(len(ROM_GEAR_GIVEITEM_OFFSETS), 2)
+        self.assertEqual(len(ROM_GEAR_GIVEITEM_NEUTER_VALUE), 4)
+        self.assertEqual(
+            ROM_GEAR_GIVEITEM_NEUTER_VALUE,
+            bytes((
+                VENDING_OPCODE_SETTRIGGER, 0x00,
+                GEAR_LOCATION_TRIGGER_ID & 0xFF,
+                (GEAR_LOCATION_TRIGGER_ID >> 8) & 0xFF,
+            )),
+        )
+        for offset in ROM_GEAR_GIVEITEM_OFFSETS:
+            self.assertIn(
+                (offset, ROM_GEAR_GIVEITEM_NEUTER_VALUE), observed,
+                f"missing Gear giveItem neuter at {offset:#x}",
+            )
+
+    def test_location_bit_matches_trigger_formula(self) -> None:
+        """Sanity: ``GEAR_LOCATION_BIT`` is the canonical RAM bit for
+        trigger 270 derived from
+        ``mem[0x001BDFCD + N/8] |= 1 << (N % 8)``."""
+        from ..data.addresses import (
+            AP_TRIGGER_ARRAY_BASE,
+            GEAR_LOCATION_BIT,
+            GEAR_LOCATION_TRIGGER_ID,
+        )
+
+        n = GEAR_LOCATION_TRIGGER_ID
+        self.assertEqual(
+            GEAR_LOCATION_BIT,
+            (AP_TRIGGER_ARRAY_BASE + n // 8, n % 8),
+        )
+
+
+class TestSteakSpawnNeuterPatcher(DigimonWorldTestBase):
+    """Steak spawn neuter: always-on. The 6-byte ``spawnItem 122 48 32``
+    in Script 35 Section_254 (Overdell map's entry boilerplate) gets
+    rewritten as ``jumpTo 150`` + 2 bytes of unreachable filler,
+    bypassing the vanilla Steak spawn. Trigger 348 (set by the fridge
+    cutscene itself) is the AP location signal, untouched by this
+    patch."""
+
+    options: ClassVar[dict[str, Any]] = {}
+
+    def test_neuter_tokens_present(self) -> None:
+        from ..data.addresses import (
+            ROM_STEAK_SPAWN_NEUTER_OFFSETS,
+            ROM_STEAK_SPAWN_NEUTER_VALUE,
+            VENDING_OPCODE_JUMPTO,
+        )
+
+        observed = _capture_tokens(self.world)
+        # 6-byte rewrite at each of the two ROM-copy sites.
+        self.assertEqual(len(ROM_STEAK_SPAWN_NEUTER_OFFSETS), 2)
+        self.assertEqual(len(ROM_STEAK_SPAWN_NEUTER_VALUE), 6)
+        # Sanity: first 4 bytes are jumpTo 150 (= 0x0096 LE).
+        self.assertEqual(
+            ROM_STEAK_SPAWN_NEUTER_VALUE[:4],
+            bytes((VENDING_OPCODE_JUMPTO, 0x00, 0x96, 0x00)),
+        )
+        # Trailing 2 bytes are filler (unreachable because the jumpTo
+        # lands on offset 150 = the next instruction's endSection).
+        self.assertEqual(ROM_STEAK_SPAWN_NEUTER_VALUE[4:], bytes((0x00, 0x00)))
+        for offset in ROM_STEAK_SPAWN_NEUTER_OFFSETS:
+            self.assertIn(
+                (offset, ROM_STEAK_SPAWN_NEUTER_VALUE), observed,
+                f"missing Steak spawn neuter at {offset:#x}",
+            )
+
+    def test_location_bit_matches_trigger_formula(self) -> None:
+        """Sanity: ``STEAK_LOCATION_BIT`` is the canonical RAM bit for
+        trigger 348 derived from
+        ``mem[0x001BDFCD + N/8] |= 1 << (N % 8)``."""
+        from ..data.addresses import (
+            AP_TRIGGER_ARRAY_BASE,
+            STEAK_LOCATION_BIT,
+            STEAK_LOCATION_TRIGGER_ID,
+        )
+
+        n = STEAK_LOCATION_TRIGGER_ID
+        self.assertEqual(
+            STEAK_LOCATION_BIT,
+            (AP_TRIGGER_ARRAY_BASE + n // 8, n % 8),
+        )
+
+
+class TestFrigKeyNeuterPatcher(DigimonWorldTestBase):
+    """Frig Key giveItem neuter: always-on. Both ``giveItem 123 1`` calls
+    in Script 63 Section_5 (Myotismon Frig-Key dialog) get rewritten
+    with ``setTrigger 104`` across 2 ROM copies = 4 .bin offsets.
+    Trigger 104 — set by the cutscene's own ``setTrigger 104`` at
+    script offset 238 and now also by our substituted instructions —
+    is the AP location signal."""
+
+    options: ClassVar[dict[str, Any]] = {}
+
+    def test_neuter_tokens_present(self) -> None:
+        from ..data.addresses import (
+            FRIG_KEY_LOCATION_TRIGGER_ID,
+            ROM_FRIG_KEY_GIVEITEM_NEUTER_VALUE,
+            ROM_FRIG_KEY_GIVEITEM_OFFSETS,
+            VENDING_OPCODE_SETTRIGGER,
+        )
+
+        observed = _capture_tokens(self.world)
+        self.assertEqual(len(ROM_FRIG_KEY_GIVEITEM_OFFSETS), 4)
+        self.assertEqual(len(ROM_FRIG_KEY_GIVEITEM_NEUTER_VALUE), 4)
+        self.assertEqual(
+            ROM_FRIG_KEY_GIVEITEM_NEUTER_VALUE,
+            bytes((
+                VENDING_OPCODE_SETTRIGGER, 0x00,
+                FRIG_KEY_LOCATION_TRIGGER_ID & 0xFF,
+                (FRIG_KEY_LOCATION_TRIGGER_ID >> 8) & 0xFF,
+            )),
+        )
+        for offset in ROM_FRIG_KEY_GIVEITEM_OFFSETS:
+            self.assertIn(
+                (offset, ROM_FRIG_KEY_GIVEITEM_NEUTER_VALUE), observed,
+                f"missing Frig Key giveItem neuter at {offset:#x}",
+            )
+
+    def test_location_bit_matches_trigger_formula(self) -> None:
+        """Sanity: ``FRIG_KEY_LOCATION_BIT`` is the canonical RAM bit
+        for trigger 104 derived from
+        ``mem[0x001BDFCD + N/8] |= 1 << (N % 8)``."""
+        from ..data.addresses import (
+            AP_TRIGGER_ARRAY_BASE,
+            FRIG_KEY_LOCATION_BIT,
+            FRIG_KEY_LOCATION_TRIGGER_ID,
+        )
+
+        n = FRIG_KEY_LOCATION_TRIGGER_ID
+        self.assertEqual(
+            FRIG_KEY_LOCATION_BIT,
+            (AP_TRIGGER_ARRAY_BASE + n // 8, n % 8),
+        )
+
+
+class TestMansionKeyNeuterPatcher(DigimonWorldTestBase):
+    """Mansion Key giveItem neuter: always-on. Both ``giveItem 119 1``
+    calls in Script 54 Section_81 (across 2 ROM copies = 4 .bin
+    offsets) get rewritten with ``setTrigger 110`` so the vanilla
+    cutscene no longer puts the key in inventory; only AP delivery
+    (bank slot 119) does. Trigger 110 — set by both the cutscene's
+    own ``setTrigger 110`` and our substituted instructions — is the
+    AP location signal. See addresses.py:
+    ``ROM_MANSION_KEY_GIVEITEM_*``."""
+
+    options: ClassVar[dict[str, Any]] = {}
+
+    def test_neuter_tokens_present(self) -> None:
+        from ..data.addresses import (
+            MANSION_KEY_LOCATION_TRIGGER_ID,
+            ROM_MANSION_KEY_GIVEITEM_NEUTER_VALUE,
+            ROM_MANSION_KEY_GIVEITEM_OFFSETS,
+            VENDING_OPCODE_SETTRIGGER,
+        )
+
+        observed = _capture_tokens(self.world)
+        # 4-byte rewrite at each of the four sites (both giveItem paths
+        # in two ROM copies of Script 54).
+        self.assertEqual(len(ROM_MANSION_KEY_GIVEITEM_OFFSETS), 4)
+        self.assertEqual(len(ROM_MANSION_KEY_GIVEITEM_NEUTER_VALUE), 4)
+        self.assertEqual(
+            ROM_MANSION_KEY_GIVEITEM_NEUTER_VALUE,
+            bytes((
+                VENDING_OPCODE_SETTRIGGER, 0x00,
+                MANSION_KEY_LOCATION_TRIGGER_ID & 0xFF,
+                (MANSION_KEY_LOCATION_TRIGGER_ID >> 8) & 0xFF,
+            )),
+        )
+        for offset in ROM_MANSION_KEY_GIVEITEM_OFFSETS:
+            self.assertIn(
+                (offset, ROM_MANSION_KEY_GIVEITEM_NEUTER_VALUE), observed,
+                f"missing Mansion Key giveItem neuter at {offset:#x}",
+            )
+
+    def test_location_bit_matches_trigger_formula(self) -> None:
+        """Sanity: ``MANSION_KEY_LOCATION_BIT`` is the canonical RAM
+        bit for trigger 110 derived from
+        ``mem[0x001BDFCD + N/8] |= 1 << (N % 8)``."""
+        from ..data.addresses import (
+            AP_TRIGGER_ARRAY_BASE,
+            MANSION_KEY_LOCATION_BIT,
+            MANSION_KEY_LOCATION_TRIGGER_ID,
+        )
+
+        n = MANSION_KEY_LOCATION_TRIGGER_ID
+        self.assertEqual(
+            MANSION_KEY_LOCATION_BIT,
+            (AP_TRIGGER_ARRAY_BASE + n // 8, n % 8),
+        )
+
+
+class TestOldFishrodRemapPatcher(DigimonWorldTestBase):
+    """Old Fishrod cutscene remap: always-on. The rod-give cutscene's
+    references to trigger 45 (in both the section gate and the
+    setTrigger) get rewritten to trigger 902 — decoupling vanilla
+    cutscene completion (location signal) from rod ownership (fishing
+    enable). See addresses.py: ``ROM_OLD_FISHROD_REMAP_*``."""
+
+    options: ClassVar[dict[str, Any]] = {}
+
+    def test_remap_tokens_present(self) -> None:
+        from ..data.addresses import (
+            OLD_FISHROD_LOCATION_TRIGGER_ID,
+            ROM_OLD_FISHROD_REMAP_OFFSETS,
+            ROM_OLD_FISHROD_REMAP_VALUE,
+        )
+
+        observed = _capture_tokens(self.world)
+        # 2-byte trigger-ID rewrite at each of the two remap sites.
+        self.assertEqual(len(ROM_OLD_FISHROD_REMAP_VALUE), 2)
+        self.assertEqual(
+            ROM_OLD_FISHROD_REMAP_VALUE,
+            bytes((
+                OLD_FISHROD_LOCATION_TRIGGER_ID & 0xFF,
+                (OLD_FISHROD_LOCATION_TRIGGER_ID >> 8) & 0xFF,
+            )),
+        )
+        for offset in ROM_OLD_FISHROD_REMAP_OFFSETS:
+            self.assertIn(
+                (offset, ROM_OLD_FISHROD_REMAP_VALUE), observed,
+                f"missing rod-cutscene remap write at {offset:#x}",
+            )
+
+    def test_location_bit_matches_trigger_formula(self) -> None:
+        """Sanity: ``OLD_FISHROD_LOCATION_BIT`` is the canonical RAM bit
+        for trigger 902 derived from ``mem[0x001BDFCD + N/8] |= 1 << (N % 8)``.
+        Catches drift between the location pollers and the patched
+        cutscene if anyone touches one without the other."""
+        from ..data.addresses import (
+            AP_TRIGGER_ARRAY_BASE,
+            OLD_FISHROD_LOCATION_BIT,
+            OLD_FISHROD_LOCATION_TRIGGER_ID,
+        )
+
+        n = OLD_FISHROD_LOCATION_TRIGGER_ID
+        self.assertEqual(
+            OLD_FISHROD_LOCATION_BIT,
+            (AP_TRIGGER_ARRAY_BASE + n // 8, n % 8),
+        )
 
 
 class TestQoLPatcherOptionsOff(DigimonWorldTestBase):
@@ -499,6 +1082,7 @@ class TestQoLPatcherOptionsOff(DigimonWorldTestBase):
         "skip_intro": 0,
         "type_lock_unlocks": 0,
         "spawn_rate_boost": 1,
+        "card_locations": True,  # fill capacity for EXCLUDED chests
     }
 
     def test_skip_intro_tokens_absent(self) -> None:
@@ -584,6 +1168,7 @@ class TestQoLSlotData(DigimonWorldTestBase):
     options: ClassVar[dict[str, Any]] = {
         "fast_drimogemon": 1,
         "easy_monochromon": 0,
+        "card_locations": True,  # fill capacity for EXCLUDED chests
     }
 
     def test_qol_flags_in_slot_data(self) -> None:

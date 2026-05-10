@@ -146,13 +146,19 @@ class TestChestDispatch(DigimonWorldTestBase):
             seen[key] = name
 
     def test_dispatch_size(self) -> None:
-        # 50 recruits + 65 chests + 4 key items (Old Fishrod Pickup,
-        # Drill Tunnel Boulder, Tropical Jungle Bridge Fixed,
-        # Great Canyon Bridge Fixed) + 12 vending machines. Per-seed
-        # availability of the option-gated entries (3 keyitems and the
-        # 12 vending) is filtered on the AP server side; the dispatch
-        # dict is unconditional.
-        self.assertEqual(len(LOCATION_RAM_BITS), 50 + 65 + 4 + 12)
+        # 50 recruits - 4 dropped (Airdramon, Seadramon, Nanimon,
+        # Giromon) + 65 chests + 9 key items (Old Fishrod Pickup,
+        # Mansion Key Pickup, Frig Key Pickup, Steak Pickup, Gear
+        # Pickup, Rain Plant Pickup, Blue Flute Pickup, Leomonstone
+        # Pickup, Amazing Rod Pickup) + 12 vending machines.
+        # Per-seed availability of the option-gated entries (the 12
+        # vending) is filtered on the AP server side; the dispatch
+        # dict is unconditional. Airdramon, Seadramon, Nanimon, and
+        # Giromon stay in RECRUIT_RAM_BITS but are filtered out of
+        # LOCATION_RAM_BITS via ``_DROPPED_RECRUITS_BLACKLIST``.
+        # Lava Cave Access / Tropical Jungle Bridge / Great Canyon
+        # Bridge are AP items only — no associated AP location.
+        self.assertEqual(len(LOCATION_RAM_BITS), 46 + 65 + 9 + 12)
 
 
 # =============================================================================
@@ -184,6 +190,18 @@ class TestItemDeliveryRoutes(DigimonWorldTestBase):
     def test_money_routes(self) -> None:
         self.assertIn("1000 Bits", ITEM_DELIVERY_ROUTES)
         self.assertIn("5000 Bits", ITEM_DELIVERY_ROUTES)
+
+    def test_all_progressive_bundles_have_routes(self) -> None:
+        """Every ``Progressive <Feature>`` recruit-bundle item must have
+        a delivery route. Without it, ``_deliver_items`` logs
+        ``"No delivery route for item X; skipping"`` on each tick the
+        item is received. The route is a no-op (the BEATEN-bit work
+        happens in ``_reconcile_recruits``) but its presence is what
+        keeps the warning from firing."""
+
+        from ..items import PROGRESSIVE_BUNDLES
+        for prog_name in PROGRESSIVE_BUNDLES:
+            self.assertIn(prog_name, ITEM_DELIVERY_ROUTES, prog_name)
 
 
 class TestProsperityDelivery(DigimonWorldTestBase):
@@ -250,29 +268,61 @@ class TestItemsReceivedCounter(DigimonWorldTestBase):
         for byte_addr in counter_range:
             self.assertNotIn(byte_addr, location_addrs)
 
-    def test_counter_uses_unused_bank_slots(self) -> None:
-        # Counter lives in the bank region but in slots beyond the
-        # highest assigned item dw_code, so DW1's bank-deposit code
-        # never writes to these bytes during normal play.
-        from ..data.addresses import RAM_ITEM_BANK_BASE
-        from ..items import ITEM_NAME_TO_ID, ITEM_ID_BASE
+    def test_counter_outside_bank_ui_range(self) -> None:
+        # The bank UI iterates all 128 bank slots and renders any
+        # non-zero quantity as ``<item-name>: N`` — including for slots
+        # where the player has never legitimately deposited anything.
+        # If the counter lived in this range, the magic byte (0xA5 =
+        # 165) would surface in-game as 165 of whatever item the slot
+        # corresponds to. (Regression guard for the 2026-05-09 Noble
+        # Mane / Giga Hand bug.)
+        from ..data.addresses import RAM_ITEM_BANK_BASE, RAM_ITEM_BANK_SIZE
         assert ITEMS_RECEIVED_COUNTER is not None
         counter_addr, counter_size = ITEMS_RECEIVED_COUNTER
-        # Compute the set of slots actually used by AP items.
-        used_slots: set[int] = set()
-        for ap_id in ITEM_NAME_TO_ID.values():
-            dw_code = ap_id - ITEM_ID_BASE
-            if 2000 <= dw_code <= 2127:
-                used_slots.add(dw_code - 2000)
+        bank_end = RAM_ITEM_BANK_BASE + RAM_ITEM_BANK_SIZE
         for byte_addr in range(counter_addr, counter_addr + counter_size):
-            slot = byte_addr - RAM_ITEM_BANK_BASE
-            self.assertGreaterEqual(slot, 0,
-                f"counter byte 0x{byte_addr:08X} is below bank base")
-            self.assertLess(slot, 128,
-                f"counter byte 0x{byte_addr:08X} is past bank end (slot 128)")
-            self.assertNotIn(slot, used_slots,
-                f"counter byte 0x{byte_addr:08X} (slot {slot}) "
-                f"collides with an AP item")
+            self.assertFalse(
+                RAM_ITEM_BANK_BASE <= byte_addr < bank_end,
+                f"counter byte 0x{byte_addr:08X} lands in the bank UI "
+                f"display range 0x{RAM_ITEM_BANK_BASE:08X}.."
+                f"0x{bank_end - 1:08X} — the bank UI will surface the "
+                f"magic byte as a phantom item in slot "
+                f"{byte_addr - RAM_ITEM_BANK_BASE}",
+            )
+
+    def test_counter_outside_card_nibble_array(self) -> None:
+        # The card-vending logic packs 66 ownership counters as nibbles
+        # in 0x001BDFAC..0x001BDFCC (33 bytes). A counter byte landing
+        # here would corrupt two card counters at once.
+        from ..data.addresses import CARD_BLOCK_BASE, CARD_BLOCK_SIZE
+        assert ITEMS_RECEIVED_COUNTER is not None
+        counter_addr, counter_size = ITEMS_RECEIVED_COUNTER
+        card_end = CARD_BLOCK_BASE + CARD_BLOCK_SIZE
+        for byte_addr in range(counter_addr, counter_addr + counter_size):
+            self.assertFalse(
+                CARD_BLOCK_BASE <= byte_addr < card_end,
+                f"counter byte 0x{byte_addr:08X} lands in the card "
+                f"nibble array 0x{CARD_BLOCK_BASE:08X}.."
+                f"0x{card_end - 1:08X}",
+            )
+
+    def test_counter_outside_trigger_array(self) -> None:
+        # The trigger bit-array is the most-written region in DW1: every
+        # ``setTrigger N`` opcode (1300+ in the script bytecode, plus
+        # engine-level callers) ORs a bit into ``base + N // 8``. The
+        # original counter at 0x001BDFEE was clobbered by trigger 274
+        # mid-playthrough — see memory note ``dw1_counter_safe_address``.
+        from ..data.addresses import AP_TRIGGER_ARRAY_BASE
+        assert ITEMS_RECEIVED_COUNTER is not None
+        counter_addr, counter_size = ITEMS_RECEIVED_COUNTER
+        trigger_end = 0x001BE041  # one past the documented trigger array tail
+        for byte_addr in range(counter_addr, counter_addr + counter_size):
+            self.assertFalse(
+                AP_TRIGGER_ARRAY_BASE <= byte_addr < trigger_end,
+                f"counter byte 0x{byte_addr:08X} lands in the trigger "
+                f"bit-array 0x{AP_TRIGGER_ARRAY_BASE:08X}.."
+                f"0x{trigger_end - 1:08X}",
+            )
 
 
 # =============================================================================
@@ -329,9 +379,19 @@ class TestGoalDetection(DigimonWorldTestBase):
 
     def _run_check_goal(self, prosperity_value: int,
                         already_finished: bool = False,
-                        already_sent: bool = False) -> _FakeClientCtx:
+                        already_sent: bool = False,
+                        goal: int = 1,
+                        prosperity_goal: int = 50) -> _FakeClientCtx:
+        # ``goal`` defaults to 1 (prosperity) so the legacy tests that
+        # were written before the goal option was honored continue to
+        # exercise the auto-fire path. Callers that want the
+        # machinedramon path pass ``goal=0``. ``prosperity_goal`` mirrors
+        # the slot_data ``prosperity_goal`` threshold; default 50
+        # matches the option's vanilla default.
         client = DigimonWorldClient()
         client._goal_complete_sent = already_sent
+        client._goal = goal
+        client._prosperity_goal = prosperity_goal
         ctx = _FakeClientCtx(finished_game=already_finished)
 
         async def fake_read(_bizhawk_ctx: Any, _requests: list[Any]) -> list[bytes]:
@@ -365,6 +425,93 @@ class TestGoalDetection(DigimonWorldTestBase):
         ctx = self._run_check_goal(100, already_sent=True)
         self.assertEqual(ctx.sent_msgs, [])
 
+    def test_prosperity_goal_uses_configured_threshold(self) -> None:
+        """Phase 9: ``goal: prosperity`` fires at the configured
+        ``prosperity_goal`` (slot_data), not the legacy hardcoded 50.
+        """
+
+        # threshold=80, byte=70 → no fire.
+        ctx = self._run_check_goal(70, prosperity_goal=80)
+        self.assertEqual(ctx.sent_msgs, [])
+        # threshold=80, byte=80 → fires.
+        ctx = self._run_check_goal(80, prosperity_goal=80)
+        self.assertEqual(len(ctx.sent_msgs), 1)
+        # threshold=30, byte=30 → fires (would have stayed below the
+        # legacy 50 cutoff).
+        ctx = self._run_check_goal(30, prosperity_goal=30)
+        self.assertEqual(len(ctx.sent_msgs), 1)
+
+    def test_unset_prosperity_goal_does_not_fire(self) -> None:
+        """If slot_data hasn't arrived yet (``_prosperity_goal`` is
+        None) the goal check is a no-op — avoids a spurious release on
+        a stale prosperity read."""
+
+        client = DigimonWorldClient()
+        client._goal = 1  # prosperity
+        client._prosperity_goal = None  # not yet from slot_data
+        ctx = _FakeClientCtx()
+
+        async def fake_read(_b: Any, _r: list[Any]) -> list[bytes]:
+            return [bytes([100])]  # well above any threshold
+
+        with mock.patch.object(client_module.bizhawk, "read", fake_read):
+            _run(client._check_goal(ctx))
+        self.assertEqual(ctx.sent_msgs, [])
+
+    def test_machinedramon_goal_does_not_fire_when_bit_unset(self) -> None:
+        # With goal=machinedramon, _check_goal reads
+        # RAM_MACHINEDRAMON_DEFEATED_BYTE and tests bit 2 (mask 0x04).
+        # A returned byte of 50 (0x32) has bit 2 unset -> no fire.
+        # Also covers the historical bug (2026-05-01) where reaching
+        # prosperity 50 used to fire GoalComplete on the machinedramon
+        # goal: byte 50 has bit 2 unset, so even if some path
+        # accidentally fed prosperity into this read, the bit-test
+        # would still gate correctly.
+        ctx = self._run_check_goal(50, goal=0)
+        self.assertEqual(ctx.sent_msgs, [])
+        self.assertFalse(ctx.finished_game)
+
+    def test_machinedramon_goal_fires_when_bit_set(self) -> None:
+        # Byte value with bit 2 set (mask 0x04) -> goal fires.
+        ctx = self._run_check_goal(0x04, goal=0)
+        self.assertEqual(len(ctx.sent_msgs), 1)
+        msg = ctx.sent_msgs[0][0]
+        self.assertEqual(msg["cmd"], "StatusUpdate")
+        from NetUtils import ClientStatus
+        self.assertEqual(msg["status"], ClientStatus.CLIENT_GOAL)
+        self.assertTrue(ctx.finished_game)
+
+    def test_machinedramon_goal_fires_when_bit_set_among_others(self) -> None:
+        # Bit 2 plus other bits set (e.g. recruit bits 3..7 are
+        # adjacent in the same byte). Goal still fires — the test
+        # masks for bit 2 only.
+        ctx = self._run_check_goal(0xFC, goal=0)  # bits 2..7 set
+        self.assertEqual(len(ctx.sent_msgs), 1)
+        self.assertTrue(ctx.finished_game)
+
+    def test_machinedramon_goal_no_fire_for_unrelated_recruit_bits(self) -> None:
+        # Adjacent recruit bits 3..7 set, but bit 2 unset (mask 0xFB).
+        # Must NOT fire — recruit-completion writes (e.g. Agumon at
+        # bit 3 of the same byte) shouldn't trigger goal completion.
+        ctx = self._run_check_goal(0xF8, goal=0)  # bits 3..7 set, bit 2 clear
+        self.assertEqual(ctx.sent_msgs, [])
+        self.assertFalse(ctx.finished_game)
+
+    def test_unset_goal_does_not_auto_fire(self) -> None:
+        # If slot_data hasn't arrived yet (_goal is None), do nothing —
+        # avoids a spurious release on a stale read before the goal
+        # is known.
+        client = DigimonWorldClient()
+        ctx = _FakeClientCtx()
+
+        async def fake_read(_bizhawk_ctx: Any, _requests: list[Any]) -> list[bytes]:
+            return [bytes([50])]
+
+        with mock.patch.object(client_module.bizhawk, "read", fake_read):
+            _run(client._check_goal(ctx))
+        self.assertEqual(ctx.sent_msgs, [])
+        self.assertFalse(ctx.finished_game)
+
 
 # =============================================================================
 # Item delivery (no pending items = no writes)
@@ -397,17 +544,22 @@ class TestManifestRecruitTableShape(DigimonWorldTestBase):
     options: ClassVar[dict[str, Any]] = {}
 
     def test_all_recruit_names_have_recruit_bits(self) -> None:
-        # RECRUIT_NAMES (48, post-Phase-6) is a subset of
-        # RECRUIT_RAM_BITS (50, manifest still includes Agumon and
-        # Digitamamon for the client's deliverer + bit-poll routes).
-        # Agumon: force-recruited bank NPC, no AP location.
-        # Digitamamon: post-game optional, no AP location.
+        # RECRUIT_NAMES (44) is a subset of RECRUIT_RAM_BITS (50 —
+        # vanilla recruit bit-block). Excluded from RECRUIT_NAMES:
+        # Agumon (force-recruited bank NPC), Digitamamon (post-game
+        # optional), Airdramon (dropped 2026-05-08), Seadramon
+        # (dropped 2026-05-09 — recruit cutscene IS Blue Flute
+        # pickup), Nanimon (dropped 2026-05-09 — never joins city),
+        # Giromon (dropped 2026-05-09 — Jukebox crashes NTSC build).
+        # See addresses.py ``_AP_RECRUIT_EXCLUDED``.
         for recruit_name in RECRUIT_NAMES:
             self.assertIn(recruit_name, RECRUIT_RAM_BITS)
         self.assertEqual(len(RECRUIT_RAM_BITS), 50)
-        self.assertEqual(len(RECRUIT_NAMES), 48)
-        self.assertNotIn("Agumon", RECRUIT_NAMES)
-        self.assertNotIn("Digitamamon", RECRUIT_NAMES)
+        self.assertEqual(len(RECRUIT_NAMES), 44)
+        for excluded in ("Agumon", "Digitamamon", "Airdramon",
+                         "Seadramon", "Nanimon", "Giromon"):
+            self.assertNotIn(excluded, RECRUIT_NAMES)
+        self.assertIn("Greymon", RECRUIT_NAMES)
         self.assertIn("Agumon", RECRUIT_RAM_BITS)
         self.assertIn("Digitamamon", RECRUIT_RAM_BITS)
 

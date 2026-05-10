@@ -40,7 +40,7 @@ Region inventory (22 regions):
     * ``Mt. Infinity`` — Devimon, Megadramon, MetalGreymon. 50-PP gate
       from File City.
     * ``Big Store`` — late-game shop. 50-PP gate.
-    * ``Tower`` — endgame; AS Decoder + 50 PP from Mt. Infinity.
+    * ``Tower`` — endgame; 50 PP from Mt. Infinity.
     * ``Factorial Town`` — Andromon/Giromon/MetalMamemon/Numemon. The
       only entry is Whamon's ferry from File City after Whamon Recruit.
     * ``Card Vending`` — synthetic region holding the 66 card-vending AP
@@ -49,6 +49,15 @@ Region inventory (22 regions):
       (free-on-region-access) and one in File City (Betamon + Patamon
       Recruit prereq). The synthetic region has both as parents so a
       card location is reachable as long as either machine is.
+    * ``Leomon Ancestor Cave`` — sub-area off Drill Tunnel, gated by
+      45 PP. Holds one chest.
+    * ``Secret Beach Cave`` — Whamon-gated beach sub-area. Holds one
+      chest.
+    * ``Back Dimension`` — post-game-only area unlocked after defeating
+      Machinedramon. Holds 7 chests, all flagged
+      ``LocationProgressType.EXCLUDED`` so AP fill never sends
+      progression there. See :data:`worlds.digimon_world.locations`
+      and the ``dw1_back_dimension`` memory note for design rationale.
 
 Edges are declared here without rules; access rules are attached in
 :mod:`.rules`. ``Menu``, ``File City``, and ``Native Forest`` are
@@ -90,6 +99,24 @@ REGION_NAMES: Final[tuple[str, ...]] = (
     "Big Store",
     "Tower",
     "Factorial Town",
+    # Locked sub-area inside Overdell — Mansion-Key gated
+    "Grey Lord's Mansion",
+    # Locked sub-area off Drill Tunnel — Leomon's Ancestor Cave entrance,
+    # gated by 45 PP (matches the Leomonstone Pickup gate, since the
+    # Stone Tablet sits inside the cave). Holds one chest.
+    "Leomon Ancestor Cave",
+    # Whamon-gated sub-area accessible from the Whamon-transport beach
+    # cluster. Holds one chest.
+    "Secret Beach Cave",
+    # Post-game-only area unlocked after defeating Machinedramon. The
+    # in-game entrance reuses one of {Ogre Fortress, Ice Sanctuary,
+    # Grey Lord's Mansion} per save; for AP logic we abstract that
+    # into a single region gated on the same Final-Battle threshold
+    # plus reachability of any of those three. All 7 chests here are
+    # flagged ``LocationProgressType.EXCLUDED`` because under the default
+    # Machinedramon goal the player wins as soon as they beat
+    # Machinedramon and has no incentive to return for post-game chests.
+    "Back Dimension",
     # Synthetic — populated only when CardLocations is on
     "Card Vending",
 )
@@ -113,7 +140,7 @@ _EDGES: Final[tuple[tuple[str, str], ...]] = (
     ("File City", "Freezeland"),         # Has(BR Recruit) & Has(Flight: Freezeland)
     ("File City", "Beetle Land"),        # Has(BR Recruit) & Has(Flight: Beetle Land)
     # Mt. Infinity terminal
-    ("Mt. Infinity", "Tower"),           # AS Decoder + 50 PP
+    ("Mt. Infinity", "Tower"),           # 50 PP
     # Left chain: Native Forest → Drill Tunnel → Meramon Tunnel → Mt. Panorama → ...
     ("Native Forest", "Drill Tunnel"),
     ("Drill Tunnel", "Meramon Tunnel"),  # Mode-gated (Lava Cave Access)
@@ -122,9 +149,16 @@ _EDGES: Final[tuple[tuple[str, str], ...]] = (
     ("Gear Savanna", "Geko Swamp"),
     ("Geko Swamp", "Misty Trees"),
     ("Misty Trees", "Toy Town"),
+    # Drill Tunnel sub-area: Leomon Ancestor Cave (PP 45)
+    ("Drill Tunnel", "Leomon Ancestor Cave"),
+    # Whamon-gated beach detour: Secret Beach Cave from File City
+    ("File City", "Secret Beach Cave"),    # Has(Whamon Recruit)
+    # Post-game Back Dimension entrance from File City
+    ("File City", "Back Dimension"),       # 50 PP + reach (GLM | Freezeland | Great Canyon)
     # Right chain: Native Forest → Tropical Jungle / Greatlake → ...
     ("Native Forest", "Tropical Jungle"),  # Mode-gated (TJ Bridge)
     ("Tropical Jungle", "Overdell"),
+    ("Overdell", "Grey Lord's Mansion"),  # Has(Mansion Key)
     ("Tropical Jungle", "Ancient Dino Region"),
     ("Native Forest", "Greatlake"),
     ("Greatlake", "Beetle Land"),        # Has(rod) | Has(Blue Flute)
@@ -135,6 +169,45 @@ _EDGES: Final[tuple[tuple[str, str], ...]] = (
     # region. Rules attached in :mod:`.rules`.
     ("Gear Savanna", "Card Vending"),    # free; Gear Savanna access alone
     ("File City",    "Card Vending"),    # Has(Betamon Recruit) & Has(Patamon Recruit)
+
+    # ====================================================================
+    # Reverse edges — walking back through the geography
+    # ====================================================================
+    # In-game DW1 lets the player walk back through any region transition
+    # they've already crossed. AP region traversal is one-way per edge,
+    # so we declare the reverse explicitly. Most reverses are free; only
+    # the boulder gate (Lava Cave Access) binds in both directions and
+    # only the rod/flute requirement applies to Beetle Land both ways.
+    # Bridge gates (TJ Bridge / GC Bridge) only apply on the forward
+    # edge per user direction — Birdramon flight bypasses are intended
+    # to provide alternative routes that don't require the bridge.
+    ("Native Forest", "File City"),
+    ("Mt. Infinity", "File City"),
+    ("Big Store", "File City"),
+    ("Factorial Town", "File City"),
+    ("Tower", "Mt. Infinity"),
+    # Left chain reverses
+    ("Drill Tunnel", "Native Forest"),
+    ("Meramon Tunnel", "Drill Tunnel"),     # Lava Cave Access (boulder)
+    ("Mt. Panorama", "Meramon Tunnel"),     # Lava Cave Access (boulder)
+    ("Gear Savanna", "Mt. Panorama"),
+    ("Geko Swamp", "Gear Savanna"),
+    ("Misty Trees", "Geko Swamp"),
+    ("Toy Town", "Misty Trees"),
+    # Sub-area reverses (free — once you can enter, you can leave)
+    ("Leomon Ancestor Cave", "Drill Tunnel"),
+    ("Secret Beach Cave", "File City"),
+    ("Back Dimension", "File City"),
+    # Right chain reverses
+    ("Tropical Jungle", "Native Forest"),
+    ("Overdell", "Tropical Jungle"),
+    ("Grey Lord's Mansion", "Overdell"),  # free reverse (key already obtained to enter)
+    ("Ancient Dino Region", "Tropical Jungle"),
+    ("Greatlake", "Native Forest"),
+    ("Beetle Land", "Greatlake"),           # rod | Blue Flute (same as forward)
+    ("Great Canyon", "Greatlake"),
+    ("Freezeland", "Great Canyon"),
+    ("Misty Trees", "Freezeland"),
 )
 
 

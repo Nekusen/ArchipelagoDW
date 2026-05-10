@@ -48,19 +48,21 @@ Apply-time pipeline
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import struct
 from pathlib import Path
+from random import Random
 from typing import TYPE_CHECKING, ClassVar
 
 import settings
-from BaseClasses import ItemClassification
 from worlds.Files import APPatchExtension, APProcedurePatch, APTokenMixin, APTokenTypes
 
 from .data import edc
 from .data.addresses import (
     AP_CHEST_SENTINEL_ITEM_ID,
     CHEST_NAME_TO_ROM_OFFSETS,
+    ROM_ANIM_ID_FORMAT,
     ROM_AP_ITEM_ENTRY_BYTES,
     ROM_AP_ITEM_ENTRY_OFFSET,
     ROM_BIN_BYTES,
@@ -80,6 +82,8 @@ from .data.addresses import (
     ROM_CHEST_ITEM_FORMAT,
     ROM_CITY_BITMAP_BYTES,
     ROM_CITY_BITMAP_OFFSET,
+    ROM_COELAMON_GATE_OFFSETS,
+    ROM_COELAMON_GATE_VALUE,
     ROM_COMBAT_SITE1_FORMAT,
     ROM_COMBAT_SITE1_OFFSET,
     ROM_COMBAT_SITE1_VALUE,
@@ -92,6 +96,8 @@ from .data.addresses import (
     ROM_COMBAT_TR1_OFFSET,
     ROM_COMBAT_TR2_OFFSET,
     ROM_COMBAT_TR3_OFFSET,
+    ROM_DIGIMON_DATA,
+    ROM_DIGIMON_ID_FORMAT,
     ROM_FIELD_SPAWN_TRIGGER_FORMAT,
     ROM_FIELD_SPAWN_TRIGGER_PATCHES,
     ROM_FIX_LEO_CAVE_FORMAT,
@@ -106,22 +112,60 @@ from .data.addresses import (
     ROM_FIX_TOY_TOWN_FORMAT,
     ROM_FIX_TOY_TOWN_OFFSETS,
     ROM_FIX_TOY_TOWN_VALUE,
+    ROM_GACHA_MP_FLOPPY_FIX_BYTES,
+    ROM_GACHA_MP_FLOPPY_FIX_OFFSET,
     ROM_GETTOPCITY_TRIGGER_FORMAT,
     ROM_GETTOPCITY_TRIGGER_PATCHES,
+    ROM_GREAT_CANYON_CUTSCENE_OFFSETS,
+    ROM_GREAT_CANYON_CUTSCENE_VALUE,
     ROM_ISTRIGGERSET_PATCH_FORMAT,
     ROM_ISTRIGGERSET_PATCH_OFFSET,
     ROM_ISTRIGGERSET_PATCH_VALUE,
-    ROM_COELAMON_GATE_OFFSETS,
-    ROM_COELAMON_GATE_VALUE,
-    ROM_GREAT_CANYON_CUTSCENE_OFFSETS,
-    ROM_GREAT_CANYON_CUTSCENE_VALUE,
     ROM_ISTRIGGERSET_WRAPPER_BYTES,
     ROM_ISTRIGGERSET_WRAPPER_OFFSET,
     ROM_LAVA_CAVE_GATE_OFFSETS,
     ROM_LAVA_CAVE_GATE_VALUE,
+    ROM_MAP_ITEM_OFFSETS,
+    ROM_PROSPERITY_GOAL_FORMAT,
+    ROM_PROSPERITY_GOAL_OFFSET,
     ROM_OGREMON_SOFTLOCK_FORMAT,
     ROM_OGREMON_SOFTLOCK_OFFSETS,
     ROM_OGREMON_SOFTLOCK_VALUE,
+    ROM_BLUE_FLUTE_GIVEITEM_NEUTER_VALUE,
+    ROM_BLUE_FLUTE_GIVEITEM_OFFSETS,
+    ROM_FRIG_KEY_GIVEITEM_NEUTER_VALUE,
+    ROM_FRIG_KEY_GIVEITEM_OFFSETS,
+    ROM_GEAR_GIVEITEM_NEUTER_VALUE,
+    ROM_GEAR_GIVEITEM_OFFSETS,
+    ROM_LEOMONSTONE_GIVEITEM_NEUTER_VALUE,
+    ROM_LEOMONSTONE_GIVEITEM_OFFSETS,
+    MERIT_SHOP_DISPATCH,
+    AP_ITEM_DESC_BIN_OFFSET,
+    AP_ITEM_DESC_PTR_BIN_OFFSET,
+    AP_ITEM_DESC_PTR_VALUE,
+    AP_ITEM_DESC_STRING,
+    AP_ITEM_ICON_BLANK_BIN_OFFSETS,
+    AP_ITEM_ICON_ROW_BYTES,
+    ROM_AMAZING_ROD_HIDE_BYTES,
+    ROM_AMAZING_ROD_HIDE_OFFSET,
+    ROM_AP_ITEM_DESC_PTR_PATCH_FORMAT,
+    ROM_AP_SHOP_BOUGHT_ENTRY_BYTES,
+    ROM_AP_SHOP_BOUGHT_ENTRY_OFFSET,
+    ROM_AP_SHOP_PRESALE_NAME_BYTES,
+    ROM_MERIT_SHOP_PATCH_FORMAT,
+    ROM_MERIT_SHOP_PATCH_OFFSET,
+    ROM_MERIT_SHOP_PATCH_VALUE,
+    ROM_MERIT_SHOP_WRAPPER_BYTES,
+    ROM_MERIT_SHOP_WRAPPER_OFFSET,
+    _merit_shop_presale_name_offset,
+    ROM_MANSION_KEY_GIVEITEM_NEUTER_VALUE,
+    ROM_MANSION_KEY_GIVEITEM_OFFSETS,
+    ROM_OLD_FISHROD_REMAP_OFFSETS,
+    ROM_OLD_FISHROD_REMAP_VALUE,
+    ROM_RAIN_PLANT_GIVEITEM_NEUTER_VALUE,
+    ROM_RAIN_PLANT_GIVEITEM_OFFSETS,
+    ROM_STEAK_SPAWN_NEUTER_OFFSETS,
+    ROM_STEAK_SPAWN_NEUTER_VALUE,
     ROM_PP_CALC_PATCH_FORMAT,
     ROM_PP_CALC_PATCH_OFFSET,
     ROM_PP_CALC_PATCH_VALUE,
@@ -143,6 +187,13 @@ from .data.addresses import (
     ROM_SPAWN_RATE_MMAMEMON_OFFSETS,
     ROM_SPAWN_RATE_OTAMAMON_OFFSETS,
     ROM_SPAWN_RATE_PIXIMON_OFFSETS,
+    ROM_STARTER_CHK_DIGIMON,
+    ROM_STARTER_EQUIP_ANIM,
+    ROM_STARTER_LEARN_TECH,
+    ROM_STARTER_SET_DIGIMON,
+    ROM_STARTER_STAT_CHK_DIGIMON,
+    ROM_TECH_ID_FORMAT,
+    ROM_TECHNIQUE_DATA,
     ROM_UNLOCK_GREYLORD_OFFSETS,
     ROM_UNLOCK_GREYLORD_VALUE,
     ROM_UNLOCK_ICE_OFFSETS,
@@ -153,8 +204,21 @@ from .data.addresses import (
     ROM_UNLOCK_TYPE_LOCK_FORMAT,
     VENDING_MACHINES,
     build_combat_multiplier_trampolines,
-    build_vending_textbox,
     encode_set_trigger,
+    read_digimon_table_user_data,
+    read_item_table_user_data,
+    read_technique_table_user_data,
+)
+from .ground_items import compute_ground_item_replacements
+from .starters import (
+    LEVEL_CHAMPION,
+    LEVEL_FRESH,
+    LEVEL_IN_TRAINING,
+    LEVEL_ROOKIE,
+    LEVEL_ULTIMATE,
+    parse_digimon_table,
+    parse_tech_table,
+    pick_starters,
 )
 
 if TYPE_CHECKING:
@@ -254,6 +318,102 @@ class DigimonWorldPatchExtension(APPatchExtension):
         return rom
 
     @staticmethod
+    def shuffle_ground_items(
+        caller: APProcedurePatch, rom: bytes, params_file: str,
+    ) -> bytes:
+        """Apply the ground-item shuffle at patch-apply time.
+
+        Reads the JSON params blob written by :func:`write_patch`
+        (seed, food_only, match_value, value_cutoff), parses ITEM_PARA
+        out of the post-token-application ROM, and rewrites the item-id
+        byte at every ``ROM_MAP_ITEM_OFFSETS`` entry to a deterministic
+        replacement drawn from the constrained pool.
+
+        Runs **after** ``apply_tokens`` so any AP-controlled writes
+        (chest sentinels, "AP ITEM" table entry at slot 83, etc.) are
+        already applied — but slot 83 is in :data:`BANNED_ITEM_IDS`
+        anyway, so it can never be selected as a replacement.
+        """
+
+        params = json.loads(caller.get_file(params_file))
+        rng = Random(int(params["seed"]))
+        table = read_item_table_user_data(rom)
+        replacements = compute_ground_item_replacements(
+            rom,
+            random=rng,
+            food_only=bool(params["food_only"]),
+            match_value=bool(params["match_value"]),
+            value_cutoff=int(params["value_cutoff"]),
+            map_item_offsets=ROM_MAP_ITEM_OFFSETS,
+            item_table_user_data=table,
+        )
+        target = bytearray(rom)
+        for offset, new_id in replacements.items():
+            target[offset + 1] = new_id
+        return bytes(target)
+
+    @staticmethod
+    def shuffle_starters(
+        caller: APProcedurePatch, rom: bytes, params_file: str,
+    ) -> bytes:
+        """Apply the starter-Digimon shuffle at patch-apply time.
+
+        Reads the JSON params blob (seed, allowed_levels mask, weakest-
+        tech flag), parses DIGIMON_PARA + TECH_PARA from the
+        post-token-application ROM, picks two distinct starters and
+        their first techs via :func:`pick_starters`, and writes the
+        nine starter-related bytes per the
+        ``ROM_STARTER_*`` offsets in the manifest.
+
+        Skips the write entirely if the eligible pool is too small
+        (degenerate level mask) or if the chosen Digimon has no usable
+        damaging tech — in those edge cases the vanilla starter bytes
+        are preserved and the player gets the unmodified pick screen.
+        """
+
+        params = json.loads(caller.get_file(params_file))
+        rng = Random(int(params["seed"]))
+        allowed_levels: frozenset[int] = frozenset(int(x) for x in params["allowed_levels"])
+        use_weakest = bool(params["use_weakest_tech"])
+
+        digimon_user_data = read_digimon_table_user_data(rom)
+        tech_user_data = read_technique_table_user_data(rom)
+        digimons = parse_digimon_table(digimon_user_data, ROM_DIGIMON_DATA.count)
+        techs = parse_tech_table(tech_user_data, ROM_TECHNIQUE_DATA.count)
+
+        picks = pick_starters(
+            digimons, techs,
+            random=rng,
+            allowed_levels=allowed_levels,
+            use_weakest_tech=use_weakest,
+        )
+        if picks is None:
+            return rom  # eligible pool too small — keep vanilla starters
+
+        target = bytearray(rom)
+        for slot_index, assignment in enumerate(picks):
+            target[ROM_STARTER_SET_DIGIMON[slot_index]] = (
+                struct.pack(ROM_DIGIMON_ID_FORMAT, assignment.digimon_id)[0]
+            )
+            target[ROM_STARTER_CHK_DIGIMON[slot_index]] = (
+                struct.pack(ROM_DIGIMON_ID_FORMAT, assignment.digimon_id)[0]
+            )
+            if assignment.tech_id is not None and assignment.anim_id is not None:
+                target[ROM_STARTER_LEARN_TECH[slot_index]] = (
+                    struct.pack(ROM_TECH_ID_FORMAT, assignment.tech_id)[0]
+                )
+                target[ROM_STARTER_EQUIP_ANIM[slot_index]] = (
+                    struct.pack(ROM_ANIM_ID_FORMAT, assignment.anim_id)[0]
+                )
+        # The shared post-pick id-check site uses slot 0's Digimon id,
+        # mirroring the standalone (``starterStatChkDigimonOffset`` is
+        # only updated for slot 0).
+        target[ROM_STARTER_STAT_CHK_DIGIMON] = (
+            struct.pack(ROM_DIGIMON_ID_FORMAT, picks[0].digimon_id)[0]
+        )
+        return bytes(target)
+
+    @staticmethod
     def recalc_edc(caller: APProcedurePatch, rom: bytes) -> bytes:
         """Run a sector-diff EDC/ECC recalc against the original source.
 
@@ -288,11 +448,21 @@ class DigimonWorldProcedurePatch(APProcedurePatch, APTokenMixin):
     1. ``verify_rom_hash`` — SHA-1 check the source BIN matches the
        canonical SLUS-01032 dump.
     2. ``apply_tokens`` — built-in extension that walks the token blob
-       and applies WRITE/COPY/RLE/AND/OR/XOR tokens. v1 has exactly one
-       token: a 32-byte WRITE to the PVD volume id.
-    3. ``recalc_edc`` — diff-recalc EDC/ECC for any sector whose data
-       was touched. With v1's single 32-byte write at sector 16, this
-       runs in milliseconds: only sector 16 differs.
+       and applies WRITE/COPY/RLE/AND/OR/XOR tokens.
+    3. ``shuffle_ground_items`` — *optional, per-instance.* Inserted by
+       :func:`_assemble_procedure` when the
+       :class:`worlds.digimon_world.options.GroundItemRandomization`
+       option is on. Reads ``ground_items.json`` for seed and pool
+       scope flags, parses ITEM_PARA, rewrites every map-spawn item-id
+       byte. Defaults to absent — vanilla ground items unchanged.
+    4. ``shuffle_starters`` — *optional, per-instance.* Inserted by
+       :func:`_assemble_procedure` when the
+       :class:`worlds.digimon_world.options.StarterRandomization`
+       option is on. Reads ``starters.json``, parses
+       DIGIMON_PARA + TECH_PARA, rewrites the two starter slots'
+       Digimon ids and learn-tech / equip-anim bytes.
+    5. ``recalc_edc`` — diff-recalc EDC/ECC for any sector whose data
+       was touched.
     """
 
     game: ClassVar[str] = GAME_NAME
@@ -687,6 +857,299 @@ def _write_lava_cave_gate_tokens(patch: DigimonWorldProcedurePatch) -> None:
         patch.write_token(APTokenTypes.WRITE, offset, ROM_LAVA_CAVE_GATE_VALUE)
 
 
+def _write_merit_shop_wrapper_tokens(patch: DigimonWorldProcedurePatch) -> None:
+    """Install the Merit Shop give-item wrapper + AP-shop sentinel
+    infrastructure.
+
+    Four sets of writes:
+
+    1. **Wrapper body** at :data:`ROM_MERIT_SHOP_WRAPPER_OFFSET`. The
+       wrapper compares each shop purchase's $a0 (item ID) against
+       :data:`MERIT_SHOP_DISPATCH`. On match: fires ``setTrigger`` for
+       the AP location signal, then memcpy's the
+       "AP Item Bought" sentinel (slot 114) over the dispatched slot
+       in RAM ITEM_PARA, then ``jr $ra`` (suppresses vanilla
+       ``giveItem``). On no match: tail-calls vanilla giveItem.
+    2. **Jal hijack** at :data:`ROM_MERIT_SHOP_PATCH_OFFSET` — replaces
+       the merit-shop function's ``jal 0x800C5240`` with
+       ``jal ROM_MERIT_SHOP_WRAPPER_RAM``.
+    3. **AP-shop-bought sentinel entry** at
+       :data:`ROM_AP_SHOP_BOUGHT_ENTRY_OFFSET` — rewrites slot 114
+       (vanilla "Moon mirror") to the
+       ``"AP Item Bought" / meritValue=0`` sentinel that the wrapper
+       copies over the dispatched slot post-purchase.
+    4. **Per-dispatch presale renames** — for each
+       ``(item_id, _) in MERIT_SHOP_DISPATCH``, rewrites that slot's
+       name field to ``"AP Item"`` so the pre-purchase shop display
+       reads ``AP Item — vanilla_price`` instead of revealing the
+       underlying item.
+    """
+
+    # 0. Slot 83 ("AP Item") full entry — name + meritValue 300 +
+    #    zeros. Always-on (independent of chest_randomization)
+    #    because slot 83 is the merit shop's AP-purchase row regardless
+    #    of whether chests are randomized. With chest rando OFF, this is
+    #    the only path that sets up slot 83; with it ON, the chest
+    #    patcher writes the same bytes again (idempotent — harmless
+    #    duplicate).
+    patch.write_token(
+        APTokenTypes.WRITE, ROM_AP_ITEM_ENTRY_OFFSET, ROM_AP_ITEM_ENTRY_BYTES,
+    )
+    # 1. Wrapper body
+    patch.write_token(
+        APTokenTypes.WRITE,
+        ROM_MERIT_SHOP_WRAPPER_OFFSET,
+        ROM_MERIT_SHOP_WRAPPER_BYTES,
+    )
+    # 2. Jal hijack
+    patch.write_token(
+        APTokenTypes.WRITE,
+        ROM_MERIT_SHOP_PATCH_OFFSET,
+        struct.pack(ROM_MERIT_SHOP_PATCH_FORMAT, ROM_MERIT_SHOP_PATCH_VALUE),
+    )
+    # 3. Slot 114 → "AP Item Bought" sentinel
+    patch.write_token(
+        APTokenTypes.WRITE,
+        ROM_AP_SHOP_BOUGHT_ENTRY_OFFSET,
+        ROM_AP_SHOP_BOUGHT_ENTRY_BYTES,
+    )
+    # 4. Per-dispatch presale name rewrites (idempotent for slot 83
+    #    since it's already named "AP Item" via ROM_AP_ITEM_ENTRY_BYTES;
+    #    needed when MERIT_SHOP_DISPATCH includes real-item slots
+    #    whose name should display as "AP Item" pre-purchase).
+    for item_id, _trigger_id in MERIT_SHOP_DISPATCH:
+        patch.write_token(
+            APTokenTypes.WRITE,
+            _merit_shop_presale_name_offset(item_id),
+            ROM_AP_SHOP_PRESALE_NAME_BYTES,
+        )
+    # 5. Hide vanilla Amazing Rod from the merit shop (zero its
+    #    meritValue field so the row scan skips it). Slot 117's name,
+    #    icon, and other stats stay vanilla — only its merit-shop
+    #    visibility is suppressed.
+    patch.write_token(
+        APTokenTypes.WRITE,
+        ROM_AMAZING_ROD_HIDE_OFFSET,
+        ROM_AMAZING_ROD_HIDE_BYTES,
+    )
+    # 6. AP Item description string in Cave6 free space + redirect
+    #    ITEM_DESC_PTR[83] to it, so the merit-shop hover panel reads
+    #    "Item from the multiworld" instead of vanilla Electo Ring's
+    #    description text.
+    patch.write_token(
+        APTokenTypes.WRITE,
+        AP_ITEM_DESC_BIN_OFFSET,
+        AP_ITEM_DESC_STRING,
+    )
+    patch.write_token(
+        APTokenTypes.WRITE,
+        AP_ITEM_DESC_PTR_BIN_OFFSET,
+        struct.pack(ROM_AP_ITEM_DESC_PTR_PATCH_FORMAT, AP_ITEM_DESC_PTR_VALUE),
+    )
+    # 7. Blank slot 83's icon in ITEM.TIM (Electo Ring sprite, never
+    #    seen elsewhere in the game). 16 row writes, sector-aware.
+    for bin_offset in AP_ITEM_ICON_BLANK_BIN_OFFSETS:
+        patch.write_token(
+            APTokenTypes.WRITE,
+            bin_offset,
+            AP_ITEM_ICON_ROW_BYTES,
+        )
+
+
+def _write_leomonstone_neuter_tokens(patch: DigimonWorldProcedurePatch) -> None:
+    """Replace all 7 ``giveItem 118 1`` calls in Script 109 with
+    ``setTrigger 135``.
+
+    Same shape as the other key-item neuters: vanilla Leomonstone
+    delivery bypassed; only AP delivery (bank slot 118) puts the
+    Leomonstone in the player's hands. The cutscene's existing
+    ``setTrigger 135`` at script offset 676 stays in place; the
+    substituted setTrigger calls are idempotent.
+
+    Three ROM copies of Script 109's Leomonstone cutscene
+    (Section_52) plus one orphan retry give 7 .bin sites total.
+    Substituting setTrigger 135 at every site is safe regardless of
+    cutscene context — the bit is the canonical "Leomonstone obtained"
+    flag and setting it once is enough; further sets are no-ops.
+
+    See :data:`ROM_LEOMONSTONE_GIVEITEM_OFFSETS` /
+    :data:`ROM_LEOMONSTONE_GIVEITEM_NEUTER_VALUE` for byte layout.
+    """
+
+    for offset in ROM_LEOMONSTONE_GIVEITEM_OFFSETS:
+        patch.write_token(APTokenTypes.WRITE, offset, ROM_LEOMONSTONE_GIVEITEM_NEUTER_VALUE)
+
+
+def _write_blue_flute_neuter_tokens(patch: DigimonWorldProcedurePatch) -> None:
+    """Replace both ``giveItem 115 1`` calls in Script 7 Section_82
+    (Seadramon friendship cutscene) with ``setTrigger 210``.
+
+    Same shape as the other key-item neuters: vanilla Blue Flute
+    delivery bypassed; only AP delivery (bank slot 115) puts the Blue
+    Flute in the player's hands. The cutscene's existing
+    ``setTrigger 210`` at script offset 1998 stays in place; the
+    substituted setTrigger calls are idempotent.
+
+    Note: trigger 210 is the same bit that was previously used as the
+    Seadramon recruit signal — Seadramon was dropped from AP recruit
+    coverage 2026-05-09 because the recruit cutscene IS the Blue
+    Flute pickup. The bit is now polled exclusively as
+    ``Blue Flute Pickup`` in ``KEYITEM_LOCATION_RAM_BITS``;
+    ``client._DROPPED_RECRUITS_BLACKLIST`` excludes Seadramon from
+    the recruit-bit poll path.
+
+    Single ROM copy of Script 7 = 2 .bin offsets.
+
+    See :data:`ROM_BLUE_FLUTE_GIVEITEM_OFFSETS` /
+    :data:`ROM_BLUE_FLUTE_GIVEITEM_NEUTER_VALUE` for byte layout.
+    """
+
+    for offset in ROM_BLUE_FLUTE_GIVEITEM_OFFSETS:
+        patch.write_token(APTokenTypes.WRITE, offset, ROM_BLUE_FLUTE_GIVEITEM_NEUTER_VALUE)
+
+
+def _write_rain_plant_neuter_tokens(patch: DigimonWorldProcedurePatch) -> None:
+    """Replace the single ``giveItem 121 1`` in Script 162 Section_83
+    (Tanemon planter cutscene in Native Forest) with ``setTrigger 76``.
+
+    Same shape as the Mansion / Frig / Gear neuters: vanilla Rain Plant
+    delivery bypassed; only AP delivery (bank slot 121) puts the Rain
+    Plant in the player's hands. The cutscene's existing
+    ``setTrigger 76`` at script offset 6238 stays in place; the
+    substituted setTrigger at offset 6116 is idempotent.
+
+    Note: the cutscene only fires on the 15th of any in-game month
+    (``pstat(106) == 14``) AND only after Palmon is recruited
+    (``trigger(246) == true``). Trigger 76 is **renewable** — Section_254
+    of Script 162 ``unsetTrigger 76`` on each day-15 transition, so
+    vanilla DW1 lets the player pick up a fresh Rain Plant each
+    month. Renewability is a non-issue for AP: the location fires
+    once on the first 0->1 transition and AP server-side dedup
+    ignores subsequent re-flips.
+
+    Single ROM copy of Script 162 = 1 .bin offset.
+
+    See :data:`ROM_RAIN_PLANT_GIVEITEM_OFFSETS` /
+    :data:`ROM_RAIN_PLANT_GIVEITEM_NEUTER_VALUE` for byte layout.
+    """
+
+    for offset in ROM_RAIN_PLANT_GIVEITEM_OFFSETS:
+        patch.write_token(APTokenTypes.WRITE, offset, ROM_RAIN_PLANT_GIVEITEM_NEUTER_VALUE)
+
+
+def _write_gear_neuter_tokens(patch: DigimonWorldProcedurePatch) -> None:
+    """Replace both ``giveItem 120 1`` calls in Script 144 Section_83
+    (Toy Town WaruMonzaemon defeat → Gear hand-off cutscene) with
+    ``setTrigger 270``.
+
+    Same shape as the Mansion / Frig Key neuters: vanilla Gear delivery
+    bypassed; only AP delivery (bank slot 120) puts the Gear in the
+    player's hands. The cutscene's existing ``setTrigger 270`` at
+    script offset 4518 stays in place; the substituted setTrigger calls
+    at offsets 4334 and 4476 are idempotent.
+
+    Note: trigger 270 is read by 6 other Toy Town scripts (139, 140,
+    142, 143, 145) as a "Gear obtained" flag — those reads still work
+    correctly. Some NPC dialog branches also check ``item(120)``;
+    after this patch the player has trigger 270 set but no Gear in
+    inventory until AP delivers, so a few NPC dialogs may behave as
+    if the Gear is "missing despite being obtained" — cosmetic only,
+    not progression-blocking.
+
+    See :data:`ROM_GEAR_GIVEITEM_OFFSETS` /
+    :data:`ROM_GEAR_GIVEITEM_NEUTER_VALUE` for byte layout.
+    """
+
+    for offset in ROM_GEAR_GIVEITEM_OFFSETS:
+        patch.write_token(APTokenTypes.WRITE, offset, ROM_GEAR_GIVEITEM_NEUTER_VALUE)
+
+
+def _write_steak_spawn_neuter_tokens(patch: DigimonWorldProcedurePatch) -> None:
+    """Replace the ``spawnItem 122 48 32`` in Script 35 Section_254 with a
+    ``jumpTo 150`` (lands on the section's terminal ``endSection``).
+
+    Unlike the rod / Mansion / Frig Key cutscenes, vanilla DW1 hands the
+    player Steak by spawning it as a map item rather than via a
+    ``giveItem`` opcode. Section_254 of the Overdell map (Script 35)
+    spawns Steak at coordinates (48, 32) when ``trigger(348) ==
+    true AND trigger(128) == false`` — i.e. when the player has used
+    the fridge (with Frig Key) but hasn't yet given the Steak to
+    Myotismon.
+
+    In AP rando, vanilla Steak is bypassed: only AP delivery (bank
+    slot 122 via :func:`_make_bank_deliverer`) puts Steak in the
+    player's hands. The 6-byte ``spawnItem`` is rewritten as 4-byte
+    ``jumpTo 150`` + 2-byte unreachable filler — execution skips
+    over the spawn and ends the section. Trigger 348 (set by the
+    fridge cutscene itself, not by us) remains the AP location signal.
+
+    See :data:`ROM_STEAK_SPAWN_NEUTER_OFFSETS` /
+    :data:`ROM_STEAK_SPAWN_NEUTER_VALUE` for byte layout.
+    """
+
+    for offset in ROM_STEAK_SPAWN_NEUTER_OFFSETS:
+        patch.write_token(APTokenTypes.WRITE, offset, ROM_STEAK_SPAWN_NEUTER_VALUE)
+
+
+def _write_frig_key_neuter_tokens(patch: DigimonWorldProcedurePatch) -> None:
+    """Replace both ``giveItem 123 1`` calls in Script 63 Section_5
+    (Myotismon Frig-Key dialog) with ``setTrigger 104``.
+
+    Same shape as the Mansion Key neuter: vanilla Frig Key delivery
+    bypassed; only AP delivery (bank slot 123 via
+    :func:`_make_bank_deliverer`) puts the key in the player's hands.
+    The cutscene's existing ``setTrigger 104`` at script offset 238
+    stays in place, so trigger 104 still flips at the cutscene's
+    intro — the substituted setTrigger calls at offsets 670 and 780
+    are idempotent.
+
+    See :data:`ROM_FRIG_KEY_GIVEITEM_OFFSETS` /
+    :data:`ROM_FRIG_KEY_GIVEITEM_NEUTER_VALUE` for byte layout.
+    """
+
+    for offset in ROM_FRIG_KEY_GIVEITEM_OFFSETS:
+        patch.write_token(APTokenTypes.WRITE, offset, ROM_FRIG_KEY_GIVEITEM_NEUTER_VALUE)
+
+
+def _write_mansion_key_neuter_tokens(patch: DigimonWorldProcedurePatch) -> None:
+    """Replace both ``giveItem 119 1`` calls in Script 54 Section_81 with
+    ``setTrigger 110``.
+
+    The vanilla Mansion Key cutscene gives the player the key in their
+    inventory; in AP rando the key must come exclusively through AP
+    delivery (bank slot 119 via :func:`_make_bank_deliverer`). Both
+    giveItem sites — primary (script offset 178) and inventory-full
+    retry (script offset 438) — are rewritten across two ROM copies =
+    4 sites total. The cutscene's existing ``setTrigger 110`` at offset
+    442 stays in place; the substituted setTrigger calls are
+    idempotent.
+
+    See :data:`ROM_MANSION_KEY_GIVEITEM_OFFSETS` /
+    :data:`ROM_MANSION_KEY_GIVEITEM_NEUTER_VALUE` for byte layout.
+    """
+
+    for offset in ROM_MANSION_KEY_GIVEITEM_OFFSETS:
+        patch.write_token(APTokenTypes.WRITE, offset, ROM_MANSION_KEY_GIVEITEM_NEUTER_VALUE)
+
+
+def _write_old_fishrod_remap_tokens(patch: DigimonWorldProcedurePatch) -> None:
+    """Redirect Script 159 Section_51's trigger 45 references to trigger 902.
+
+    Decouples "vanilla rod cutscene played" (now trigger 902, the AP
+    location signal) from "rod owned" (still trigger 45, the bit the
+    fishing minigame reads). Without this patch the two share trigger
+    45, so AP delivery of the Old Fishrod item self-triggers the
+    location and vanilla cutscene completion enables fishing without AP.
+
+    See :data:`ROM_OLD_FISHROD_REMAP_OFFSETS` /
+    :data:`ROM_OLD_FISHROD_REMAP_VALUE` for byte layout. Two 2-byte
+    writes (single ROM copy of Script 159).
+    """
+
+    for offset in ROM_OLD_FISHROD_REMAP_OFFSETS:
+        patch.write_token(APTokenTypes.WRITE, offset, ROM_OLD_FISHROD_REMAP_VALUE)
+
+
 def _write_coelamon_gate_tokens(patch: DigimonWorldProcedurePatch) -> None:
     """Redirect Coelamon Section_51's first-gate branch target.
 
@@ -702,6 +1165,31 @@ def _write_coelamon_gate_tokens(patch: DigimonWorldProcedurePatch) -> None:
 
     for offset in ROM_COELAMON_GATE_OFFSETS:
         patch.write_token(APTokenTypes.WRITE, offset, ROM_COELAMON_GATE_VALUE)
+
+
+def _write_prosperity_goal_token(
+    patch: DigimonWorldProcedurePatch, threshold: int,
+) -> None:
+    """Patch the ``pstat(1) < 50`` literal in Script 210 §51 line 162.
+
+    This is the gate Jijimon checks before announcing the Mt. Infinity
+    entrance and arming the Airdramon ambush. Rewriting the comparand
+    moves the in-game gate to the player's configured prosperity
+    threshold; the ``prosperity_goal`` option also drives the
+    matching AP rules in :mod:`.rules` and the
+    ``Prosperity Point`` pool size in :mod:`.items`, so all three
+    sides agree.
+
+    The slot is a 16-bit LE comparand (vanilla ``32 00`` = 50). We
+    write the threshold the same way; values 20..100 fit in 1 byte so
+    the high byte is always 0.
+    """
+
+    patch.write_token(
+        APTokenTypes.WRITE,
+        ROM_PROSPERITY_GOAL_OFFSET,
+        struct.pack(ROM_PROSPERITY_GOAL_FORMAT, threshold),
+    )
 
 
 def _write_great_canyon_cutscene_tokens(patch: DigimonWorldProcedurePatch) -> None:
@@ -879,39 +1367,30 @@ def _write_combat_multiplier_tokens(
 
 
 # =============================================================================
-# Vending-machine patcher (Stage 1 — opcode overwrite + text substitution)
+# Vending-machine patcher
 # =============================================================================
 #
 # For each ``_VendingItem`` in :data:`VENDING_MACHINES`, the patcher
 # overwrites the vanilla success-branch ``giveItem`` / ``addStats`` opcode
 # with ``setTrigger N`` — N is the AP-allocated trigger bit for that
 # location. The overwrite happens at every ``script_base + offset`` for
-# every ROM copy of the script.
+# every ROM copy of the script. Vanilla menu / result / preface text is
+# left intact: the player still sees the vanilla item name on screen,
+# but the AP location fires and AP delivers whatever it placed at that
+# location to the player's bank.
 #
-# Then, for each text slot (menu / preface / result), the patcher
-# substitutes the vanilla item-name text with classification text
-# derived from the AP item placed at each location:
+# An earlier "Quest/Bonus/Junk" text-substitution pass was retired
+# 2026-05-08 because DW1's script-engine PC-advance is fragile against
+# shortened textbox content — substitutions could (and did, intermittently)
+# cause the engine to drop out of the script before reaching our
+# ``setTrigger`` overwrite, suppressing the AP location ping.
 #
-# * ``ItemClassification.progression`` (or progression_skip_balancing) → "Quest"
-# * ``ItemClassification.useful``                                     → "Bonus"
-# * everything else (filler, trap, etc.)                              → "Junk"
-
-_CLASS_LABELS: dict[int, str] = {
-    int(ItemClassification.progression): "Quest",
-    int(ItemClassification.progression_skip_balancing): "Quest",
-    int(ItemClassification.useful): "Bonus",
-}
-
-
-def _classify(item_classification: ItemClassification) -> str:
-    """Map an AP ItemClassification to a 5-char vending-text label."""
-    flags = int(item_classification)
-    # Honor progression > useful > everything-else priority.
-    if flags & int(ItemClassification.progression):
-        return "Quest"
-    if flags & int(ItemClassification.useful):
-        return "Bonus"
-    return "Junk"
+# Plus: the Ancient Dino "Try" gacha needs an extra 4-byte ROM patch to
+# fix a vanilla DW1 scripting bug where the MP Floppy outcome's
+# ``giveItem`` is gated behind the inventory-full recovery branch (so
+# the player gets the announcement textbox but never the item, and our
+# trigger 901 never fires either). See
+# :data:`ROM_GACHA_MP_FLOPPY_FIX_OFFSET` for the fix details.
 
 
 def _write_vending_tokens(
@@ -920,76 +1399,132 @@ def _write_vending_tokens(
 ) -> None:
     """Write all vending-machine tokens for the seed.
 
-    Two passes per machine:
+    Per machine: at every ``base + overwrite_offset`` for every ROM
+    copy of the script, replace the vanilla ``giveItem`` /
+    ``addStats`` opcode with a 4-byte ``setTrigger N`` pointing at
+    that purchase's AP-allocated trigger bit.
 
-    1. **Opcode overwrites.** For each item, replace every vanilla
-       ``giveItem``/``addStats`` opcode location (in every ROM copy)
-       with a ``setTrigger`` opcode pointing at the item's AP-allocated
-       trigger bit.
-
-    2. **Text substitution.** For each text slot, write a
-       classification-aware replacement message:
-
-       * **Menu** slots become ``"<Cat1>: <P1> bits\\rDon't buy"`` style
-         — one line per item plus a Don't-buy line.
-       * **Result** slots become ``"<Cat>!"`` (short — fits 38-byte
-         result slots that some machines have).
-       * **Preface** slots become ``"AP randomized prizes."``.
-
-       The classification is derived from the AP item placed at the
-       corresponding location after fill.
+    For the Ancient Dino "Try" gacha, also emits the 4-byte
+    :data:`ROM_GACHA_MP_FLOPPY_FIX_BYTES` patch at
+    :data:`ROM_GACHA_MP_FLOPPY_FIX_OFFSET` — without this patch, only
+    3 of the 4 gacha prizes were detectable by AP (vanilla DW1 bug;
+    see addresses.py block comment for the script-flow analysis).
     """
 
     multiworld = world.multiworld
     player = world.player
 
     for machine in VENDING_MACHINES:
-        # Resolve each item's AP classification by inspecting what fill
-        # placed at that location. ``get_location`` will raise KeyError
-        # if the option-gated location is absent for this seed; in that
-        # case we skip the machine entirely. ``location.item`` may be
-        # None during test fixtures where fill hasn't fully populated
-        # placements yet — fall back to "Junk" so the patcher tokens
-        # still emit (the test only verifies presence, not exact text).
+        # Probe one location per machine to see whether this slot has
+        # vending locations enabled. ``get_location`` raises KeyError
+        # when the option is off — skip the machine in that case.
         try:
-            classes_list: list[str] = []
-            for item in machine.items:
-                location = multiworld.get_location(item.location_name, player)
-                placed = location.item
-                if placed is None:
-                    classes_list.append("Junk")
-                else:
-                    classes_list.append(_classify(placed.classification))
-            classes = tuple(classes_list)
+            multiworld.get_location(machine.items[0].location_name, player)
         except KeyError:
             return  # option off — no vending locations exist for this slot
 
         for base in machine.script_bases:
-            # Pass 1: opcode overwrites.
-            for class_label, item in zip(classes, machine.items, strict=True):
+            for item in machine.items:
                 trigger_bytes = encode_set_trigger(item.trigger_id)
                 for off in item.overwrite_offsets:
                     patch.write_token(APTokenTypes.WRITE, base + off, trigger_bytes)
-            # Pass 2: text substitution.
-            for slot in machine.text_slots:
-                if slot.purpose == "menu":
-                    lines = []
-                    for idx in slot.item_indices:
-                        item = machine.items[idx]
-                        lines.append(f"{classes[idx]}: {item.vanilla_price} bits")
-                    # Cancel line — DW1's text engine doesn't render
-                    # ASCII apostrophe so we avoid 'Don't buy' here.
-                    lines.append("Cancel")
-                    content = "\r\0".join(lines)
-                elif slot.purpose == "result":
-                    idx = slot.item_indices[0]
-                    content = f"{classes[idx]}!"
-                elif slot.purpose == "preface":
-                    content = "AP randomized prizes."
-                else:
-                    continue
-                payload = build_vending_textbox(content, slot.length)
-                patch.write_token(APTokenTypes.WRITE, base + slot.rel, payload)
+
+    # Vanilla DW1 gacha-prize-4 fix — applied unconditionally when
+    # vending locations are on, since trigger 901 is otherwise
+    # unreachable for the MP Floppy outcome.
+    patch.write_token(
+        APTokenTypes.WRITE,
+        ROM_GACHA_MP_FLOPPY_FIX_OFFSET,
+        ROM_GACHA_MP_FLOPPY_FIX_BYTES,
+    )
+
+
+def _write_ground_item_params(
+    patch: DigimonWorldProcedurePatch,
+    world: DigimonWorldWorld,
+) -> None:
+    """Stage the ground-item-shuffle params blob in the patch zip.
+
+    Generation does **not** read the source BIN; per-spot vanilla item
+    ids and ITEM_PARA prices are read from the local ROM at apply time
+    by :meth:`DigimonWorldPatchExtension.shuffle_ground_items`. This
+    helper just writes the seed + scope-flag JSON to the zip — the
+    procedure step itself is added later by :func:`_assemble_procedure`.
+    """
+
+    options = world.options
+    params = {
+        "seed": world.random.getrandbits(64),
+        "food_only": bool(int(options.ground_items_food_only.value)),
+        "match_value": bool(int(options.ground_items_match_value.value)),
+        "value_cutoff": int(options.ground_items_value_cutoff.value),
+    }
+    patch.write_file("ground_items.json", json.dumps(params).encode("ascii"))
+
+
+_LEVEL_OPTION_TO_LEVEL_BYTE = (
+    ("starter_allow_fresh", LEVEL_FRESH),
+    ("starter_allow_in_training", LEVEL_IN_TRAINING),
+    ("starter_allow_rookie", LEVEL_ROOKIE),
+    ("starter_allow_champion", LEVEL_CHAMPION),
+    ("starter_allow_ultimate", LEVEL_ULTIMATE),
+)
+
+
+def _write_starter_params(
+    patch: DigimonWorldProcedurePatch,
+    world: DigimonWorldWorld,
+) -> None:
+    """Stage the starter-shuffle params blob in the patch zip.
+
+    Collapses the five level-toggle options into a single
+    ``allowed_levels`` list (DW1 level-byte values 0x01..0x05) for the
+    apply-time picker. The picker also receives the seed and the
+    weakest-tech flag.
+    """
+
+    options = world.options
+    allowed_levels = [
+        level_byte
+        for option_name, level_byte in _LEVEL_OPTION_TO_LEVEL_BYTE
+        if int(getattr(options, option_name).value)
+    ]
+    params = {
+        "seed": world.random.getrandbits(64),
+        "allowed_levels": allowed_levels,
+        "use_weakest_tech": bool(int(options.starter_use_weakest_tech.value)),
+    }
+    patch.write_file("starters.json", json.dumps(params).encode("ascii"))
+
+
+def _assemble_procedure(
+    patch: DigimonWorldProcedurePatch,
+    *,
+    shuffle_ground_items: bool,
+    shuffle_starters: bool,
+) -> None:
+    """Mutate the per-instance procedure to include opt-in shuffle steps.
+
+    Order: ``verify_rom_hash`` -> ``apply_tokens`` -> any opt-in
+    shufflers in declaration order -> ``recalc_edc``. The shufflers
+    operate independently (one rewrites map-spawn item bytes, the
+    other rewrites starter bytes) and don't touch each other's
+    target offsets, so their relative order doesn't matter.
+    """
+
+    extensions: list[tuple[str, list[str]]] = []
+    if shuffle_ground_items:
+        extensions.append(("shuffle_ground_items", ["ground_items.json"]))
+    if shuffle_starters:
+        extensions.append(("shuffle_starters", ["starters.json"]))
+    if not extensions:
+        return  # default class-level procedure already correct
+    patch.procedure = [
+        ("verify_rom_hash", []),
+        ("apply_tokens", ["token_data.bin"]),
+        *extensions,
+        ("recalc_edc", []),
+    ]
 
 
 # =============================================================================
@@ -1042,6 +1577,15 @@ def write_patch(world: DigimonWorldWorld, output_directory: str) -> None:
     _write_field_spawn_trigger_patches(patch)  # Plan A: per-Digimon
     _write_gettopcity_trigger_patches(patch)  # Plan A: Top City variants
     _write_birdra_flight_table_tokens(patch)
+    _write_old_fishrod_remap_tokens(patch)  # always-on; decouples cutscene from rod ownership
+    _write_mansion_key_neuter_tokens(patch)  # always-on; vanilla key give -> AP location signal
+    _write_frig_key_neuter_tokens(patch)  # always-on; same shape as Mansion Key
+    _write_steak_spawn_neuter_tokens(patch)  # always-on; spawn-replacement (6-byte patch)
+    _write_gear_neuter_tokens(patch)  # always-on; same shape as Mansion/Frig Key
+    _write_rain_plant_neuter_tokens(patch)  # always-on; single-site giveItem -> setTrigger
+    _write_blue_flute_neuter_tokens(patch)  # always-on; same shape as Mansion/Frig/Gear
+    _write_leomonstone_neuter_tokens(patch)  # always-on; 7 sites across 3 ROM copies + orphan
+    _write_merit_shop_wrapper_tokens(patch)  # always-on; engine-hook for Merit-Shop purchases
     if int(world.options.lava_cave_access.value) != 0:  # 0 = vanilla
         _write_lava_cave_gate_tokens(patch)
     # Bridge shuffled-mode patches (option value 2 = shuffled).
@@ -1049,6 +1593,11 @@ def write_patch(world: DigimonWorldWorld, output_directory: str) -> None:
         _write_coelamon_gate_tokens(patch)
     if int(world.options.great_canyon_unlock.value) == 2:
         _write_great_canyon_cutscene_tokens(patch)
+    # Mt. Infinity prosperity threshold — always-on (writes the same 50
+    # at default, otherwise the configured threshold).
+    _write_prosperity_goal_token(
+        patch, int(world.options.prosperity_goal.value),
+    )
 
     options = world.options
     if options.skip_intro:
@@ -1061,6 +1610,18 @@ def write_patch(world: DigimonWorldWorld, output_directory: str) -> None:
     )
     if int(options.vending_locations.value):
         _write_vending_tokens(patch, world)
+
+    do_shuffle_ground_items = bool(int(options.randomize_ground_items.value))
+    do_shuffle_starters = bool(int(options.randomize_starter.value))
+    if do_shuffle_ground_items:
+        _write_ground_item_params(patch, world)
+    if do_shuffle_starters:
+        _write_starter_params(patch, world)
+    _assemble_procedure(
+        patch,
+        shuffle_ground_items=do_shuffle_ground_items,
+        shuffle_starters=do_shuffle_starters,
+    )
 
     patch.write_file("token_data.bin", patch.get_token_binary())
 

@@ -9,10 +9,15 @@ Tests:
 * Item-pool / location-count balance.
 * Recruit AP locations exist for all 50 Digimon.
 * No ``X Recruit`` items in the pool.
-* Final-Battle endgame requires AS Decoder + 50 Prosperity Points.
+* Final-Battle endgame requires 50 Prosperity Points (AS Decoder
+  used to be part of the rule but is a no-op item; removed 2026-05-08).
 * The closed-shuffle ``recruit_remap`` is shaped right.
+* Filler-distribution shape (Phase 8) — ``build_filler_pool`` produces
+  exactly ``count`` items in roughly the expected per-bucket proportion.
 """
 
+import random
+import unittest
 from typing import Any, ClassVar
 
 from .bases import DigimonWorldTestBase
@@ -58,47 +63,69 @@ class TestPhase4Logic(DigimonWorldTestBase):
     # ------------------------------------------------------------------
 
     def test_recruit_items_present(self) -> None:
-        """Phase 6: 48 ``X Recruit`` items ship (everyone except Agumon
-        and Digitamamon — both intentionally not in the AP pool)."""
+        """18 individual ``X Recruit`` items ship after the Phase 7
+        bundle rework (5 progression + 5 useful + 8 filler). The
+        other 26 recruit-bit-managed Digimon are bundled into the
+        6 ``Progressive <Feature>`` ladder items. See
+        ``items.PROGRESSIVE_BUNDLES`` and ``_BUNDLED_RECRUITS``."""
 
-        from ..data.addresses import AP_RECRUIT_ITEM_DIGIMON
-        from ..items import ITEM_NAME_TO_ID
+        from ..items import ITEM_NAME_TO_ID, PROGRESSIVE_BUNDLES
 
         recruit_names = [n for n in ITEM_NAME_TO_ID if n.endswith(" Recruit")]
-        self.assertEqual(len(recruit_names), 48, recruit_names)
-        self.assertNotIn("Agumon Recruit", ITEM_NAME_TO_ID)
-        self.assertNotIn("Digitamamon Recruit", ITEM_NAME_TO_ID)
-        for digimon in AP_RECRUIT_ITEM_DIGIMON:
-            self.assertIn(f"{digimon} Recruit", ITEM_NAME_TO_ID)
+        self.assertEqual(len(recruit_names), 18, recruit_names)
+        for excluded in ("Agumon Recruit", "Digitamamon Recruit",
+                         "Airdramon Recruit", "Seadramon Recruit",
+                         "Nanimon Recruit", "Giromon Recruit"):
+            self.assertNotIn(excluded, ITEM_NAME_TO_ID)
+        # Individual progression recruits remain present.
+        for kept in ("Whamon Recruit", "Birdramon Recruit",
+                     "Palmon Recruit", "Shellmon Recruit",
+                     "Centarumon Recruit"):
+            self.assertIn(kept, ITEM_NAME_TO_ID)
+        # Bundled Digimon do NOT have individual items.
+        for bundled in ("Betamon Recruit", "Patamon Recruit",
+                        "Greymon Recruit", "Numemon Recruit",
+                        "Drimogemon Recruit", "Kabuterimon Recruit"):
+            self.assertNotIn(bundled, ITEM_NAME_TO_ID)
+        # All 6 Progressive ladder items are present.
+        for prog_name in PROGRESSIVE_BUNDLES:
+            self.assertIn(prog_name, ITEM_NAME_TO_ID)
 
     def test_prosperity_point_in_pool(self) -> None:
-        """Phase 5 piece C: 25 Prosperity Point items in the pool, each
-        worth ``PROSPERITY_PER_ITEM`` (= 2) PP at delivery."""
+        """Phase 9: pool size is ``prosperity_point_count(threshold)``,
+        sized to the player's ``prosperity_goal`` option (default
+        50 → 21 items). Each item is worth ``PROSPERITY_PER_ITEM`` (= 3)
+        PP at delivery."""
 
         from ..items import (
             PROSPERITY_PER_ITEM,
-            PROSPERITY_POINT_COUNT,
             PROSPERITY_POINT_NAME,
+            prosperity_point_count,
         )
 
+        threshold = int(self.multiworld.worlds[self.player].options.prosperity_goal.value)
+        expected = prosperity_point_count(threshold)
         pp_items = [
             item for item in self.multiworld.itempool
             if item.name == PROSPERITY_POINT_NAME
         ]
-        self.assertEqual(len(pp_items), PROSPERITY_POINT_COUNT)
-        # Total PP shipped should match the goal threshold (50).
-        self.assertEqual(PROSPERITY_POINT_COUNT * PROSPERITY_PER_ITEM, 50)
+        self.assertEqual(len(pp_items), expected)
+        # Total shipped PP must be at least the configured threshold.
+        # (Comfort margin from PROSPERITY_OVERHEAD_FACTOR pushes us above.)
+        self.assertGreaterEqual(expected * PROSPERITY_PER_ITEM, threshold)
 
     # ------------------------------------------------------------------
     # Endgame
     # ------------------------------------------------------------------
 
-    def test_final_battle_requires_as_decoder_and_pp(self) -> None:
-        """Final Battle event needs AS Decoder + 50 Prosperity Points."""
+    def test_final_battle_requires_pp(self) -> None:
+        """Final Battle event needs 50 Prosperity Points. AS Decoder
+        used to also be required, but it is a no-op item in DW1 and
+        gates nothing — removed from the pool 2026-05-08."""
 
         self.assertAccessDependency(
             ["Final Battle"],
-            [["AS Decoder", "Prosperity Point"]],
+            [["Prosperity Point"]],
             only_check_listed=True,
         )
 
@@ -211,7 +238,14 @@ class TestPhase4LogicVendingOn(DigimonWorldTestBase):
     naturally inherit those region access rules.
     """
 
-    options: ClassVar[dict[str, Any]] = {"vending_locations": True}
+    # Cards on too — the 35 unconfirmed chests are now EXCLUDED, which
+    # leaves the default config slightly short on non-EXCLUDED slots
+    # for all 87 mandatory progression items. Cards add 66 progression-
+    # eligible locations and let fill complete.
+    options: ClassVar[dict[str, Any]] = {
+        "vending_locations": True,
+        "card_locations": True,
+    }
 
     def test_vending_count(self) -> None:
         from ..data.addresses import VENDING_LOCATION_NAMES
@@ -261,24 +295,28 @@ class TestVendingTextEncoder(DigimonWorldTestBase):
         # Trigger 890 = 0x037A LE → "1C 00 7A 03"
         self.assertEqual(encode_set_trigger(890), bytes((0x1C, 0x00, 0x7A, 0x03)))
 
-    def test_textbox_fits_within_slot(self) -> None:
-        from ..data.addresses import build_vending_textbox
+    def test_vending_script_bases_self_consistent(self) -> None:
+        """Sanity check each machine's script_base by deriving it two
+        independent ways from the per-item ``overwrite_offsets``.
 
-        # "Quest!" + null-terminator at content time → 1A 00 [Quest!] 0D 00.
-        # Fullwidth Quest! = 12 bytes; opcode = 2; CR/null = 2 → 16 bytes
-        # of payload. Padded to 38.
-        payload = build_vending_textbox("Quest!", 38)
-        self.assertEqual(len(payload), 38)
-        self.assertEqual(payload[:2], b"\x1A\x00")  # showTextbox opcode
-        # 12 fullwidth bytes for "Quest!" + 2 bytes CR/null.
-        self.assertIn(b"\x82\x70", payload)  # fullwidth 'Q'
+        Each ``_VendingItem.overwrite_offsets`` lists ROM-script offsets
+        of vanilla ``giveItem``/``addStats`` opcodes. We assert that all
+        offsets fall inside [0, 0x1000] (a single script bank) — a wrong
+        ``script_base`` typically produces offsets that are far off.
+        It's a cheap regression net for the kind of typo that previously
+        caused two machines (script 71 and 78) to write tokens at
+        offsets 32-64 bytes off and silently break the in-game flow.
+        """
+        from ..data.addresses import VENDING_MACHINES
 
-    def test_textbox_overflow_raises(self) -> None:
-        from ..data.addresses import build_vending_textbox
-
-        # Force overflow: a 100-char content cannot fit in a 24-byte slot.
-        with self.assertRaises(ValueError):
-            build_vending_textbox("X" * 100, 24)
+        for machine in VENDING_MACHINES:
+            for item in machine.items:
+                for off in item.overwrite_offsets:
+                    self.assertGreater(off, 0, f"{machine.label}: bogus offset")
+                    self.assertLess(
+                        off, 0x1000,
+                        f"{machine.label}: offset {off} >= 0x1000 (overshoots a single script)",
+                    )
 
 
 # =============================================================================
@@ -327,18 +365,39 @@ class TestRecruitRandomizationOff(DigimonWorldTestBase):
     """RecruitRandomization off — every <Name> Recruit item is locked at
     the matching recruit AP location."""
 
-    options: ClassVar[dict[str, Any]] = {"recruit_randomization": False}
+    # Cards on for fill capacity (see TestPhase4LogicVendingOn rationale).
+    options: ClassVar[dict[str, Any]] = {
+        "recruit_randomization": False,
+        "card_locations": True,
+    }
 
     def test_each_recruit_self_locked(self) -> None:
         from ..data.addresses import AP_RECRUIT_ITEM_DIGIMON
+        from ..items import ITEM_NAME_TO_ID
 
         for digimon in AP_RECRUIT_ITEM_DIGIMON:
+            recruit_item_name = f"{digimon} Recruit"
+            if recruit_item_name not in ITEM_NAME_TO_ID:
+                # Bundled recruit (Phase 7 rework — see
+                # ``items.PROGRESSIVE_BUNDLES``): no individual
+                # ``<X> Recruit`` item exists, so the AP location
+                # stays unlocked and AP fill places whatever it
+                # wants. Verify it's NOT pre-filled with a recruit
+                # item, which would indicate a regression.
+                location = self.multiworld.get_location(digimon, self.player)
+                if location.item is not None:
+                    self.assertFalse(
+                        location.item.name.endswith(" Recruit"),
+                        f"bundled {digimon} location should not be "
+                        f"pre-filled with a recruit item",
+                    )
+                continue
             location = self.multiworld.get_location(digimon, self.player)
             self.assertIsNotNone(
                 location.item, f"{digimon} location should be pre-filled",
             )
             self.assertEqual(
-                location.item.name, f"{digimon} Recruit",
+                location.item.name, recruit_item_name,
                 f"{digimon} location should hold its own recruit item, "
                 f"got {location.item.name}",
             )
@@ -362,3 +421,190 @@ class TestRecruitRandomizationOff(DigimonWorldTestBase):
         # 48 recruit locations are pre-filled; pool should match remaining.
         unfilled = self.multiworld.get_unfilled_locations(self.player)
         self.assertEqual(len(self.multiworld.itempool), len(unfilled))
+
+
+# =============================================================================
+# Filler distribution (Phase 8)
+# =============================================================================
+
+
+class TestFillerDistribution(unittest.TestCase):
+    """``build_filler_pool`` enforces the per-seed proportion contract:
+
+    * exactly ``count`` items returned (rounding drift repaired).
+    * every item is a real shippable AP filler item.
+    * for large ``count``, observed bucket frequencies are close to the
+      configured weights.
+    * deterministic for a given RNG seed.
+    """
+
+    def test_pool_size_matches_count(self) -> None:
+        from ..items import build_filler_pool
+
+        rng = random.Random(0xDEAD_BEEF)
+        for count in (0, 1, 7, 13, 49, 100, 423):
+            pool = build_filler_pool(rng, count)
+            self.assertEqual(len(pool), count, count)
+
+    def test_pool_contents_are_known_items(self) -> None:
+        from ..items import ITEM_NAME_TO_ID, build_filler_pool
+
+        rng = random.Random(42)
+        pool = build_filler_pool(rng, 200)
+        for name in pool:
+            self.assertIn(name, ITEM_NAME_TO_ID, name)
+
+    def test_observed_proportions_track_weights(self) -> None:
+        from ..items import FILLER_DISTRIBUTION, build_filler_pool
+
+        rng = random.Random(0xC0FFEE)
+        count = 10_000
+        pool = build_filler_pool(rng, count)
+        # Map each item back to its bucket index for tallying.
+        bucket_index_by_item: dict[str, int] = {}
+        for i, (bucket, _) in enumerate(FILLER_DISTRIBUTION):
+            for name in bucket:
+                bucket_index_by_item[name] = i
+
+        observed = [0] * len(FILLER_DISTRIBUTION)
+        for name in pool:
+            observed[bucket_index_by_item[name]] += 1
+
+        for i, (_, weight) in enumerate(FILLER_DISTRIBUTION):
+            actual = observed[i] / count
+            self.assertAlmostEqual(
+                actual, weight, places=2,
+                msg=f"bucket {i} observed={actual:.3f} expected={weight}",
+            )
+
+    def test_deterministic_for_fixed_seed(self) -> None:
+        from ..items import build_filler_pool
+
+        rng_a = random.Random(1234)
+        rng_b = random.Random(1234)
+        self.assertEqual(
+            build_filler_pool(rng_a, 64),
+            build_filler_pool(rng_b, 64),
+        )
+
+
+# =============================================================================
+# Mt. Infinity prosperity option (Phase 9)
+# =============================================================================
+
+
+class TestProsperityPointCount(unittest.TestCase):
+    """``prosperity_point_count`` rounds ``ceil(threshold / 3) * 1.2``
+    upward, matching the user-spec margin."""
+
+    def test_known_thresholds(self) -> None:
+        from ..items import prosperity_point_count
+
+        # User-spec example: 50 → ceil(17 * 1.2) = ceil(20.4) = 21.
+        self.assertEqual(prosperity_point_count(50), 21)
+        # Range bounds and a couple of intermediate values.
+        self.assertEqual(prosperity_point_count(20), 9)    # ceil( 7 * 1.2) =  9
+        self.assertEqual(prosperity_point_count(30), 12)   # ceil(10 * 1.2) = 12
+        self.assertEqual(prosperity_point_count(45), 18)   # ceil(15 * 1.2) = 18
+        self.assertEqual(prosperity_point_count(100), 41)  # ceil(34 * 1.2) = 41
+
+    def test_monotonic_with_threshold(self) -> None:
+        from ..items import prosperity_point_count
+
+        prev = 0
+        for thresh in range(20, 101):
+            count = prosperity_point_count(thresh)
+            self.assertGreaterEqual(count, prev, thresh)
+            prev = count
+
+    def test_count_covers_threshold(self) -> None:
+        """Each item delivers 3 PP; ``count * 3`` must always meet or
+        exceed the threshold so the in-game gate can be reached."""
+
+        from ..items import (
+            PROSPERITY_PER_ITEM,
+            prosperity_point_count,
+        )
+
+        for thresh in range(20, 101):
+            count = prosperity_point_count(thresh)
+            self.assertGreaterEqual(
+                count * PROSPERITY_PER_ITEM, thresh, thresh,
+            )
+
+
+class TestProsperityGoalLow(DigimonWorldTestBase):
+    """With a low ``prosperity_goal`` (below 45), recruits gated above
+    the threshold (45/50 PP) get marked EXCLUDED + filler-only and
+    their PP rules dropped. The PP pool sizes to the threshold only —
+    no floor at 50."""
+
+    options: ClassVar[dict[str, Any]] = {
+        "prosperity_goal": 30,
+    }
+
+    def test_pool_count_matches_threshold(self) -> None:
+        from ..items import (
+            PROSPERITY_POINT_NAME,
+            prosperity_point_count,
+        )
+
+        pp_items = [
+            item for item in self.multiworld.itempool
+            if item.name == PROSPERITY_POINT_NAME
+        ]
+        # 30 PP threshold → ceil(10 * 1.2) = 12 items. No 50-PP floor.
+        self.assertEqual(len(pp_items), prosperity_point_count(30))
+        self.assertEqual(len(pp_items), 12)
+
+    def test_unreachable_recruits_marked_excluded(self) -> None:
+        from BaseClasses import LocationProgressType
+
+        for unreachable in ("Etemon", "Ninjamon", "Devimon",
+                            "Megadramon", "MetalGreymon",
+                            "Leomon", "Vademon", "SkullGreymon"):
+            loc = self.multiworld.get_location(unreachable, self.player)
+            self.assertEqual(
+                loc.progress_type, LocationProgressType.EXCLUDED,
+                f"{unreachable} should be EXCLUDED at threshold=30",
+            )
+
+    def test_leomonstone_pickup_excluded(self) -> None:
+        from BaseClasses import LocationProgressType
+
+        loc = self.multiworld.get_location("Leomonstone Pickup", self.player)
+        self.assertEqual(loc.progress_type, LocationProgressType.EXCLUDED)
+
+    def test_leomon_ancestor_cave_chest_excluded(self) -> None:
+        from BaseClasses import LocationProgressType
+
+        loc = self.multiworld.get_location(
+            "Chest: Leomon Ancestor Cave", self.player,
+        )
+        self.assertEqual(loc.progress_type, LocationProgressType.EXCLUDED)
+
+
+class TestProsperityGoalHigh(DigimonWorldTestBase):
+    """With a high ``prosperity_goal`` (80), the pool grows past the
+    default 21 items but no recruits are excluded (all vanilla gates
+    ≤ 80)."""
+
+    options: ClassVar[dict[str, Any]] = {
+        "prosperity_goal": 80,
+        # Cards on so the larger PP pool fits.
+        "card_locations": True,
+    }
+
+    def test_pool_count_grows_with_threshold(self) -> None:
+        from ..items import (
+            PROSPERITY_POINT_NAME,
+            prosperity_point_count,
+        )
+
+        pp_items = [
+            item for item in self.multiworld.itempool
+            if item.name == PROSPERITY_POINT_NAME
+        ]
+        # 80 PP threshold → ceil(27 * 1.2) = 33 items.
+        self.assertEqual(len(pp_items), prosperity_point_count(80))
+        self.assertGreater(len(pp_items), prosperity_point_count(50))

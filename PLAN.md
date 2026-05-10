@@ -481,6 +481,67 @@ in-game.
 - Build via `python Launcher.py "Build APWorlds" -- "Digimon World"`.
 - Ship the `.apworld` zip from this fork's releases.
 
+### Phase 7 — v2 scope backlog (post-MVP, not yet scheduled)
+
+Captured 2026-05-07 from a scoping conversation. None of these are committed
+work; this is the agreed candidate list for v2 design.
+
+**New AP location sources** (location-pool expansion — current pool of
+~120-130 base locations is light once the v2 item pool grows):
+
+- **ShogunGekomon Merit Shop** — uses the separate "Merit" currency. Each
+  shop slot becomes an AP location; access rule must encode merit cost.
+  Inventory offsets present in the standalone randomizer .bin patches at
+  [references/digimon_world_randomizer/](references/digimon_world_randomizer/) — copy the offset, not the
+  code. **Medium RE cost** (need to find the purchase callsite).
+- **Normal shops** — same pattern as the merit shop, with bits/yen as the
+  access-rule currency. ~10-25 slot locations across all vendors. RE cost
+  shared with the merit shop (same purchase routine).
+- **Key-item spawns** — Old Fishing Rod (already in item pool but the
+  spawn isn't randomized — the AP item exists, the in-world pickup still
+  gives the vanilla item), Mansion Key, Frigid Key, Steak, etc. The
+  pickup itself needs to become an AP location and the vanilla pickup
+  needs to be replaced with a placeholder. Audit needed: cross-check
+  against the standalone randomizer's key-item table to find the full
+  set.
+- **Normal item spawns (renewable)** — areas have items that spawn
+  infinitely (apple trees, food bushes, etc.). User direction: **first
+  pickup of a given spawn fires a location AND still gives the regular
+  item** (so the player keeps the renewable food source). Detection
+  needs a per-spawn "first time visited" flag — likely a free trigger
+  bit per spawn, or a dedicated AP scratch-byte block (analogous to the
+  items-received counter at [memory/dw1_counter_safe_address.md](C:/Users/Sergio/.claude/projects/c--opt-dev-AP-ArchipelagoDW/memory/dw1_counter_safe_address.md)).
+- **Fishing** — TBD scope. Catch counter exists; smallest possible
+  shape is one location per "first catch of species X" or threshold
+  milestones. RE cost low to medium.
+
+**AP reward (item pool) polish:**
+
+- **Recruit list** — audit the 48 vanilla recruits in [locations.py:55](worlds/digimon_world/locations.py#L55);
+  some may not be useful as AP items in practice. Decide on a per-recruit
+  basis whether they stay in the pool, become opt-in, or are demoted to
+  non-AP.
+- **Item pool** — general polish pass. Specifics deferred to the audit.
+- **Key items** — some are missing from the pool, some are added in the
+  wrong shape (see Old Fishing Rod above). Pair this with the key-item
+  spawn work since the two ends need to match.
+- **Techniques** — AP item only (NOT a location source). Techs become
+  receivable items that grant the tech in-game by writing into the
+  per-Digimon learned-tech table at
+  [data/addresses.py:436](worlds/digimon_world/data/addresses.py#L436).
+  ~121 techs total (`0x79` entries) — likely needs a sub-option to scope
+  (e.g., signature techs only, or category-based) so the pool isn't
+  flooded.
+
+**Explicitly rejected for v2** (captured here so it isn't re-litigated):
+
+- Techniques as **both** items and locations. A learn-bit transition
+  can't distinguish "AP granted" from "naturally learned" without a
+  ROM hook on the tech-learn callsite (~1 week of work). If AP grants
+  the tech first, the location strands forever (game won't re-roll a
+  tech the Digimon already has). Sticking to **item-only** avoids the
+  disambiguation problem entirely.
+
 ---
 
 ## d. Open questions

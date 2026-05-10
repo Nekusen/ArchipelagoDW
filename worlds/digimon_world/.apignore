@@ -1,0 +1,9 @@
+# Reverse-engineering and QA tooling — not needed at runtime.
+tools/
+
+# Internal implementation-plan docs — not user-facing.
+docs/
+
+# Stray RAM dumps / snapshot captures, in case they ever leak out of tools/.
+*.bin
+dw1_*snapshot*.txt

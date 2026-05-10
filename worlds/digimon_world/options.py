@@ -29,6 +29,38 @@ class Goal(Choice):
     default = option_machinedramon
 
 
+class ProsperityGoal(Range):
+    """Prosperity Points threshold tied to the seed's goal.
+
+    Applies to **both** goal modes:
+
+    * ``goal: prosperity`` — reach the threshold to win.
+    * ``goal: machinedramon`` — reach the threshold AND defeat
+      Machinedramon. The threshold opens the Mt. Infinity entrance
+      in-game (vanilla DW1 hard-codes 50 PP; this option rewrites that
+      literal), so reaching it is a real prerequisite to completing
+      the Machinedramon questline as well.
+
+    * Range: 20 – 100. Lower threshold = faster path to the endgame.
+    * Default: ``50`` (vanilla).
+    * Supports ``random``, ``random-low``, ``random-high``.
+
+    Mechanics: the patcher rewrites the ``pstat(1) < 50`` literal in
+    Script 210 §51 to the configured value; the AP pool scales to
+    ``ceil(threshold / 3) * 1.2`` Prosperity Point items (each delivers
+    3 PP); rules.py uses the same threshold for Mt. Infinity / Tower /
+    Final Battle entrance gates and the Final Battle completion
+    condition; the client fires ``GoalComplete`` when the in-game
+    prosperity counter meets the threshold (prosperity goal) or when
+    Machinedramon is defeated (machinedramon goal).
+    """
+
+    display_name = "Prosperity Goal"
+    range_start = 20
+    range_end = 100
+    default = 50
+
+
 class FastDrimogemon(DefaultOnToggle):
     """Skip Drimogemon's 10-day dig wait.
 
@@ -82,8 +114,8 @@ class BridgeUnlock(Choice):
       the bit (no cutscene played, bridge appears "as if always there"
       from that point on). The vanilla cutscene path also still works
       as a fallback if the player reaches the trigger tile by other
-      means before AP delivers. The ``Tropical Jungle Bridge Fixed``
-      AP location fires the first time the bit is set.
+      means before AP delivers. The bridge is an AP item only — there
+      is no associated AP location.
     """
 
     display_name = "Tropical Jungle Bridge"
@@ -109,8 +141,7 @@ class GreatCanyonUnlock(Choice):
       the bit (no cutscene). The vanilla cutscene is patcher-disabled
       in this mode (its gate becomes self-contradictory) so reaching 6
       prosperity organically can no longer bypass the AP gate. The
-      ``Great Canyon Bridge Fixed`` AP location fires when the bit
-      is set.
+      bridge is an AP item only — there is no associated AP location.
     """
 
     display_name = "Great Canyon Bridge"
@@ -132,8 +163,8 @@ class LavaCaveAccess(Choice):
     * ``shuffled`` — the boulder check is rewritten to gate on an
       AP-controlled trigger bit. The ``Lava Cave Access`` AP item must be
       delivered before the boulder cutscene will succeed (any digimon may
-      then move it). Triggering the cutscene fires the
-      ``Drill Tunnel Boulder`` AP location. Default.
+      then move it). The boulder is an AP item only — there is no
+      associated AP location. Default.
     """
 
     display_name = "Lava Cave Access"
@@ -284,12 +315,16 @@ class VendingLocations(Toggle):
     With this on, each item-purchase becomes its own AP location (12
     total). The patcher overwrites the vanilla ``giveItem`` /
     ``addStats`` opcodes with ``setTrigger N`` so the player still pays
-    bits and sees a result message, but no vanilla item is granted —
-    the AP-placed item at that location is delivered to the player's
-    bank instead. Menu and result text get rewritten to show the
-    AP item's *classification* (Quest / Bonus / Junk) instead of the
-    vanilla item name. Each location's region matches the in-game
-    machine location.
+    bits and sees the vanilla menu / result text, but no vanilla item
+    is granted — the AP-placed item at that location is delivered to
+    the player's bank instead. Each location's region matches the
+    in-game machine location.
+
+    The Ancient Dino "Try" gacha also gets a one-line ROM bug-fix
+    patch: vanilla DW1's MP Floppy outcome only awards the item when
+    the player's bag is full, leaving 1 of 4 prizes effectively
+    unreachable. With this option on, the patcher rewrites the gating
+    conditional so all 4 prizes ping their AP location reliably.
     """
 
     display_name = "Vending Machine Locations"
@@ -314,6 +349,168 @@ class CardLocations(Toggle):
     display_name = "Card Vending Locations"
 
 
+class GroundItemRandomization(DefaultOnToggle):
+    """Shuffle the items that randomly spawn on field maps.
+
+    DW1 places ~460 ``spawnItem`` opcodes throughout its world maps;
+    each is a spot where, on a given visit, the game may roll out an
+    item the player can pick up. Vanilla items at these spots aren't AP
+    locations and aren't tracked individually — items respawn each map
+    visit per vanilla behavior, so a single one-and-done detection isn't
+    feasible without a per-spot first-pickup flag (deferred to v2).
+
+    With this on, the patcher rewrites each spot's item-id byte at
+    apply time, picking from a constrained replacement pool driven by
+    the three follow-up options. With it off, every spot keeps its
+    vanilla item.
+
+    Mirrors the standalone DW1 randomizer's ``mapItems.Enabled`` master
+    toggle.
+    """
+
+    display_name = "Ground Item Randomization"
+
+
+class GroundItemFoodOnly(Toggle):
+    """When a ground-item spot holds a food item in vanilla, restrict
+    its replacement to food items only.
+
+    Off (default): any consumable item may replace any consumable.
+    On: spots that originally spawned food keep spawning food (any
+    food); spots that originally spawned non-food are unconstrained.
+
+    Mirrors the standalone's ``mapItems.FoodOnly`` flag.
+    """
+
+    display_name = "Ground Items: Food For Food"
+
+
+class GroundItemMatchValue(DefaultOnToggle):
+    """Keep ground-item replacements within the same value band as the
+    vanilla item.
+
+    With this on, replacements stay on the same side of
+    :class:`GroundItemValueCutoff` as the vanilla item — cheap items
+    replace cheap items, valuable items replace valuable items. Off, no
+    such constraint applies and any pool member is eligible.
+
+    Mirrors the standalone's ``mapItems.MatchValue`` flag.
+    """
+
+    display_name = "Ground Items: Match Value Band"
+
+
+class GroundItemValueCutoff(Range):
+    """Price threshold separating "cheap" and "valuable" items for the
+    :class:`GroundItemMatchValue` constraint.
+
+    Vanilla DW1 prices range up to several thousand bits. The default
+    1000 mirrors the standalone DW1 randomizer's
+    ``mapItems.ValuableItemCutoff`` default. Has no effect when
+    :class:`GroundItemMatchValue` is off.
+    """
+
+    display_name = "Ground Items: Value Cutoff"
+    range_start = 1
+    range_end = 50_000
+    default = 1000
+
+
+class StarterRandomization(DefaultOnToggle):
+    """Shuffle the two starter Digimon offered at the "pick your
+    partner" screen.
+
+    With this on, the patcher rewrites both starter slots at apply
+    time — Digimon id, the tech taught when "starting fresh" with that
+    Digimon, and the equipped-tech animation. Eligibility is gated by
+    the five level toggles below; the four ``starter_allow_*`` non-
+    Rookie toggles are off by default to keep vanilla pacing.
+
+    Mirrors the standalone DW1 randomizer's ``starter.Enabled`` master
+    toggle.
+    """
+
+    display_name = "Starter Randomization"
+
+
+class StarterAllowFresh(Toggle):
+    """Allow Fresh-level Digimon (Botamon, Punimon, Yuramon, Poyomon,
+    etc.) as starter candidates.
+
+    Off by default. Fresh Digimon have very limited tech lists in
+    vanilla — most can only use the Bubble placeholder which the
+    standalone treats as non-learnable, so a Fresh starter often ends
+    up with no usable starter tech.
+
+    Mirrors the standalone's ``starter.Fresh`` flag.
+    """
+
+    display_name = "Starters: Allow Fresh"
+
+
+class StarterAllowInTraining(Toggle):
+    """Allow In-Training Digimon (Koromon, Tsunomon, Tokomon, etc.) as
+    starter candidates. Off by default — see :class:`StarterAllowFresh`
+    for the tech-list caveat. Mirrors ``starter.InTraining``.
+    """
+
+    display_name = "Starters: Allow In-Training"
+
+
+class StarterAllowRookie(DefaultOnToggle):
+    """Allow Rookie Digimon (Agumon, Gabumon, Patamon, etc.) as starter
+    candidates. On by default — Rookies are vanilla starter material.
+    Mirrors ``starter.Rookie``.
+    """
+
+    display_name = "Starters: Allow Rookie"
+
+
+class StarterAllowChampion(Toggle):
+    """Allow Champion Digimon (Greymon, Garurumon, etc.) as starter
+    candidates.
+
+    Off by default. **Caveat:** starting at Champion trivializes early
+    combat and can desync evolution-driven progression assumptions in
+    the AP rules — recruit / prosperity gating is balanced around a
+    Rookie starter that evolves naturally. Use for chaos seeds.
+
+    Mirrors ``starter.Champion``.
+    """
+
+    display_name = "Starters: Allow Champion"
+
+
+class StarterAllowUltimate(Toggle):
+    """Allow Ultimate Digimon (MetalGreymon, MetalMamemon, etc.) as
+    starter candidates.
+
+    Off by default. **Caveat:** even more disruptive than Champion-
+    level starts — Ultimate stats overpower nearly every fight in the
+    early-to-mid game. Mirrors ``starter.Ultimate``.
+    """
+
+    display_name = "Starters: Allow Ultimate"
+
+
+class StarterUseWeakestTech(DefaultOnToggle):
+    """Choose the weakest viable starter tech rather than a random one.
+
+    On (default): the patcher picks the lowest-slot damaging,
+    non-finisher, non-Counter technique the chosen Digimon can learn
+    — matches the standalone's ``UseWeakestTech=True`` flow and keeps
+    starters' damage output close to vanilla.
+
+    Off: any damaging non-finisher non-Counter technique from the
+    Digimon's tech list may be selected, including high-tier ones the
+    Digimon would normally have to train into.
+
+    Mirrors ``starter.UseWeakestTech``.
+    """
+
+    display_name = "Starters: Use Weakest Tech"
+
+
 class GodMode(Toggle):
     """Pin partner Digimon's combat stats to max each client tick.
 
@@ -335,6 +532,7 @@ class GodMode(Toggle):
 @dataclass
 class DigimonWorldOptions(PerGameCommonOptions):
     goal: Goal
+    prosperity_goal: ProsperityGoal
     fast_drimogemon: FastDrimogemon
     easy_monochromon: EasyMonochromon
     skip_intro: SkipIntro
@@ -347,14 +545,36 @@ class DigimonWorldOptions(PerGameCommonOptions):
     combat_stat_multiplier: CombatStatMultiplier
     chest_randomization: ChestRandomization
     recruit_randomization: RecruitRandomization
+    randomize_ground_items: GroundItemRandomization
+    ground_items_food_only: GroundItemFoodOnly
+    ground_items_match_value: GroundItemMatchValue
+    ground_items_value_cutoff: GroundItemValueCutoff
+    randomize_starter: StarterRandomization
+    starter_allow_fresh: StarterAllowFresh
+    starter_allow_in_training: StarterAllowInTraining
+    starter_allow_rookie: StarterAllowRookie
+    starter_allow_champion: StarterAllowChampion
+    starter_allow_ultimate: StarterAllowUltimate
+    starter_use_weakest_tech: StarterUseWeakestTech
     card_locations: CardLocations
     vending_locations: VendingLocations
     god_mode: GodMode
 
 
 option_groups: list[OptionGroup] = [
-    OptionGroup("Goal", [Goal]),
-    OptionGroup("Randomization", [ChestRandomization, RecruitRandomization]),
+    OptionGroup("Goal", [Goal, ProsperityGoal]),
+    OptionGroup(
+        "Randomization",
+        [
+            ChestRandomization, RecruitRandomization,
+            GroundItemRandomization, GroundItemFoodOnly,
+            GroundItemMatchValue, GroundItemValueCutoff,
+            StarterRandomization, StarterAllowFresh,
+            StarterAllowInTraining, StarterAllowRookie,
+            StarterAllowChampion, StarterAllowUltimate,
+            StarterUseWeakestTech,
+        ],
+    ),
     OptionGroup("Locations", [CardLocations, VendingLocations]),
     OptionGroup(
         "Quality of Life",
