@@ -3183,9 +3183,27 @@ ROM_LEOMONSTONE_GIVEITEM_NEUTER_VALUE: Final = bytes((
 # Two BIN copies of the script; both trigger-ID bytes patched. Patch
 # is emitted only when ``options.great_canyon_unlock == shuffled``.
 
+#
+# IF-block byte layout (verified in vanilla BIN 2026-05-10):
+#
+#   off  bytes  meaning
+#   +0   ?? ??  cond1 trigger ID (u16 LE) — vanilla 67 00 = trigger 103
+#   +2   ?? ??  cond1 opcode             — vanilla 80 00 (first-position OR)
+#   +4   ?? ??  cond2 trigger ID (u16 LE) — vanilla 7c 00 = trigger 124  ← patch target
+#   +6   ?? ??  cond2 opcode             — vanilla 18 00 (second-position OR)
+#   +8   ?? ??  jumpTo target (u16 LE)   — vanilla 4e 03 = offset 846 (endSection)
+#   +10  19 00  jumpTo opcode
+#
+# The earlier +8 offset overwrote the jumpTo target (turned 846 → 103),
+# making the IF jump into the middle of the spawnItem init code in
+# Section_254 whenever its condition was met. After AP delivered the
+# bridge item the script jumped to garbage instead of skipping the
+# cutscene cleanly, leaving the bridge unusable. Verified by decoding
+# vanilla vs patched output 2026-05-10.
+
 ROM_GREAT_CANYON_CUTSCENE_OFFSETS: Final = (
-    0x13FF876A,  # Copy 1: 0x13FF8762 + 8 (second trigger ID byte position)
-    0x13FF8ABC,  # Copy 2: 0x13FF8AB4 + 8
+    0x13FF8766,  # Copy 1: 0x13FF8762 + 4 (cond2 trigger ID byte position)
+    0x13FF8AB8,  # Copy 2: 0x13FF8AB4 + 4
 )
 ROM_GREAT_CANYON_CUTSCENE_VALUE: Final = bytes((0x67, 0x00))  # trigger 103 LE
 
@@ -5863,23 +5881,47 @@ assert ROM_ISTRIGGERSET_PATCH_VALUE[0] == 0x0802562C, hex(
 # option rewrites this byte at generation time so the in-game gate and
 # the AP rules in :mod:`worlds.digimon_world.rules` stay in sync.
 #
-# Slot layout (4 bytes per IF primitive, encoding inferred from the
-# ``setTrigger`` opcode pattern of "ID-LE then value-LE"):
+# Slot layout — verified against the live BIN 2026-05-10. IF primitives
+# are 4 bytes each, but ``trigger(N) == X`` and ``pstat(N) <op> V`` use
+# DIFFERENT encodings:
 #
-#   0x1409E4D2: pstat ID byte 0  (= 0x01)
-#   0x1409E4D3: pstat ID byte 1  (= 0x00)
-#   0x1409E4D4: comparand byte 0 (= 0x32 vanilla)  ← patch target
-#   0x1409E4D5: comparand byte 1 (= 0x00 vanilla)
+#   trigger(N) == true    -> ID(u16-LE) | 0x008A  (4 bytes)
+#   trigger(N) == false   -> ID(u16-LE) | 0x0018  (4 bytes)
+#   pstat(N) < V          -> ID(u8) | V(u8) | 0x0080  (4 bytes; ``<`` opcode)
 #
-# The bin offset 0x1409E4D2 is derived from the trigger(205) slot at
-# 0x1409E4D6 (= line 162 position 2), one of the three former Greymon
-# visibility patches that we removed 2026-05-08; pstat(1) is at
-# position 1, four bytes earlier. Threshold range is 20..100 so the
-# value fits in one byte; we still write 2 bytes LE to preserve the
-# 16-bit slot encoding.
+# Concretely for line 162 (vanilla bytes ``62 01 8A 00 01 32 80 00 CD
+# 00 18 00 B8 03``):
+#
+#   0x1409E4CE..D1: trigger(354) == true  -> 62 01 8A 00
+#   0x1409E4D2:     pstat ID byte         = 0x01 (pstat 1 = prosperity)
+#   0x1409E4D3:     comparand byte        = 0x32 (= 50 vanilla)  ← patch target
+#   0x1409E4D4..D5: ``<`` operator opcode = 80 00
+#   0x1409E4D6..D9: trigger(205) == false -> CD 00 18 00
+#   0x1409E4DA..DB: jump target           = B8 03 (= line 952)
+#
+# **Earlier inferred encoding was wrong**: the 2026-05-10 v1 patch
+# wrote 2 LE bytes at 0x1409E4D4, which corrupted the operator opcode
+# instead of moving the threshold. With ``<`` clobbered the gate did
+# not gate prosperity at all and Jijimon armed Airdramon unconditionally.
+# Verified against vanilla bytes by isolating the unique 14-byte
+# IF-block sequence and confirming the comparand byte sits at
+# offset +5 from the IF block start.
+#
+# Two physical copies of this IF block exist in the BIN (the second
+# is at 0x1409EE7E, comparand at 0x1409EE83 — same Script 210 logic
+# repeated). Both must be patched; only patching one leaves the gate
+# vanilla because either copy may be the live one for a given
+# screen/script-load path.
+#
+# We write 1 byte (not 2) at each comparand position so the adjacent
+# operator opcode is preserved. Threshold range is 20..100 (fits in 1
+# byte; high byte was always 0 in vanilla anyway).
 
-ROM_PROSPERITY_GOAL_OFFSET: Final = 0x1409E4D4
-ROM_PROSPERITY_GOAL_FORMAT: Final = "<H"
+ROM_PROSPERITY_GOAL_OFFSETS: Final[tuple[int, ...]] = (
+    0x1409E4D3,  # Script 210 §51 line 162, copy A
+    0x1409EE83,  # Script 210 §51 line 162, copy B (duplicate)
+)
+ROM_PROSPERITY_GOAL_FORMAT: Final = "B"  # 1 unsigned byte (preserves operator opcode at +1)
 ROM_PROSPERITY_GOAL_VANILLA: Final = 50  # script's vanilla literal
 
 
@@ -6146,3 +6188,410 @@ ROM_SPAWN_RATE_PIXIMON_OFFSETS: Final = (
 )
 ROM_SPAWN_RATE_MMAMEMON_OFFSETS: Final = (0x13FD831F, 0x140B949F)
 ROM_SPAWN_RATE_OTAMAMON_OFFSETS: Final = (0x13FD7F47, 0x140B90C7)
+
+
+# =============================================================================
+# Recycle Shop (GIAS06B) — AP randomization (Phase 10)
+# =============================================================================
+#
+# The Recycle Shop in Gear Savanna (Tinmon "Market Manager", screen
+# GIAS06B, script 126 §82) sells 7 fixed money-priced items. Unlike the
+# merit shop, the inventory is NOT a runtime ITEM_PARA scan; it's an
+# engine-managed array reconstructed at shop-open time from scattered
+# data we never fully traced. We patch it at runtime via a client poll.
+#
+# **Architecture (locked, see docs/recycle_shop_implementation_plan.md):**
+#
+# In-place ITEM_PARA extension via ITEM_DESC_PTR relocation. The
+# description-pointer table (128 × u32 at RAM 0x801279DC, immediately
+# after ITEM_PARA[0..127]) moves to Cave1 free RAM (0x800A0A50,
+# 61 KB available). Its freed 1024 bytes at 0x801279DC become extended
+# ITEM_PARA slots 128..255.
+#
+# Slots 128..134 hold the 7 AP shop entries — one per recycle shop row.
+# Each entry's name = the multiworld-resolved AP item name truncated to
+# 14 chars (resolved at gen time after fill). Each entry's description
+# (in the relocated ITEM_DESC_PTR) = "From <player>'s World". Each
+# entry's price = the vanilla price of the recycle slot it replaces.
+#
+# Runtime: client polls every tick. When the recycle shop opens
+# (shop_obj at gp-0x6BC4 != NULL with entry_count == 7), the client
+# overwrites the 14-byte runtime array at shop_obj.item_list_ptr with
+# [128,1, 129,1, ..., 134,1].
+#
+# A wrapper at the recycle shop's giveItem callsite (RAM 0x800FB410)
+# dispatches by item_id. Ids 128..134 fire setTrigger(904 + offset) and
+# skip vanilla giveItem so no item enters inventory; AP delivers the
+# real reward via the normal path. Money is still deducted (the shop
+# logic deducts before the giveItem callsite).
+#
+# RE source: docs/recycle_shop_implementation_plan.md and the runtime
+# probe at tools/dw1_recycle_shop_probe.lua.
+
+# --- RAM addresses (verified live 2026-05-10) -------------------------------
+# Bare Nymashock MainRAM offsets (no kuseg prefix) — wrapper builder ORs
+# in 0x80000000 when emitting MIPS code.
+RAM_RECYCLE_SHOP_OBJ: Final = 0x00088804         # shop_obj struct (32 B)
+RAM_RECYCLE_SHOP_LIST_PTR: Final = 0x00088828    # runtime [id,flag]*7 array
+RAM_RECYCLE_SHOP_GP_SLOT: Final = 0x00134F68     # gp-0x6BC4 (holds shop_obj ptr)
+
+# shop_obj field offsets — see runtime probe results.
+RECYCLE_SHOP_OBJ_LIST_PTR_OFFSET: Final = 0x00     # u32 -> item list
+RECYCLE_SHOP_OBJ_ENTRY_COUNT_OFFSET: Final = 0x08  # u8  -> 7 for recycle
+
+# Per-shop count used to fingerprint "is recycle shop open" (the merit
+# shop uses a different count and a different shop_obj address).
+RECYCLE_SHOP_ENTRY_COUNT: Final = 7
+
+# AP slot range: extends ITEM_PARA in-place at the freed ITEM_DESC_PTR
+# location. Slot 128 = the first byte at RAM 0x801279DC; we use slots
+# 128..134 (7 entries). Slots 135..143 stay zero (reserved for future
+# shop work).
+RECYCLE_SHOP_AP_ITEM_ID_BASE: Final = 128
+RECYCLE_SHOP_AP_ITEM_ID_COUNT: Final = 7
+RECYCLE_SHOP_AP_ITEM_IDS: Final = tuple(
+    RECYCLE_SHOP_AP_ITEM_ID_BASE + i
+    for i in range(RECYCLE_SHOP_AP_ITEM_ID_COUNT)
+)
+
+# AP location triggers — allocated 904..910. Each maps to one shop slot.
+#
+# **Range justification**: 904..910 are 7 consecutive bits in byte
+# 0x001BE03E (= AP_TRIGGER_ARRAY_BASE + 113). Bits 0..6 of that byte
+# are unassigned by vanilla DW1 and unused by AP (the prior AP-allocated
+# range 890..903 ends at byte 0x001BE03D bit 7). Trigger 911 stays free
+# for future expansion (bit 7 of the same byte). The plan-doc's
+# original suggestion of 951..957 was rejected because trigger 951
+# lands at byte 0x001BE043 = :data:`RAM_MERAMON_TUNNEL_STATE`,
+# corrupting the Drimogemon-tunnel state machine.
+RECYCLE_SHOP_TRIGGER_BASE: Final = 904
+RECYCLE_SHOP_TRIGGER_COUNT: Final = 7
+RECYCLE_SHOP_TRIGGER_IDS: Final = tuple(
+    RECYCLE_SHOP_TRIGGER_BASE + i for i in range(RECYCLE_SHOP_TRIGGER_COUNT)
+)
+# Sanity: every trigger lands in byte 0x001BE03E (= AP_TRIGGER_ARRAY_BASE
+# + 113, just above the existing AP-allocated band 890..903).
+_RECYCLE_TRIG_BYTES = {
+    AP_TRIGGER_ARRAY_BASE + (t // 8) for t in RECYCLE_SHOP_TRIGGER_IDS
+}
+assert _RECYCLE_TRIG_BYTES == {0x001BE03E}, (
+    f"Recycle shop triggers spilled out of byte 0x001BE03E: "
+    f"{[hex(b) for b in sorted(_RECYCLE_TRIG_BYTES)]}"
+)
+
+# Vanilla item IDs / prices of the 7 recycle slots (verified runtime
+# probe 2026-05-10). Used to set each AP slot's `value` field so the
+# shop displays the same money price as vanilla for that slot.
+RECYCLE_SHOP_VANILLA_IDS: Final = (0x01, 0x05, 0x0F, 0x10, 0x11, 0x16, 0x27)
+RECYCLE_SHOP_VANILLA_PRICES: Final = (500, 800, 500, 500, 500, 300, 500)
+assert len(RECYCLE_SHOP_VANILLA_IDS) == RECYCLE_SHOP_AP_ITEM_ID_COUNT
+assert len(RECYCLE_SHOP_VANILLA_PRICES) == RECYCLE_SHOP_AP_ITEM_ID_COUNT
+
+# AP location names (one per slot, in cursor order matching the runtime
+# array). locations.py imports this tuple to build the location entries.
+RECYCLE_SHOP_LOCATION_NAMES: Final = tuple(
+    f"Recycle Shop #{i + 1}"
+    for i in range(RECYCLE_SHOP_AP_ITEM_ID_COUNT)
+)
+
+# Per-location (byte_addr, bit_index) for the client's bit-poll table.
+RECYCLE_SHOP_LOCATION_RAM_BITS: Final[dict[str, tuple[int, int]]] = {
+    name: (
+        AP_TRIGGER_ARRAY_BASE + (RECYCLE_SHOP_TRIGGER_IDS[i] // 8),
+        RECYCLE_SHOP_TRIGGER_IDS[i] % 8,
+    )
+    for i, name in enumerate(RECYCLE_SHOP_LOCATION_NAMES)
+}
+
+# --- SLUS RAM <-> bin offset helper -----------------------------------------
+# Chest wrapper anchors any SLUS-RAM-relative .bin offset computation.
+# Sector-aware (Mode2/2352): always use this helper for arbitrary RAM
+# offsets that might cross a 2048-byte user-data boundary.
+
+def _slus_ram_to_bin_offset(ram_addr: int) -> int:
+    """Translate a SLUS-RAM address to its sector-aware .bin offset.
+
+    Anchored on :data:`ROM_CHEST_GIVEITEM_WRAPPER_RAM` /
+    :data:`ROM_CHEST_GIVEITEM_WRAPPER_OFFSET`, so all addresses inside
+    the SLUS exec region (RAM ~0x80090000..0x80140000) round-trip
+    correctly regardless of how many sector boundaries lie between
+    the anchor and the target.
+    """
+
+    delta = ram_addr - ROM_CHEST_GIVEITEM_WRAPPER_RAM
+    return _flat_to_user_data(ROM_CHEST_GIVEITEM_WRAPPER_OFFSET, delta)
+
+
+# --- Cave1 layout: relocated ITEM_DESC_PTR + AP description strings --------
+# Cave1 spans RAM 0x800A0A50..0x800AFD78 (61 KB). The AP-recycle-shop
+# block sits at the very start, leaving ~60 KB headroom for future work.
+
+EXT_CAVE1_RAM_BASE: Final = 0x800A0A50
+EXT_CAVE1_BIN_OFFSET: Final = _slus_ram_to_bin_offset(EXT_CAVE1_RAM_BASE)
+
+# Relocated ITEM_DESC_PTR table — 256 entries × u32 = 1024 bytes. The
+# patcher copies the vanilla 128-entry pointer block (RAM 0x801279DC)
+# verbatim into slots 0..127, fills slots 128..134 with pointers to
+# the AP description strings (below), and leaves slots 135..255 zeroed.
+RELOC_ITEM_DESC_PTR_RAM: Final = EXT_CAVE1_RAM_BASE                    # 0x800A0A50
+RELOC_ITEM_DESC_PTR_ENTRIES: Final = 256
+RELOC_ITEM_DESC_PTR_SIZE: Final = RELOC_ITEM_DESC_PTR_ENTRIES * 4      # 1024
+RELOC_ITEM_DESC_PTR_BIN_OFFSET: Final = EXT_CAVE1_BIN_OFFSET
+
+# AP description strings — placed immediately after the relocated
+# ITEM_DESC_PTR. Each string lives in a fixed AP_DESC_STRING_MAX_LEN
+# byte slot (NUL-padded). Layout: 7 contiguous slots starting at
+# RAM 0x800A0E50.
+AP_DESC_STRING_MAX_LEN: Final = 64
+AP_DESC_STRINGS_RAM: Final = (
+    RELOC_ITEM_DESC_PTR_RAM + RELOC_ITEM_DESC_PTR_SIZE                  # 0x800A0E50
+)
+AP_DESC_STRINGS_BIN_OFFSET: Final = _slus_ram_to_bin_offset(AP_DESC_STRINGS_RAM)
+AP_DESC_STRINGS_TOTAL_SIZE: Final = (
+    AP_DESC_STRING_MAX_LEN * RECYCLE_SHOP_AP_ITEM_ID_COUNT              # 448
+)
+
+# String prefix/suffix for "From <player>'s World".
+AP_DESC_PREFIX: Final = b"From "
+AP_DESC_SUFFIX: Final = b"'s World"
+
+
+def build_ap_desc_string(player_name: str) -> bytes:
+    """Build the NUL-terminated, NUL-padded description string for one AP slot.
+
+    Length = :data:`AP_DESC_STRING_MAX_LEN`. Player name is truncated
+    to fit if necessary; the trailing NUL is always preserved so the
+    in-game text renderer halts cleanly.
+    """
+
+    name_bytes = player_name.encode("ascii", errors="replace")
+    # Reserve 1 byte for the trailing NUL.
+    max_name = AP_DESC_STRING_MAX_LEN - len(AP_DESC_PREFIX) - len(AP_DESC_SUFFIX) - 1
+    if len(name_bytes) > max_name:
+        name_bytes = name_bytes[:max_name]
+    body = AP_DESC_PREFIX + name_bytes + AP_DESC_SUFFIX + b"\x00"
+    return body.ljust(AP_DESC_STRING_MAX_LEN, b"\x00")
+
+
+# Sanity: max-length player name should still fit a non-empty body.
+assert AP_DESC_STRING_MAX_LEN > len(AP_DESC_PREFIX) + len(AP_DESC_SUFFIX) + 1
+
+
+# --- Vanilla ITEM_DESC_PTR source location (.bin) --------------------------
+# RAM 0x801279DC = the byte immediately after ITEM_PARA[127], where the
+# vanilla 128-entry ITEM_DESC_PTR table lives. Sector-aware translation
+# via the existing ITEM_PARA helper (the table is contiguous with
+# ITEM_PARA in user-data layout).
+VANILLA_ITEM_DESC_PTR_RAM: Final = 0x801279DC
+VANILLA_ITEM_DESC_PTR_BIN_OFFSET: Final = _table_byte_to_bin_flat(
+    ROM_ITEM_TABLE_ENTRY_COUNT * ROM_ITEM_TABLE_ENTRY_SIZE,                # = 0x1000
+)
+# Number of vanilla ITEM_DESC_PTR entries to copy into the relocated table.
+VANILLA_ITEM_DESC_PTR_ENTRIES: Final = ROM_ITEM_TABLE_ENTRY_COUNT          # 128
+
+
+# --- Extended ITEM_PARA region ----------------------------------------------
+# The freed bytes at the original ITEM_DESC_PTR location become extended
+# ITEM_PARA slots 128..255. We populate slots 128..134; slots 135..255
+# stay whatever the vanilla data happened to be (we don't depend on them).
+EXT_ITEM_PARA_RAM: Final = VANILLA_ITEM_DESC_PTR_RAM                       # 0x801279DC
+EXT_ITEM_PARA_BIN_OFFSET: Final = VANILLA_ITEM_DESC_PTR_BIN_OFFSET
+
+
+def ext_item_para_slot_bin_offset(slot: int) -> int:
+    """Sector-aware .bin offset of extended ITEM_PARA slot ``slot``.
+
+    Valid for ``slot in [128, 256)`` (the freed ITEM_DESC_PTR region).
+    """
+
+    if not 128 <= slot < 256:
+        raise ValueError(f"Extended ITEM_PARA slot {slot} out of range [128, 256)")
+    return _table_byte_to_bin_flat(slot * ROM_ITEM_TABLE_ENTRY_SIZE)
+
+
+def build_ap_item_para_entry(name: str, price: int) -> bytes:
+    """Build a 32-byte ITEM_PARA entry for one AP recycle-shop slot.
+
+    Layout (matches dw1.hpp Item struct):
+
+    * bytes  0..19: name (ASCII, NUL-padded, truncated to 14 chars per
+      spec — the in-game name field renders 14 chars cleanly; the extra
+      6 padding bytes stay zero).
+    * bytes 20..23: value (i32 LE, money price — set to ``price``).
+    * bytes 24..25: meritValue (0).
+    * bytes 26..27: sortingValue (0).
+    * byte  28:     itemColor (0).
+    * byte  29:     dropable (0 — never grants to inventory).
+    * bytes 30..31: unk (0).
+    """
+
+    name_bytes = name.encode("ascii", errors="replace")[:14]
+    return (
+        name_bytes.ljust(20, b"\x00")
+        + price.to_bytes(4, "little", signed=True)
+        + b"\x00\x00"  # meritValue
+        + b"\x00\x00"  # sortingValue
+        + b"\x00"      # itemColor
+        + b"\x00"      # dropable
+        + b"\x00\x00"  # unk
+    )
+
+
+# --- ITEM_DESC_PTR callsite patches ----------------------------------------
+# Every ``addiu rN, rN, 0x79DC`` in the SLUS that resolves to ITEM_DESC_PTR.
+# All 3 callsites use $r2 (verified against references/DW1-Code/SLUS.asm):
+#
+#   * RAM 0x000DC648 lui $r2, 0x8012   <- target #1 hi half (inventory desc)
+#     RAM 0x000DC64C addiu $r2, $r2, 0x79DC
+#   * RAM 0x000FD74C lui $r2, 0x8012   <- target #2 hi half (shop desc panel)
+#     RAM 0x000FD754 addiu $r2, $r2, 0x79DC  (an `sll` lives between the two)
+#   * RAM 0x000FD76C lui $r2, 0x8012   <- target #3 hi half (shop desc panel)
+#     RAM 0x000FD770 addiu $r2, $r2, 0x79DC
+#
+# We rewrite each pair to load RELOC_ITEM_DESC_PTR_RAM (= 0x800A0A50):
+#   lui   $r2, 0x800A     -> 0x3C02800A
+#   addiu $r2, $r2, 0x0A50 -> 0x24420A50
+# (low half 0x0A50 is positive < 0x8000, no sign-extension issue.)
+
+# Encoding helpers — derived from RELOC_ITEM_DESC_PTR_RAM so the bytes
+# stay in sync if the relocated address moves.
+_RELOC_HI: Final = (RELOC_ITEM_DESC_PTR_RAM >> 16) & 0xFFFF                 # 0x800A
+_RELOC_LO: Final = RELOC_ITEM_DESC_PTR_RAM & 0xFFFF                         # 0x0A50
+assert _RELOC_LO < 0x8000, (
+    f"RELOC low half 0x{_RELOC_LO:04X} would need sign-extension; pick a "
+    f"new RELOC_ITEM_DESC_PTR_RAM whose low 16 bits are < 0x8000."
+)
+# Both encodings target $r2 (rt=2). lui: opcode 0x0F << 26 | rt<<16 | imm
+RELOC_ITEM_DESC_PTR_LUI_VALUE: Final = 0x3C020000 | _RELOC_HI               # 0x3C02800A
+RELOC_ITEM_DESC_PTR_ADDIU_VALUE: Final = 0x24420000 | _RELOC_LO             # 0x24420A50
+assert RELOC_ITEM_DESC_PTR_LUI_VALUE == 0x3C02800A, (
+    hex(RELOC_ITEM_DESC_PTR_LUI_VALUE)
+)
+assert RELOC_ITEM_DESC_PTR_ADDIU_VALUE == 0x24420A50, (
+    hex(RELOC_ITEM_DESC_PTR_ADDIU_VALUE)
+)
+
+# Per-callsite (lui_bin_offset, addiu_bin_offset) tuples. Each lands in
+# the patcher as two 4-byte WRITEs.
+RELOC_ITEM_DESC_PTR_PATCH_SITES: Final = (
+    # Inventory hover description display
+    (_slus_ram_to_bin_offset(0x800DC648), _slus_ram_to_bin_offset(0x800DC64C)),
+    # Shop description panel — first reader (lui at 0xFD74C, addiu at 0xFD754
+    # with the `sll $r3, $r19, 0x02` instruction interleaved between them)
+    (_slus_ram_to_bin_offset(0x800FD74C), _slus_ram_to_bin_offset(0x800FD754)),
+    # Shop description panel — second reader (consecutive lui+addiu)
+    (_slus_ram_to_bin_offset(0x800FD76C), _slus_ram_to_bin_offset(0x800FD770)),
+)
+RELOC_ITEM_DESC_PTR_PATCH_FORMAT: Final = "<I"
+
+
+# --- Recycle-shop give-item wrapper -----------------------------------------
+# The wrapper hijacks the vanilla ``jal 0x800C5240`` (giveItem) at the
+# recycle shop's give-item callsite (RAM 0x800FB410). Logic:
+#
+#   1. If $a0 (item_id) is in [128, 134] — i.e. one of our extended AP
+#      slots — fire setTrigger(904 + (item_id - 128)) and return $v0=1
+#      WITHOUT calling vanilla giveItem. Money was already deducted by
+#      the surrounding shop logic before this jal.
+#   2. Otherwise tail-call vanilla giveItem so the shop functions
+#      normally for any unmatched item ID (defensive — vanilla recycle
+#      slots are 0x01..0x27 so this branch is unreachable in practice
+#      after the runtime patch, but keeps the wrapper safe if the
+#      runtime patch somehow fails).
+#
+# Wrapper sits in Cave6 free space, after the combat trampolines (which
+# end at RAM 0x8009593C). The merit shop wrapper at 0x80095800 + 180 B
+# = 0x800958B4 plus AP_ITEM_DESC_STRING (25 B) = 0x800958CD; combat tr1
+# starts at 0x80095900 and tr3 ends at 0x8009593C. Place this wrapper
+# at 0x80095940 (4-byte aligned, 4-byte gap from combat tr3).
+ROM_RECYCLE_SHOP_WRAPPER_RAM: Final = 0x80095940
+ROM_RECYCLE_SHOP_WRAPPER_OFFSET: Final = _slus_ram_to_bin_offset(
+    ROM_RECYCLE_SHOP_WRAPPER_RAM,
+)
+
+
+def _build_recycle_shop_wrapper_bytes() -> bytes:
+    """Build the recycle-shop giveItem-wrapper MIPS bytecode.
+
+    15 instructions / 60 bytes. See section 2 above for the dispatch
+    semantics.
+
+    Layout::
+
+        addiu $at, $a0, -RECYCLE_SHOP_AP_ITEM_ID_BASE   ; at = a0 - 128
+        sltiu $t0, $at, RECYCLE_SHOP_AP_ITEM_ID_COUNT   ; t0 = (at < 7)
+        beq   $t0, $0, .vanilla                          ; not in AP range
+        nop                                              ; bne delay slot
+        addiu $sp, $sp, -0x10                            ; (in-range path)
+        sw    $ra, 0x0C($sp)
+        addiu $a0, $at, RECYCLE_SHOP_TRIGGER_BASE        ; trigger_id = 904 + (a0-128)
+        jal   setTrigger
+        nop                                              ; jal delay slot
+        lw    $ra, 0x0C($sp)
+        addiu $sp, $sp, 0x10
+        jr    $ra                                        ; return without giveItem
+        addiu $v0, $0, 1                                 ; success ($v0=1, jr delay)
+      .vanilla:
+        j     0x800C5240                                 ; tail-call vanilla giveItem
+        nop                                              ; j delay slot
+    """
+
+    import struct as _struct
+
+    SETTRIGGER_RAM = 0x801065C0
+    GIVEITEM_RAM = 0x800C5240
+    jal_settrigger = 0x0C000000 | ((SETTRIGGER_RAM >> 2) & 0x03FFFFFF)
+    j_giveitem = 0x08000000 | ((GIVEITEM_RAM >> 2) & 0x03FFFFFF)
+
+    # MIPS branch offset = (target_PC_index - branch_PC_index - 1).
+    # The beq is at instruction-index 2; the .vanilla label (j giveItem)
+    # is at index 13 — that's 9 in-range-path instructions past the bne
+    # delay slot, plus the 4-instruction in-range epilogue (lw, addiu,
+    # jr, addiu in delay) for a total of 10 instructions skipped.
+    BEQ_OFFSET = 0x11000000 | (10 & 0xFFFF)  # beq $t0, $0, +10
+
+    return b"".join(
+        _struct.pack("<I", v) for v in (
+            # at = a0 - 128  (sign-extended -128 = 0xFF80)
+            0x24810000 | ((-RECYCLE_SHOP_AP_ITEM_ID_BASE) & 0xFFFF),
+            # sltiu $t0, $at, COUNT
+            0x2C280000 | (RECYCLE_SHOP_AP_ITEM_ID_COUNT & 0xFFFF),
+            # beq $t0, $0, .vanilla (skip 10 instrs forward)
+            BEQ_OFFSET,
+            0x00000000,                                # nop (beq delay slot)
+            # In AP range: setTrigger(TRIGGER_BASE + at), then return.
+            0x27BDFFF0,                                # addiu $sp, $sp, -0x10
+            0xAFBF000C,                                # sw    $ra, 0x0C($sp)
+            # addiu $a0, $at, TRIGGER_BASE  (at already = a0 - 128)
+            0x24240000 | (RECYCLE_SHOP_TRIGGER_BASE & 0xFFFF),
+            jal_settrigger,                            # jal   setTrigger
+            0x00000000,                                # nop   (jal delay slot)
+            0x8FBF000C,                                # lw    $ra, 0x0C($sp)
+            0x27BD0010,                                # addiu $sp, $sp, 0x10
+            0x03E00008,                                # jr    $ra
+            0x24020001,                                # addiu $v0, $0, 1 (jr delay)
+            # .vanilla: tail-call vanilla giveItem
+            j_giveitem,                                # j     0x800C5240
+            0x00000000,                                # nop   (j delay slot)
+        )
+    )
+
+
+ROM_RECYCLE_SHOP_WRAPPER_BYTES: Final = _build_recycle_shop_wrapper_bytes()
+assert len(ROM_RECYCLE_SHOP_WRAPPER_BYTES) == 60, len(ROM_RECYCLE_SHOP_WRAPPER_BYTES)
+
+
+# --- Recycle-shop give-item jal hijack --------------------------------------
+# Replace ``jal 0x800C5240`` (= 0x0C031490 LE) at RAM 0x800FB410 with
+# ``jal ROM_RECYCLE_SHOP_WRAPPER_RAM``. Single 4-byte rewrite. The
+# delay-slot nop at +4 stays as-is.
+
+ROM_RECYCLE_SHOP_PATCH_RAM: Final = 0x800FB410
+ROM_RECYCLE_SHOP_PATCH_OFFSET: Final = _slus_ram_to_bin_offset(
+    ROM_RECYCLE_SHOP_PATCH_RAM,
+)
+ROM_RECYCLE_SHOP_PATCH_FORMAT: Final = "<I"
+ROM_RECYCLE_SHOP_PATCH_VALUE: Final = (
+    0x0C000000 | ((ROM_RECYCLE_SHOP_WRAPPER_RAM >> 2) & 0x03FFFFFF)
+)
+
