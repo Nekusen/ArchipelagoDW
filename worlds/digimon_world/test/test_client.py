@@ -150,15 +150,17 @@ class TestChestDispatch(DigimonWorldTestBase):
         # Giromon) + 65 chests + 9 key items (Old Fishrod Pickup,
         # Mansion Key Pickup, Frig Key Pickup, Steak Pickup, Gear
         # Pickup, Rain Plant Pickup, Blue Flute Pickup, Leomonstone
-        # Pickup, Amazing Rod Pickup) + 12 vending machines.
+        # Pickup, Amazing Rod Pickup) + 12 vending machines + 7
+        # recycle shop slots.
         # Per-seed availability of the option-gated entries (the 12
-        # vending) is filtered on the AP server side; the dispatch
-        # dict is unconditional. Airdramon, Seadramon, Nanimon, and
-        # Giromon stay in RECRUIT_RAM_BITS but are filtered out of
-        # LOCATION_RAM_BITS via ``_DROPPED_RECRUITS_BLACKLIST``.
+        # vending, the 7 recycle shop) is filtered on the AP server
+        # side; the dispatch dict is unconditional. Airdramon,
+        # Seadramon, Nanimon, and Giromon stay in RECRUIT_RAM_BITS
+        # but are filtered out of LOCATION_RAM_BITS via
+        # ``_DROPPED_RECRUITS_BLACKLIST``.
         # Lava Cave Access / Tropical Jungle Bridge / Great Canyon
         # Bridge are AP items only — no associated AP location.
-        self.assertEqual(len(LOCATION_RAM_BITS), 46 + 65 + 9 + 12)
+        self.assertEqual(len(LOCATION_RAM_BITS), 46 + 65 + 9 + 12 + 7)
 
 
 # =============================================================================
