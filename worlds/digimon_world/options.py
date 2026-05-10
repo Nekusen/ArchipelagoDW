@@ -349,6 +349,30 @@ class CardLocations(Toggle):
     display_name = "Card Vending Locations"
 
 
+class RecycleShopLocations(Toggle):
+    """Add the Recycle Shop (Tinmon "Market Manager", Gear Savanna) as
+    AP locations.
+
+    DW1's recycle shop sells 7 fixed money-priced items
+    (med.recovery / Medium MP / Off. Disk / Def. Disk / Hispeed dsk /
+    Auto Pilot / Giant Meat). With this on, each row becomes its own
+    AP location (7 total), and the shop UI displays the multiworld
+    AP item name + a "From <player>'s World" hover description.
+
+    Mechanics: a one-time gen-time relocation of DW1's
+    ``ITEM_DESC_PTR`` table out to free RAM frees up 16 ITEM_PARA
+    slots; we use 7 of them to hold per-shop-row AP names + prices.
+    A runtime poll rewrites the engine's shop array when the recycle
+    shop opens. A wrapper at the shop's ``giveItem`` callsite fires
+    the AP location signal and skips the vanilla item delivery so
+    the AP-placed item at that location is delivered to the player's
+    bank instead. Money is still deducted (vanilla shop logic
+    deducts before the give-item callsite).
+    """
+
+    display_name = "Recycle Shop Locations"
+
+
 class GroundItemRandomization(DefaultOnToggle):
     """Shuffle the items that randomly spawn on field maps.
 
@@ -558,6 +582,7 @@ class DigimonWorldOptions(PerGameCommonOptions):
     starter_use_weakest_tech: StarterUseWeakestTech
     card_locations: CardLocations
     vending_locations: VendingLocations
+    recycle_shop_locations: RecycleShopLocations
     god_mode: GodMode
 
 
@@ -575,7 +600,7 @@ option_groups: list[OptionGroup] = [
             StarterUseWeakestTech,
         ],
     ),
-    OptionGroup("Locations", [CardLocations, VendingLocations]),
+    OptionGroup("Locations", [CardLocations, VendingLocations, RecycleShopLocations]),
     OptionGroup(
         "Quality of Life",
         [

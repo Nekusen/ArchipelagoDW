@@ -3325,6 +3325,53 @@ def _table_byte_to_bin_flat(table_byte_offset: int) -> int:
     return _flat_to_user_data(ROM_ITEM_TABLE_BASE, table_byte_offset)
 
 
+def read_user_data_bytes(rom: bytes, base_bin_offset: int, length: int) -> bytes:
+    """Read ``length`` bytes of pure user data starting at ``base_bin_offset``.
+
+    Sector-aware: hops Mode2/2352 EDC/ECC blocks via
+    :func:`_flat_to_user_data`. ``length`` is measured in user-data
+    bytes; the returned ``bytes`` is contiguous (no sector header /
+    EC bytes interleaved).
+    """
+
+    out = bytearray(length)
+    pos = 0
+    while pos < length:
+        flat = _flat_to_user_data(base_bin_offset, pos)
+        sector_index = flat // SECTOR_SIZE_BYTES
+        sector_user_end = (
+            sector_index * SECTOR_SIZE_BYTES
+            + SECTOR_SIZE_BYTES
+            - SECTOR_EDC_ECC_BYTES
+        )
+        chunk = min(sector_user_end - flat, length - pos)
+        out[pos:pos + chunk] = rom[flat:flat + chunk]
+        pos += chunk
+    return bytes(out)
+
+
+def write_user_data_bytes(rom: bytearray, base_bin_offset: int, data: bytes) -> None:
+    """Write ``data`` (pure user-data bytes) starting at ``base_bin_offset``.
+
+    Sector-aware: hops Mode2/2352 EDC/ECC blocks. Mutates ``rom`` in
+    place.
+    """
+
+    length = len(data)
+    pos = 0
+    while pos < length:
+        flat = _flat_to_user_data(base_bin_offset, pos)
+        sector_index = flat // SECTOR_SIZE_BYTES
+        sector_user_end = (
+            sector_index * SECTOR_SIZE_BYTES
+            + SECTOR_SIZE_BYTES
+            - SECTOR_EDC_ECC_BYTES
+        )
+        chunk = min(sector_user_end - flat, length - pos)
+        rom[flat:flat + chunk] = data[pos:pos + chunk]
+        pos += chunk
+
+
 def _read_struct_block_user_data(rom: bytes, block: "StructBlock") -> bytes:
     """Extract a ``StructBlock``'s user-data records from a flat BIN.
 

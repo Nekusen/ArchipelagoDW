@@ -127,7 +127,7 @@ from .data.addresses import (
     ROM_LAVA_CAVE_GATE_VALUE,
     ROM_MAP_ITEM_OFFSETS,
     ROM_PROSPERITY_GOAL_FORMAT,
-    ROM_PROSPERITY_GOAL_OFFSET,
+    ROM_PROSPERITY_GOAL_OFFSETS,
     ROM_OGREMON_SOFTLOCK_FORMAT,
     ROM_OGREMON_SOFTLOCK_OFFSETS,
     ROM_OGREMON_SOFTLOCK_VALUE,
@@ -144,6 +144,8 @@ from .data.addresses import (
     AP_ITEM_DESC_PTR_BIN_OFFSET,
     AP_ITEM_DESC_PTR_VALUE,
     AP_ITEM_DESC_STRING,
+    AP_DESC_STRING_MAX_LEN,
+    AP_DESC_STRINGS_BIN_OFFSET,
     AP_ITEM_ICON_BLANK_BIN_OFFSETS,
     AP_ITEM_ICON_ROW_BYTES,
     ROM_AMAZING_ROD_HIDE_BYTES,
@@ -171,6 +173,18 @@ from .data.addresses import (
     ROM_PP_CALC_PATCH_VALUE,
     ROM_RECRUITMENT,
     ROM_RECRUITMENT_FORMAT,
+    ROM_RECYCLE_SHOP_PATCH_FORMAT,
+    ROM_RECYCLE_SHOP_PATCH_OFFSET,
+    ROM_RECYCLE_SHOP_PATCH_VALUE,
+    ROM_RECYCLE_SHOP_WRAPPER_BYTES,
+    ROM_RECYCLE_SHOP_WRAPPER_OFFSET,
+    RECYCLE_SHOP_AP_ITEM_ID_COUNT,
+    RECYCLE_SHOP_LOCATION_NAMES,
+    RECYCLE_SHOP_VANILLA_PRICES,
+    RELOC_ITEM_DESC_PTR_ADDIU_VALUE,
+    RELOC_ITEM_DESC_PTR_LUI_VALUE,
+    RELOC_ITEM_DESC_PTR_PATCH_FORMAT,
+    RELOC_ITEM_DESC_PTR_PATCH_SITES,
     ROM_SETTRIGGER_PATCH_FORMAT,
     ROM_SETTRIGGER_PATCH_OFFSET,
     ROM_SETTRIGGER_PATCH_VALUE,
@@ -203,8 +217,11 @@ from .data.addresses import (
     ROM_UNLOCK_TOY_TOWN_VALUE,
     ROM_UNLOCK_TYPE_LOCK_FORMAT,
     VENDING_MACHINES,
+    build_ap_desc_string,
+    build_ap_item_para_entry,
     build_combat_multiplier_trampolines,
     encode_set_trigger,
+    ext_item_para_slot_bin_offset,
     read_digimon_table_user_data,
     read_item_table_user_data,
     read_technique_table_user_data,
@@ -410,6 +427,63 @@ class DigimonWorldPatchExtension(APPatchExtension):
         # only updated for slot 0).
         target[ROM_STARTER_STAT_CHK_DIGIMON] = (
             struct.pack(ROM_DIGIMON_ID_FORMAT, picks[0].digimon_id)[0]
+        )
+        return bytes(target)
+
+    @staticmethod
+    def relocate_item_desc_ptr(caller: APProcedurePatch, rom: bytes) -> bytes:
+        """Build the relocated ITEM_DESC_PTR table in Cave1.
+
+        Runs only when the
+        :class:`worlds.digimon_world.options.RecycleShopLocations`
+        option is on — see :func:`_assemble_procedure`.
+
+        Reads the 128 vanilla u32 pointer entries from the **original
+        source ROM** (via :meth:`get_source_data_with_cache`, so we get
+        them pre-token-application even though ``apply_tokens`` has
+        already overwritten the same .bin region with extended
+        ITEM_PARA slots 128..134). Writes them as slots 0..127 of the
+        relocated 256-entry table at
+        :data:`RELOC_ITEM_DESC_PTR_BIN_OFFSET`. Slots 128..134 are
+        overwritten with kuseg pointers into the 7 AP description
+        strings (which ``apply_tokens`` has already written at
+        :data:`AP_DESC_STRINGS_BIN_OFFSET`). Slots 135..255 stay zero.
+
+        Sector-aware on both read and write — the table spans multiple
+        Mode2/2352 user-data regions.
+        """
+
+        from .data.addresses import (
+            AP_DESC_STRING_MAX_LEN,
+            AP_DESC_STRINGS_RAM,
+            RECYCLE_SHOP_AP_ITEM_ID_COUNT,
+            RELOC_ITEM_DESC_PTR_BIN_OFFSET,
+            RELOC_ITEM_DESC_PTR_SIZE,
+            VANILLA_ITEM_DESC_PTR_BIN_OFFSET,
+            VANILLA_ITEM_DESC_PTR_ENTRIES,
+            read_user_data_bytes,
+            write_user_data_bytes,
+        )
+
+        base_data = caller.get_source_data_with_cache()
+        vanilla_bytes = read_user_data_bytes(
+            base_data,
+            VANILLA_ITEM_DESC_PTR_BIN_OFFSET,
+            VANILLA_ITEM_DESC_PTR_ENTRIES * 4,
+        )
+
+        table = bytearray(RELOC_ITEM_DESC_PTR_SIZE)
+        table[:len(vanilla_bytes)] = vanilla_bytes
+
+        ap_desc_kuseg_base = 0x80000000 | AP_DESC_STRINGS_RAM
+        first_ap_slot = VANILLA_ITEM_DESC_PTR_ENTRIES
+        for i in range(RECYCLE_SHOP_AP_ITEM_ID_COUNT):
+            ptr = ap_desc_kuseg_base + i * AP_DESC_STRING_MAX_LEN
+            struct.pack_into("<I", table, (first_ap_slot + i) * 4, ptr)
+
+        target = bytearray(rom)
+        write_user_data_bytes(
+            target, RELOC_ITEM_DESC_PTR_BIN_OFFSET, bytes(table),
         )
         return bytes(target)
 
@@ -1180,16 +1254,17 @@ def _write_prosperity_goal_token(
     ``Prosperity Point`` pool size in :mod:`.items`, so all three
     sides agree.
 
-    The slot is a 16-bit LE comparand (vanilla ``32 00`` = 50). We
-    write the threshold the same way; values 20..100 fit in 1 byte so
-    the high byte is always 0.
+    The comparand is a single byte (vanilla ``0x32`` = 50) sitting at
+    offset +1 inside the 4-byte ``pstat(N) <op> V`` IF primitive; the
+    next 2 bytes (``80 00``) are the ``<`` operator opcode and must be
+    preserved. Two duplicate copies of the IF block exist in the BIN —
+    both are patched so either script-load path sees the new threshold.
+    See :data:`ROM_PROSPERITY_GOAL_OFFSETS` for the verified encoding.
     """
 
-    patch.write_token(
-        APTokenTypes.WRITE,
-        ROM_PROSPERITY_GOAL_OFFSET,
-        struct.pack(ROM_PROSPERITY_GOAL_FORMAT, threshold),
-    )
+    payload = struct.pack(ROM_PROSPERITY_GOAL_FORMAT, threshold)
+    for offset in ROM_PROSPERITY_GOAL_OFFSETS:
+        patch.write_token(APTokenTypes.WRITE, offset, payload)
 
 
 def _write_great_canyon_cutscene_tokens(patch: DigimonWorldProcedurePatch) -> None:
@@ -1439,6 +1514,113 @@ def _write_vending_tokens(
     )
 
 
+def _write_recycle_shop_tokens(
+    patch: DigimonWorldProcedurePatch,
+    world: DigimonWorldWorld,
+) -> None:
+    """Write all Recycle Shop tokens for the seed.
+
+    Five sets of writes:
+
+    1. **Extended ITEM_PARA entries (slots 128..134)** at the freed
+       ITEM_DESC_PTR location. One 32-byte entry per AP shop slot,
+       carrying the multiworld-resolved AP item name (truncated to
+       14 chars) and the slot's vanilla money price.
+    2. **AP description strings** at :data:`AP_DESC_STRINGS_BIN_OFFSET`
+       in Cave1. One 64-byte slot per shop entry, NUL-padded, holding
+       ``"From <player>'s World"``. The relocated ITEM_DESC_PTR
+       (built later by :meth:`relocate_item_desc_ptr`) references
+       these.
+    3. **3 ITEM_DESC_PTR callsite patches** that move every
+       ``lui $r2, 0x8012; addiu $r2, $r2, 0x79DC`` pair in the SLUS
+       to the relocated table. After this, vanilla item-description
+       lookups read from Cave1 instead of the now-repurposed
+       0x801279DC region.
+    4. **giveItem wrapper** at :data:`ROM_RECYCLE_SHOP_WRAPPER_OFFSET`
+       — 60-byte MIPS sequence that, when ``$a0`` is in the AP slot
+       range [128, 134], fires ``setTrigger(904 + offset)`` and
+       returns ``$v0=1`` without delivering any item to inventory.
+       Otherwise tail-calls vanilla ``giveItem``.
+    5. **Jal hijack** at :data:`ROM_RECYCLE_SHOP_PATCH_OFFSET` —
+       single 4-byte rewrite of the recycle shop's
+       ``jal 0x800C5240`` to point at the wrapper.
+
+    The 256-entry relocated ITEM_DESC_PTR table itself is built by
+    the :meth:`DigimonWorldPatchExtension.relocate_item_desc_ptr`
+    procedure step (it needs to read the 128 vanilla pointers from
+    the source ROM, which apply_tokens cannot do). Caller must add
+    that step to the procedure when this token writer is invoked
+    — see :func:`_assemble_procedure`.
+    """
+
+    multiworld = world.multiworld
+    player = world.player
+
+    # 1. Extended ITEM_PARA entries (one per AP shop slot).
+    # 2. AP description strings (one per AP shop slot).
+    for i, location_name in enumerate(RECYCLE_SHOP_LOCATION_NAMES):
+        try:
+            location = multiworld.get_location(location_name, player)
+        except KeyError:
+            # Option off — should never reach here because callers
+            # gate on the option, but defend in case.
+            return
+
+        placed = location.item
+        if placed is None:
+            # Defensive: location wasn't filled. Skip the AP-specific
+            # writes; the slot will display whatever stale bytes the
+            # vanilla ITEM_DESC_PTR region happened to contain — but
+            # the wrapper will still fire the trigger on purchase.
+            ap_item_name = "AP Item"
+            owner_name = multiworld.player_name[player]
+        else:
+            ap_item_name = placed.name
+            owner_name = multiworld.player_name[placed.player]
+
+        slot_id = 128 + i
+        entry_bytes = build_ap_item_para_entry(
+            ap_item_name, RECYCLE_SHOP_VANILLA_PRICES[i],
+        )
+        patch.write_token(
+            APTokenTypes.WRITE,
+            ext_item_para_slot_bin_offset(slot_id),
+            entry_bytes,
+        )
+
+        desc_bytes = build_ap_desc_string(owner_name)
+        patch.write_token(
+            APTokenTypes.WRITE,
+            AP_DESC_STRINGS_BIN_OFFSET + i * AP_DESC_STRING_MAX_LEN,
+            desc_bytes,
+        )
+
+    # 3. ITEM_DESC_PTR callsite patches (3 sites, both halves of each).
+    lui_bytes = struct.pack(
+        RELOC_ITEM_DESC_PTR_PATCH_FORMAT, RELOC_ITEM_DESC_PTR_LUI_VALUE,
+    )
+    addiu_bytes = struct.pack(
+        RELOC_ITEM_DESC_PTR_PATCH_FORMAT, RELOC_ITEM_DESC_PTR_ADDIU_VALUE,
+    )
+    for lui_offset, addiu_offset in RELOC_ITEM_DESC_PTR_PATCH_SITES:
+        patch.write_token(APTokenTypes.WRITE, lui_offset, lui_bytes)
+        patch.write_token(APTokenTypes.WRITE, addiu_offset, addiu_bytes)
+
+    # 4. giveItem wrapper.
+    patch.write_token(
+        APTokenTypes.WRITE,
+        ROM_RECYCLE_SHOP_WRAPPER_OFFSET,
+        ROM_RECYCLE_SHOP_WRAPPER_BYTES,
+    )
+
+    # 5. Jal hijack.
+    patch.write_token(
+        APTokenTypes.WRITE,
+        ROM_RECYCLE_SHOP_PATCH_OFFSET,
+        struct.pack(ROM_RECYCLE_SHOP_PATCH_FORMAT, ROM_RECYCLE_SHOP_PATCH_VALUE),
+    )
+
+
 def _write_ground_item_params(
     patch: DigimonWorldProcedurePatch,
     world: DigimonWorldWorld,
@@ -1502,17 +1684,29 @@ def _assemble_procedure(
     *,
     shuffle_ground_items: bool,
     shuffle_starters: bool,
+    relocate_item_desc_ptr: bool,
 ) -> None:
-    """Mutate the per-instance procedure to include opt-in shuffle steps.
+    """Mutate the per-instance procedure to include opt-in extension steps.
 
-    Order: ``verify_rom_hash`` -> ``apply_tokens`` -> any opt-in
-    shufflers in declaration order -> ``recalc_edc``. The shufflers
-    operate independently (one rewrites map-spawn item bytes, the
-    other rewrites starter bytes) and don't touch each other's
-    target offsets, so their relative order doesn't matter.
+    Order: ``verify_rom_hash`` -> ``apply_tokens`` ->
+    ``relocate_item_desc_ptr`` (if recycle shop on) -> any opt-in
+    shufflers in declaration order -> ``recalc_edc``.
+
+    The shufflers operate independently (one rewrites map-spawn item
+    bytes, the other rewrites starter bytes) and don't touch each
+    other's target offsets, so their relative order doesn't matter.
+
+    ``relocate_item_desc_ptr`` runs **after** ``apply_tokens`` so the
+    AP description strings (written by token) are already in place,
+    and **before** the shufflers so any reads they do via
+    :func:`read_item_table_user_data` still see the freshly-written
+    extended ITEM_PARA entries (slots 128..134) — though in practice
+    the shufflers cap at slot 127 so this ordering is defensive.
     """
 
     extensions: list[tuple[str, list[str]]] = []
+    if relocate_item_desc_ptr:
+        extensions.append(("relocate_item_desc_ptr", []))
     if shuffle_ground_items:
         extensions.append(("shuffle_ground_items", ["ground_items.json"]))
     if shuffle_starters:
@@ -1610,6 +1804,9 @@ def write_patch(world: DigimonWorldWorld, output_directory: str) -> None:
     )
     if int(options.vending_locations.value):
         _write_vending_tokens(patch, world)
+    do_recycle_shop = bool(int(options.recycle_shop_locations.value))
+    if do_recycle_shop:
+        _write_recycle_shop_tokens(patch, world)
 
     do_shuffle_ground_items = bool(int(options.randomize_ground_items.value))
     do_shuffle_starters = bool(int(options.randomize_starter.value))
@@ -1621,6 +1818,7 @@ def write_patch(world: DigimonWorldWorld, output_directory: str) -> None:
         patch,
         shuffle_ground_items=do_shuffle_ground_items,
         shuffle_starters=do_shuffle_starters,
+        relocate_item_desc_ptr=do_recycle_shop,
     )
 
     patch.write_file("token_data.bin", patch.get_token_binary())
