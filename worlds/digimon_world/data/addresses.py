@@ -6902,38 +6902,63 @@ ROM_RECYCLE_SHOP_INIT_WRAPPER_OFFSET: Final = _slus_ram_to_bin_offset(
 )
 
 
+# Per-slot trigger bits live in a single byte — RAM 0x801BE03E (= bare
+# MainRAM 0x001BE03E, where AP_TRIGGER_ARRAY_BASE + 113 lands). Bit i
+# of that byte corresponds to trigger 904+i = recycle shop slot i. The
+# wrapper loads this byte once and tests each bit per-slot to decide
+# whether to emit that entry. ``lui 0x801C; addiu 0xE03E`` resolves
+# correctly: 0xE03E sign-extends to -0x1FC2, so 0x801C0000 - 0x1FC2 =
+# 0x801BE03E.
+_RECYCLE_SHOP_TRIGGER_BYTE_HI: Final = 0x801C
+_RECYCLE_SHOP_TRIGGER_BYTE_LO: Final = 0xE03E
+
+
 def _build_recycle_shop_init_wrapper_bytes() -> bytes:
     """Build the recycle-shop init epilogue wrapper.
 
-    23 instructions / 92 bytes. See section above for the dispatch
-    semantics.
+    Filters bought entries (per-slot trigger 904..910 set) out of the
+    runtime [id, flag] * 7 array, decrementing entry_count to match.
+    Bought slots disappear from the displayed shop list as soon as
+    the player reopens it.
 
-    Layout::
+    Layout (63 instructions / 252 bytes)::
 
-        # Check entry_count at 0x8008880C
+        # === Setup: only fire for the recycle shop variant ===
         lui   $t0, 0x8009
-        addiu $t0, $t0, 0x880C            ; t0 = 0x8008880C
-        lbu   $t1, 0($t0)                 ; t1 = entry_count
+        addiu $t0, $t0, 0x880C        ; t0 = 0x8008880C (entry_count addr)
+        lbu   $t1, 0($t0)             ; t1 = engine-built entry_count
         addiu $t2, $0, 7
-        bne   $t1, $t2, .skip             ; not recycle shop -> skip
-        nop                                ; bne delay slot
+        bne   $t1, $t2, .skip          ; not the recycle shop variant
+        nop                            ; bne delay slot
 
-        # entry_count == 7. Overwrite the 14-byte array at 0x80088828
-        # with [128,1, 129,1, ..., 134,1]. Each entry encodes as a
-        # little-endian halfword: low byte = id, high byte = flag = 1.
-        addiu $t0, $t0, 0x1C              ; t0 = 0x80088828 (array)
-        addiu $t1, $0, 0x0180              ; entry 0 (id=128, flag=1)
-        sh    $t1, 0($t0)
-        addiu $t1, $0, 0x0181
-        sh    $t1, 2($t0)
-        ...
-        addiu $t1, $0, 0x0186              ; entry 6 (id=134, flag=1)
-        sh    $t1, 12($t0)
+        # === Load the per-slot trigger byte ===
+        lui   $t1, 0x801C
+        addiu $t1, $t1, 0xE03E         ; t1 = 0x801BE03E
+        lbu   $t1, 0($t1)              ; t1 = trigger byte (bit i = slot i bought)
+
+        # === Initialize write pointer + kept-count ===
+        addiu $t3, $t0, 0x1C           ; t3 = 0x80088828 (write pointer)
+        addu  $t2, $0, $0              ; t2 = 0 (kept count)
+
+        # === Per-entry block (×7) ===
+        # (i = 0)
+        andi  $t4, $t1, 0x01           ; t4 = bit i of trigger byte
+        bne   $t4, $0, .skip_0          ; if bit set (bought), skip emit
+        nop                            ; bne delay slot
+        addiu $t5, $0, 0x0180           ; (flag=1 << 8) | (id=128+i)
+        sh    $t5, 0($t3)
+        addiu $t3, $t3, 2
+        addiu $t2, $t2, 1
+        .skip_0:
+        # (i = 1, 2, ..., 6 follow the same shape with mask 1<<i and id 128+i)
+
+        # === Update entry_count to match what we wrote ===
+        sb    $t2, 0($t0)              ; entry_count = kept count
 
         .skip:
-        # Reproduce the displaced epilogue (was at RAM 0x800FAA60)
+        # === Reproduce the displaced epilogue (was at RAM 0x800FAA60) ===
         jr    $ra
-        addiu $sp, $sp, 0x30               ; jr delay slot
+        addiu $sp, $sp, 0x30           ; jr delay slot
     """
 
     import struct as _struct
@@ -6942,47 +6967,97 @@ def _build_recycle_shop_init_wrapper_bytes() -> bytes:
     COUNT = RECYCLE_SHOP_AP_ITEM_ID_COUNT
     SP_DELTA = _RECYCLE_SHOP_INIT_SP_DELTA
 
-    # Branch target = .skip = jr $ra at index 21 (counting from 0).
-    # The bne is at index 4. MIPS offset = (target - branch - 1) = 16.
-    BNE_TO_SKIP = 0x15400000 | (16 & 0xFFFF)  # bne $t2, $0, +16 — see below
-
-    # We compare $t1 (entry_count) to $t2 (=7). bne $t1, $t2, +16:
-    # rs=$t1=9, rt=$t2=10. opcode 5. = 0x14 << 26 | 9<<21 | 10<<16 | 16.
-    BNE_NEQ_SEVEN = (0x05 << 26) | (9 << 21) | (10 << 16) | 16
-
-    instructions: list[int] = [
-        # entry_count check
-        0x3C088009,                                        # lui $t0, 0x8009
-        0x25080000 | (_RECYCLE_SHOP_OBJ_ENTRY_COUNT_LO    # addiu $t0, $t0, 0x880C
+    # ----- Setup phase (PC 0..5) -----
+    setup = [
+        0x3C088009,                                        # PC 0: lui $t0, 0x8009
+        0x25080000 | (_RECYCLE_SHOP_OBJ_ENTRY_COUNT_LO    # PC 1: addiu $t0, $t0, 0x880C
                       & 0xFFFF),
-        0x91090000,                                        # lbu $t1, 0($t0)
-        0x240A0000 | (RECYCLE_SHOP_ENTRY_COUNT & 0xFFFF),  # addiu $t2, $0, 7
-        BNE_NEQ_SEVEN,                                     # bne $t1, $t2, +16
-        0x00000000,                                        # nop (bne delay)
-        # Slide t0 from entry_count addr to array addr (+0x1C)
-        0x25080000 | (_RECYCLE_SHOP_OBJ_ARRAY_OFFSET_FROM_ENTRY_COUNT
-                      & 0xFFFF),                           # addiu $t0, $t0, 0x1C
+        0x91090000,                                        # PC 2: lbu $t1, 0($t0)
+        0x240A0000 | (RECYCLE_SHOP_ENTRY_COUNT & 0xFFFF),  # PC 3: addiu $t2, $0, 7
+        # PC 4: bne $t1, $t2, +OFFSET (filled in below)
+        None,
+        0x00000000,                                        # PC 5: nop (bne delay)
     ]
-    # 7 entries: addiu $t1, $0, 0x01<id>; sh $t1, 2*i($t0)
+
+    # ----- Trigger-byte load (PC 6..8) -----
+    trigger_load = [
+        0x3C090000 | (_RECYCLE_SHOP_TRIGGER_BYTE_HI & 0xFFFF),  # PC 6: lui $t1, 0x801C
+        0x25290000 | (_RECYCLE_SHOP_TRIGGER_BYTE_LO & 0xFFFF),  # PC 7: addiu $t1, $t1, 0xE03E
+        0x91290000,                                              # PC 8: lbu $t1, 0($t1)
+    ]
+
+    # ----- Write-pointer + kept-count init (PC 9..10) -----
+    init_state = [
+        0x250B0000 | (_RECYCLE_SHOP_OBJ_ARRAY_OFFSET_FROM_ENTRY_COUNT
+                      & 0xFFFF),                           # PC 9: addiu $t3, $t0, 0x1C
+        0x00005021,                                        # PC 10: addu $t2, $0, $0
+    ]
+
+    # ----- Per-entry blocks (7 entries × 7 instructions = 49 instructions) -----
+    # Each per-entry block:
+    #   andi $t4, $t1, (1 << i)
+    #   bne  $t4, $0, +5  (skip the next 5 instructions)
+    #   nop
+    #   addiu $t5, $0, ((1 << 8) | (128 + i))
+    #   sh    $t5, 0($t3)
+    #   addiu $t3, $t3, 2
+    #   addiu $t2, $t2, 1
+    # The bne offset is "+5" (skip the 5 following instructions to land
+    # on the next entry's andi). MIPS offset semantics:
+    # target_PC = branch_PC + 1 + offset. To skip 5 instrs after the
+    # delay slot, offset = 5.
+    per_entry: list[int] = []
     for i in range(COUNT):
-        id_byte = (BASE_ID + i) & 0xFF
-        # Little-endian halfword: low byte = id, high byte = flag (1).
-        halfword_value = (0x01 << 8) | id_byte
-        instructions.append(0x24090000 | halfword_value)   # addiu $t1, $0, halfword
-        instructions.append(0xA5090000 | (i * 2))          # sh $t1, (2*i)($t0)
+        mask = 1 << i
+        halfword = (0x01 << 8) | ((BASE_ID + i) & 0xFF)
+        per_entry.extend([
+            # andi $t4, $t1, mask
+            #   opcode 0x0C, rs=$t1(9), rt=$t4(12), imm=mask
+            (0x0C << 26) | (9 << 21) | (12 << 16) | (mask & 0xFFFF),
+            # bne $t4, $0, +5
+            (0x05 << 26) | (12 << 21) | (0 << 16) | 5,
+            0x00000000,                                     # nop (bne delay)
+            0x240D0000 | halfword,                          # addiu $t5, $0, halfword
+            0xA56D0000,                                     # sh $t5, 0($t3)
+            0x256B0002,                                     # addiu $t3, $t3, 2
+            0x254A0001,                                     # addiu $t2, $t2, 1
+        ])
 
-    # .skip: jr $ra; addiu $sp, $sp, 0x48
-    instructions.append(0x03E00008)                        # jr $r31
-    instructions.append(0x27BD0000 | (SP_DELTA & 0xFFFF))  # addiu $r29, $r29, 0x48
+    # ----- Final entry_count update + epilogue (PC last-3..last) -----
+    finalize = [
+        # sb $t2, 0($t0)
+        #   opcode 0x28, base=$t0(8), rt=$t2(10), offset=0
+        (0x28 << 26) | (8 << 21) | (10 << 16) | 0,
+    ]
+    epilogue = [
+        0x03E00008,                                         # jr $ra
+        0x27BD0000 | (SP_DELTA & 0xFFFF),                  # addiu $sp, $sp, SP_DELTA
+    ]
 
+    # ----- Compute outer bne offset (PC 4 -> .skip = first epilogue PC) -----
+    # PCs: setup=0..5, trigger=6..8, init=9..10, entries=11..(11+49-1)=59,
+    # finalize=60, epilogue=61..62. .skip target = PC 61 (jr $ra).
+    setup_count = len(setup)
+    trigger_count = len(trigger_load)
+    init_count = len(init_state)
+    entries_count = len(per_entry)
+    finalize_count = len(finalize)
+    skip_target_pc = setup_count + trigger_count + init_count + entries_count + finalize_count
+    bne_pc = 4
+    bne_offset = skip_target_pc - bne_pc - 1
+    # Encode bne $t1($r9), $t2($r10), bne_offset:
+    setup[4] = (0x05 << 26) | (9 << 21) | (10 << 16) | (bne_offset & 0xFFFF)
+
+    instructions = setup + trigger_load + init_state + per_entry + finalize + epilogue
     return b"".join(_struct.pack("<I", v) for v in instructions)
 
 
 ROM_RECYCLE_SHOP_INIT_WRAPPER_BYTES: Final = (
     _build_recycle_shop_init_wrapper_bytes()
 )
-# 6 setup + 1 slide + 14 writes + 2 epilogue = 23 instructions = 92 bytes.
-assert len(ROM_RECYCLE_SHOP_INIT_WRAPPER_BYTES) == 92, (
+# 6 setup + 3 trigger load + 2 init + 49 entries + 1 finalize + 2 epilogue
+# = 63 instructions = 252 bytes.
+assert len(ROM_RECYCLE_SHOP_INIT_WRAPPER_BYTES) == 252, (
     len(ROM_RECYCLE_SHOP_INIT_WRAPPER_BYTES)
 )
 
