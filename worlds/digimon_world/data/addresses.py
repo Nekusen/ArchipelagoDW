@@ -6844,34 +6844,42 @@ ROM_ICON_CLAMP_PATCH_VALUE: Final = (
 #
 # Static RE 2026-05-11 located the construction site:
 #
-#   Function ``init_recycle_shop_obj`` at vanilla RAM 0x800A32F4. Its
-#   epilogue at 0x800A3408..0x800A340F runs after the entire shop_obj
-#   has been initialized (a memcpy at 0x800A3330 to ``0x80088804``
-#   plus post-memcpy field shuffling). Two callers across the SLUS
-#   (RAM 0x800E0FE8 and RAM 0x801043CC) — likely the "regular item"
-#   and "recycled item" branches of the dialog. Both populate the same
-#   shop_obj at 0x80088804.
+#   Function ``build_shop_runtime_list`` at vanilla RAM 0x800FA834.
+#   It's the sole shop-runtime-array writer that uses the canonical
+#   gp-relative shop_obj indirection — ``lw r2, -0x6bc4(r28)`` at
+#   0x800FA858, then `lw r16, 0(r2)` to load shop_obj.item_list_ptr
+#   (= the array address, 0x80088828 when active). It clears
+#   entry_count to 0, walks a static items table, and writes
+#   [id, flag] pairs to the array (incrementing entry_count for each
+#   accepted item). Called from the shop-state dispatcher around
+#   0x800FC664+. Its epilogue at RAM 0x800FAA60 (jr $ra; addiu $sp,
+#   +0x30) runs after all writes are done.
 #
-# Fix: hijack the function's epilogue to ``j wrapper; nop``. The
-# wrapper:
+#   An earlier guess targeted ``init_shop_obj`` at 0x800A32F4 (which
+#   memcpys a stack-local source to 0x80088804). User testing
+#   2026-05-11 showed that patch was ineffective — names didn't
+#   refresh. That function evidently isn't on the recycle-shop's
+#   open-time call path, or it runs before the actual array writer.
+#
+# Fix: hijack ``build_shop_runtime_list``'s epilogue to ``j wrapper;
+# nop``. The wrapper:
 #   1. Reads entry_count from shop_obj+8 (= RAM 0x8008880C). If it's
-#      not 7, this isn't the recycle shop branch — skip to the original
-#      epilogue (don't break the regular sub-shop or any other future
-#      caller).
+#      not 7, this isn't the recycle shop variant — skip to the
+#      original epilogue (don't break other shops the dispatcher might
+#      route through this function).
 #   2. If entry_count == 7, overwrites the 14-byte array at
 #      RAM 0x80088828 with [128,1, 129,1, ..., 134,1] — our AP IDs.
 #      Done synchronously inside the engine's call chain, so the shop
 #      UI captures AP names from the very first frame.
-#   3. Reproduces the original epilogue (jr $ra; addiu $sp, +0x48).
+#   3. Reproduces the original epilogue (jr $ra; addiu $sp, +0x30).
 #
-# The client-side reconciler stays as a defensive backstop in case the
-# function is bypassed by some unforeseen code path.
+# The client-side reconciler stays as a defensive backstop.
 
-ROM_RECYCLE_SHOP_INIT_RAM: Final = 0x800A32F4               # function entry
-ROM_RECYCLE_SHOP_INIT_EPILOGUE_RAM: Final = 0x800A3408      # jr $r31 instr
+ROM_RECYCLE_SHOP_INIT_RAM: Final = 0x800FA834               # function entry
+ROM_RECYCLE_SHOP_INIT_EPILOGUE_RAM: Final = 0x800FAA60      # jr $r31 instr
 # Hardcoded sp delta from the function's prologue:
-# ``0x800A32F4 addiu $r29, $r29, 0xffb8`` -> sp -= 0x48.
-_RECYCLE_SHOP_INIT_SP_DELTA: Final = 0x48
+# ``0x800FA834 addiu $r29, $r29, 0xffd0`` -> sp -= 0x30.
+_RECYCLE_SHOP_INIT_SP_DELTA: Final = 0x30
 # entry_count lives at shop_obj + 8 = 0x8008880C. addiu sign-extends
 # 0x880C as -0x77F4, so ``lui 0x8009; addiu 0x880C`` resolves to
 # 0x80090000 - 0x77F4 = 0x8008880C. Same trick as the merit shop
@@ -6923,9 +6931,9 @@ def _build_recycle_shop_init_wrapper_bytes() -> bytes:
         sh    $t1, 12($t0)
 
         .skip:
-        # Reproduce the displaced epilogue (was at RAM 0x800A3408)
+        # Reproduce the displaced epilogue (was at RAM 0x800FAA60)
         jr    $ra
-        addiu $sp, $sp, 0x48               ; jr delay slot
+        addiu $sp, $sp, 0x30               ; jr delay slot
     """
 
     import struct as _struct
