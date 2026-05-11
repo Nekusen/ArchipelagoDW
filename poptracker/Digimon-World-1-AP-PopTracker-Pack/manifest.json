@@ -1,0 +1,16 @@
+{
+    "name": "Digimon World 1 (ArchipelagoDW) Tracker",
+    "game_name": "Digimon World",
+    "package_version": "0.1.0",
+    "package_uid": "digimon_world_dw_tracker",
+    "platform": "Playstation 1",
+    "author": "Nekusen",
+    "variants": {
+        "standard": {
+            "display_name": "World Map",
+            "flags": [
+                "ap"
+            ]
+        }
+    }
+}

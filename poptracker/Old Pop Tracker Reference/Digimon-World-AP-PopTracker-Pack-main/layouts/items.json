@@ -1,0 +1,158 @@
+{
+    "digimon_grid": {
+        "type": "array",
+        "orientation": "vertical",
+        "margin": "0,0",
+        "content": [
+            {
+                "type": "array",
+                "orientation": "horizontal",
+                "margin": "0,0",
+                "content": [
+					{
+						"type": "tabbed",
+						"dock": "top",
+						"content": [
+							{
+								"title": "Digimon Found",
+								"type": "itemgrid",
+								"item_margin": "4, 4",
+								"h_alignment": "left",
+								"rows": [
+									[
+										"agumon",
+										"gabumon",
+										"patamon",
+										"biyomon",
+										"elecmon",
+										"kunemon",
+										"palmon",
+										"betamon",
+										"penguinmon",
+										"coelamon"
+									],
+									[
+										"vegiemon",
+										"monochromon",
+										"centarumon",
+										"tyrannomon",
+										"birdramon",
+										"shellmon",
+										"garurumon",
+										"mojyamon",
+										"frigimon",
+										"whamon"
+									],
+									[
+										"meramon",
+										"drimogemon",
+										"unimon",
+										"vademon",
+										"kokatorimon",
+										"monzaemon",
+										"ninjamon",
+										"angemon",
+										"skullgreymon",
+										"andromon"
+									],
+									[
+										"mamemon",
+										"giromon",
+										"piximon",
+										"metalmamemon",
+										"seadramon",
+										"kuwagamon",
+										"kabuterimon",
+										"leomon",
+										"ogremon",
+										"etemon"
+									],
+									[
+										"bakemon",
+										"sukamon",
+										"numemon",
+										"nanimon",
+										"greymon",
+										"airdramon",
+										"devimon",
+										"metalgreymon",
+										"megadramon",
+										"digitamamon"
+									]
+								]
+							},
+							{
+								"title": "Digimon Souls",
+								"type": "itemgrid",
+								"item_margin": "4, 4",
+								"h_alignment": "left",
+								"rows": [
+									[
+										"agumon_soul",
+										"gabumon_soul",
+										"patamon_soul",
+										"biyomon_soul",
+										"elecmon_soul",
+										"kunemon_soul",
+										"palmon_soul",
+										"betamon_soul",
+										"penguinmon_soul",
+										"coelamon_soul"
+									],
+									[
+										"vegiemon_soul",
+										"monochromon_soul",
+										"centarumon_soul",
+										"tyrannomon_soul",
+										"birdramon_soul",
+										"shellmon_soul",
+										"garurumon_soul",
+										"mojyamon_soul",
+										"frigimon_soul",
+										"whamon_soul"
+									],
+									[
+										"meramon_soul",
+										"drimogemon_soul",
+										"unimon_soul",
+										"vademon_soul",
+										"kokatorimon_soul",
+										"monzaemon_soul",
+										"ninjamon_soul",
+										"angemon_soul",
+										"skullgreymon_soul",
+										"andromon_soul"
+									],
+									[
+										"mamemon_soul",
+										"giromon_soul",
+										"piximon_soul",
+										"metalmamemon_soul",
+										"seadramon_soul",
+										"kuwagamon_soul",
+										"kabuterimon_soul",
+										"leomon_soul",
+										"ogremon_soul",
+										"etemon_soul"
+									],
+									[
+										"bakemon_soul",
+										"sukamon_soul",
+										"numemon_soul",
+										"nanimon_soul",
+										"greymon_soul",
+										"airdramon_soul",
+										"devimon_soul",
+										"metalgreymon_soul",
+										"megadramon_soul",
+										"digitamamon_soul"
+									]
+								]
+							}
+						]
+                    }
+                ]
+            }
+        ]
+    }
+}

@@ -1,0 +1,759 @@
+[
+  {
+    "name": "File City",
+    "access_rules": [
+      "$reach_file_city"
+    ],
+    "chest_unopened_img": "images/items/jijimon.png",
+    "chest_opened_img": "images/items/jijimon_opened.png",
+    "map_locations": [
+      {
+        "map": "file_island",
+        "x": 770,
+        "y": 680
+      }
+    ],
+    "sections": [
+      {
+        "name": "Greymon  [15 PP]"
+      }
+    ]
+  },
+  {
+    "name": "Native Forest",
+    "access_rules": [
+      "$reach_native_forest"
+    ],
+    "chest_unopened_img": "images/items/jijimon.png",
+    "chest_opened_img": "images/items/jijimon_opened.png",
+    "map_locations": [
+      {
+        "map": "file_island",
+        "x": 800,
+        "y": 850
+      }
+    ],
+    "sections": [
+      {
+        "name": "Coelamon  [Tropical Jungle Bridge]"
+      },
+      {
+        "name": "Etemon  [50 PP]"
+      },
+      {
+        "name": "Kunemon"
+      },
+      {
+        "name": "Ninjamon  [50 PP, Prog Secret Shop, Tropical Jungle Bridge]"
+      },
+      {
+        "name": "Palmon"
+      },
+      {
+        "name": "Rain Plant Pickup  [Recruit Palmon]"
+      }
+    ]
+  },
+  {
+    "name": "Tropical Jungle",
+    "access_rules": [
+      "$reach_tropical_jungle"
+    ],
+    "chest_unopened_img": "images/items/jijimon.png",
+    "chest_opened_img": "images/items/jijimon_opened.png",
+    "map_locations": [
+      {
+        "map": "file_island",
+        "x": 1180,
+        "y": 700
+      }
+    ],
+    "sections": [
+      {
+        "name": "Betamon"
+      },
+      {
+        "name": "Centarumon"
+      },
+      {
+        "name": "Chest: Tropical Jungle"
+      },
+      {
+        "name": "Piximon"
+      },
+      {
+        "name": "Vegiemon  [Rain Plant]"
+      }
+    ]
+  },
+  {
+    "name": "Overdell",
+    "access_rules": [
+      "$reach_overdell"
+    ],
+    "chest_unopened_img": "images/items/jijimon.png",
+    "chest_opened_img": "images/items/jijimon_opened.png",
+    "map_locations": [
+      {
+        "map": "file_island",
+        "x": 1050,
+        "y": 580
+      }
+    ],
+    "sections": [
+      {
+        "name": "Bakemon"
+      },
+      {
+        "name": "Chest: Grey Lord's Mansion 1"
+      },
+      {
+        "name": "Chest: Grey Lord's Mansion 2"
+      },
+      {
+        "name": "Chest: Grey Lord's Mansion 3"
+      },
+      {
+        "name": "Mansion Key Pickup"
+      },
+      {
+        "name": "SkullGreymon  [40 PP, Mansion Key, Frig Key, Recruit Shellmon]"
+      }
+    ]
+  },
+  {
+    "name": "Grey Lord's Mansion",
+    "access_rules": [
+      "$reach_grey_lords_mansion"
+    ],
+    "chest_unopened_img": "images/items/jijimon.png",
+    "chest_opened_img": "images/items/jijimon_opened.png",
+    "map_locations": [
+      {
+        "map": "file_island",
+        "x": 980,
+        "y": 460
+      }
+    ],
+    "sections": [
+      {
+        "name": "Chest: Grey Lord's Mansion 10"
+      },
+      {
+        "name": "Chest: Grey Lord's Mansion 11"
+      },
+      {
+        "name": "Chest: Grey Lord's Mansion 12"
+      },
+      {
+        "name": "Chest: Grey Lord's Mansion 13"
+      },
+      {
+        "name": "Chest: Grey Lord's Mansion 4"
+      },
+      {
+        "name": "Chest: Grey Lord's Mansion 5"
+      },
+      {
+        "name": "Chest: Grey Lord's Mansion 6"
+      },
+      {
+        "name": "Chest: Grey Lord's Mansion 7"
+      },
+      {
+        "name": "Chest: Grey Lord's Mansion 8"
+      },
+      {
+        "name": "Chest: Grey Lord's Mansion 9"
+      },
+      {
+        "name": "Frig Key Pickup"
+      }
+    ]
+  },
+  {
+    "name": "Ancient Dino Region",
+    "access_rules": [
+      "$reach_ancient_dino_region"
+    ],
+    "chest_unopened_img": "images/items/jijimon.png",
+    "chest_opened_img": "images/items/jijimon_opened.png",
+    "map_locations": [
+      {
+        "map": "file_island",
+        "x": 1200,
+        "y": 600
+      }
+    ],
+    "sections": [
+      {
+        "name": "Tyrannomon"
+      }
+    ]
+  },
+  {
+    "name": "Greatlake",
+    "access_rules": [
+      "$reach_greatlake"
+    ],
+    "chest_unopened_img": "images/items/jijimon.png",
+    "chest_opened_img": "images/items/jijimon_opened.png",
+    "map_locations": [
+      {
+        "map": "file_island",
+        "x": 700,
+        "y": 950
+      }
+    ],
+    "sections": [
+      {
+        "name": "Blue Flute Pickup  [Old Fishrod Or Amazing Rod]"
+      },
+      {
+        "name": "Chest: Dragon Eye Lake"
+      }
+    ]
+  },
+  {
+    "name": "Beetle Land",
+    "access_rules": [
+      "$reach_beetle_land"
+    ],
+    "chest_unopened_img": "images/items/jijimon.png",
+    "chest_opened_img": "images/items/jijimon_opened.png",
+    "map_locations": [
+      {
+        "map": "file_island",
+        "x": 380,
+        "y": 1000
+      }
+    ],
+    "sections": [
+      {
+        "name": "Kabuterimon"
+      },
+      {
+        "name": "Kuwagamon"
+      }
+    ]
+  },
+  {
+    "name": "Great Canyon",
+    "access_rules": [
+      "$reach_great_canyon"
+    ],
+    "chest_unopened_img": "images/items/jijimon.png",
+    "chest_opened_img": "images/items/jijimon_opened.png",
+    "map_locations": [
+      {
+        "map": "file_island",
+        "x": 1290,
+        "y": 380
+      }
+    ],
+    "sections": [
+      {
+        "name": "Birdramon"
+      },
+      {
+        "name": "Chest: Great Canyon 1"
+      },
+      {
+        "name": "Chest: Ogre Fortress 1"
+      },
+      {
+        "name": "Chest: Ogre Fortress 2"
+      },
+      {
+        "name": "Chest: Ogre Fortress 3"
+      },
+      {
+        "name": "Chest: Ogre Fortress 4"
+      },
+      {
+        "name": "Chest: Ogre Fortress 5"
+      },
+      {
+        "name": "Chest: Ogre Fortress 6"
+      },
+      {
+        "name": "Chest: Ogre Fortress 7"
+      },
+      {
+        "name": "Monochromon"
+      },
+      {
+        "name": "Ogremon  [reach Freezeland]"
+      },
+      {
+        "name": "Shellmon  [reach Freezeland]"
+      }
+    ]
+  },
+  {
+    "name": "Freezeland",
+    "access_rules": [
+      "$reach_freezeland"
+    ],
+    "chest_unopened_img": "images/items/jijimon.png",
+    "chest_opened_img": "images/items/jijimon_opened.png",
+    "map_locations": [
+      {
+        "map": "file_island",
+        "x": 890,
+        "y": 200
+      }
+    ],
+    "sections": [
+      {
+        "name": "Angemon"
+      },
+      {
+        "name": "Chest: Ice Sanctuary 1"
+      },
+      {
+        "name": "Chest: Ice Sanctuary 2"
+      },
+      {
+        "name": "Chest: Ice Sanctuary 3"
+      },
+      {
+        "name": "Chest: Ice Sanctuary 4"
+      },
+      {
+        "name": "Chest: Ice Sanctuary 5"
+      },
+      {
+        "name": "Chest: Ice Sanctuary 6"
+      },
+      {
+        "name": "Chest: Ice Sanctuary 7"
+      },
+      {
+        "name": "Frigimon"
+      },
+      {
+        "name": "Garurumon"
+      },
+      {
+        "name": "Mojyamon"
+      },
+      {
+        "name": "Penguinmon"
+      },
+      {
+        "name": "Whamon  [reach Great Canyon]"
+      }
+    ]
+  },
+  {
+    "name": "Drill Tunnel",
+    "access_rules": [
+      "$reach_drill_tunnel"
+    ],
+    "chest_unopened_img": "images/items/jijimon.png",
+    "chest_opened_img": "images/items/jijimon_opened.png",
+    "map_locations": [
+      {
+        "map": "file_island",
+        "x": 610,
+        "y": 760
+      }
+    ],
+    "sections": [
+      {
+        "name": "Drimogemon  [Lava Cave Access]"
+      },
+      {
+        "name": "Leomonstone Pickup  [45 PP]"
+      }
+    ]
+  },
+  {
+    "name": "Meramon Tunnel",
+    "access_rules": [
+      "$reach_meramon_tunnel"
+    ],
+    "chest_unopened_img": "images/items/jijimon.png",
+    "chest_opened_img": "images/items/jijimon_opened.png",
+    "map_locations": [
+      {
+        "map": "file_island",
+        "x": 530,
+        "y": 745
+      }
+    ],
+    "sections": [
+      {
+        "name": "Chest: Lava Cave 1"
+      },
+      {
+        "name": "Chest: Lava Cave 2"
+      },
+      {
+        "name": "Chest: Lava Cave 3"
+      },
+      {
+        "name": "Chest: Lava Cave 4"
+      },
+      {
+        "name": "Chest: Lava Cave 5"
+      },
+      {
+        "name": "Chest: Lava Cave 6"
+      },
+      {
+        "name": "Meramon"
+      }
+    ]
+  },
+  {
+    "name": "Leomon Ancestor Cave",
+    "access_rules": [
+      "$reach_leomon_ancestor_cave"
+    ],
+    "chest_unopened_img": "images/items/jijimon.png",
+    "chest_opened_img": "images/items/jijimon_opened.png",
+    "map_locations": [
+      {
+        "map": "file_island",
+        "x": 555,
+        "y": 815
+      }
+    ],
+    "sections": [
+      {
+        "name": "Chest: Leomon Ancestor Cave"
+      }
+    ]
+  },
+  {
+    "name": "Mt. Panorama",
+    "access_rules": [
+      "$reach_mt_panorama"
+    ],
+    "chest_unopened_img": "images/items/jijimon.png",
+    "chest_opened_img": "images/items/jijimon_opened.png",
+    "map_locations": [
+      {
+        "map": "file_island",
+        "x": 520,
+        "y": 650
+      }
+    ],
+    "sections": [
+      {
+        "name": "Chest: Mt. Panorama 1"
+      },
+      {
+        "name": "Chest: Mt. Panorama 2"
+      },
+      {
+        "name": "Chest: Mt. Panorama 3"
+      },
+      {
+        "name": "Mamemon"
+      },
+      {
+        "name": "Unimon  [Recruit Centarumon]"
+      },
+      {
+        "name": "Vademon  [45 PP]"
+      }
+    ]
+  },
+  {
+    "name": "Gear Savanna",
+    "access_rules": [
+      "$reach_gear_savanna"
+    ],
+    "chest_unopened_img": "images/items/jijimon.png",
+    "chest_opened_img": "images/items/jijimon_opened.png",
+    "map_locations": [
+      {
+        "map": "file_island",
+        "x": 280,
+        "y": 540
+      }
+    ],
+    "sections": [
+      {
+        "name": "Biyomon"
+      },
+      {
+        "name": "Elecmon"
+      },
+      {
+        "name": "Leomon  [45 PP, Leomonstone]"
+      },
+      {
+        "name": "Old Fishrod Pickup"
+      },
+      {
+        "name": "Patamon"
+      },
+      {
+        "name": "Sukamon"
+      }
+    ]
+  },
+  {
+    "name": "Geko Swamp",
+    "access_rules": [
+      "$reach_geko_swamp"
+    ],
+    "chest_unopened_img": "images/items/jijimon.png",
+    "chest_opened_img": "images/items/jijimon_opened.png",
+    "map_locations": [
+      {
+        "map": "file_island",
+        "x": 390,
+        "y": 380
+      }
+    ],
+    "sections": [
+      {
+        "name": "Amazing Rod Pickup"
+      }
+    ]
+  },
+  {
+    "name": "Misty Trees",
+    "access_rules": [
+      "$reach_misty_trees"
+    ],
+    "chest_unopened_img": "images/items/jijimon.png",
+    "chest_opened_img": "images/items/jijimon_opened.png",
+    "map_locations": [
+      {
+        "map": "file_island",
+        "x": 470,
+        "y": 280
+      }
+    ],
+    "sections": [
+      {
+        "name": "Gabumon"
+      },
+      {
+        "name": "Kokatorimon"
+      }
+    ]
+  },
+  {
+    "name": "Toy Town",
+    "access_rules": [
+      "$reach_toy_town"
+    ],
+    "chest_unopened_img": "images/items/jijimon.png",
+    "chest_opened_img": "images/items/jijimon_opened.png",
+    "map_locations": [
+      {
+        "map": "file_island",
+        "x": 510,
+        "y": 200
+      }
+    ],
+    "sections": [
+      {
+        "name": "Chest: Toy Mansion"
+      },
+      {
+        "name": "Gear Pickup"
+      },
+      {
+        "name": "Monzaemon  [Gear]"
+      }
+    ]
+  },
+  {
+    "name": "Factorial Town",
+    "access_rules": [
+      "$reach_factorial_town"
+    ],
+    "chest_unopened_img": "images/items/jijimon.png",
+    "chest_opened_img": "images/items/jijimon_opened.png",
+    "map_locations": [
+      {
+        "map": "file_island",
+        "x": 220,
+        "y": 460
+      }
+    ],
+    "sections": [
+      {
+        "name": "Andromon"
+      },
+      {
+        "name": "Chest: Factorial Town 1"
+      },
+      {
+        "name": "Chest: Factorial Town 2"
+      },
+      {
+        "name": "Chest: Factorial Town 3"
+      },
+      {
+        "name": "Chest: Factorial Town 4"
+      },
+      {
+        "name": "Chest: Factorial Town 5"
+      },
+      {
+        "name": "MetalMamemon"
+      },
+      {
+        "name": "Numemon"
+      }
+    ]
+  },
+  {
+    "name": "Mt. Infinity",
+    "access_rules": [
+      "$reach_mt_infinity"
+    ],
+    "chest_unopened_img": "images/items/jijimon.png",
+    "chest_opened_img": "images/items/jijimon_opened.png",
+    "map_locations": [
+      {
+        "map": "file_island",
+        "x": 640,
+        "y": 400
+      }
+    ],
+    "sections": [
+      {
+        "name": "Chest: Mt. Infinity 1"
+      },
+      {
+        "name": "Chest: Mt. Infinity 10"
+      },
+      {
+        "name": "Chest: Mt. Infinity 11"
+      },
+      {
+        "name": "Chest: Mt. Infinity 2"
+      },
+      {
+        "name": "Chest: Mt. Infinity 3"
+      },
+      {
+        "name": "Chest: Mt. Infinity 4"
+      },
+      {
+        "name": "Chest: Mt. Infinity 5"
+      },
+      {
+        "name": "Chest: Mt. Infinity 6"
+      },
+      {
+        "name": "Chest: Mt. Infinity 7"
+      },
+      {
+        "name": "Chest: Mt. Infinity 8"
+      },
+      {
+        "name": "Chest: Mt. Infinity 9"
+      },
+      {
+        "name": "Devimon  [50 PP]"
+      },
+      {
+        "name": "Megadramon  [50 PP]"
+      },
+      {
+        "name": "MetalGreymon  [50 PP]"
+      }
+    ]
+  },
+  {
+    "name": "Tower",
+    "access_rules": [
+      "$reach_tower"
+    ],
+    "chest_unopened_img": "images/items/jijimon.png",
+    "chest_opened_img": "images/items/jijimon_opened.png",
+    "map_locations": [
+      {
+        "map": "file_island",
+        "x": 660,
+        "y": 320
+      }
+    ],
+    "sections": []
+  },
+  {
+    "name": "Big Store",
+    "access_rules": [
+      "$reach_big_store"
+    ],
+    "chest_unopened_img": "images/items/jijimon.png",
+    "chest_opened_img": "images/items/jijimon_opened.png",
+    "map_locations": [
+      {
+        "map": "file_island",
+        "x": 790,
+        "y": 540
+      }
+    ],
+    "sections": []
+  },
+  {
+    "name": "Secret Beach Cave",
+    "access_rules": [
+      "$reach_secret_beach_cave"
+    ],
+    "chest_unopened_img": "images/items/jijimon.png",
+    "chest_opened_img": "images/items/jijimon_opened.png",
+    "map_locations": [
+      {
+        "map": "file_island",
+        "x": 1080,
+        "y": 1050
+      }
+    ],
+    "sections": [
+      {
+        "name": "Chest: Secret Beach Cave"
+      }
+    ]
+  },
+  {
+    "name": "Back Dimension",
+    "access_rules": [
+      "$reach_back_dimension"
+    ],
+    "chest_unopened_img": "images/items/jijimon.png",
+    "chest_opened_img": "images/items/jijimon_opened.png",
+    "map_locations": [
+      {
+        "map": "file_island",
+        "x": 660,
+        "y": 460
+      }
+    ],
+    "sections": [
+      {
+        "name": "Chest: Back Dimension 1"
+      },
+      {
+        "name": "Chest: Back Dimension 2"
+      },
+      {
+        "name": "Chest: Back Dimension 3"
+      },
+      {
+        "name": "Chest: Back Dimension 4"
+      },
+      {
+        "name": "Chest: Back Dimension 5"
+      },
+      {
+        "name": "Chest: Back Dimension 6"
+      },
+      {
+        "name": "Chest: Back Dimension 7"
+      }
+    ]
+  }
+]

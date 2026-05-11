@@ -1,0 +1,54 @@
+{
+    "layouts": {
+        "tracker_default": {
+            "type": "container",
+            "background": "#212121",
+            "content": {
+                "type": "dock",
+                "content": [
+                    {
+                        "type": "dock",
+                        "dock": "left",
+                        "v_alignment": "stretch",
+                        "content": [
+                            {
+                                "type": "group",
+                                "header": "Key Items",
+                                "dock": "top",
+                                "content": { "type": "layout", "key": "keyitem_grid" }
+                            },
+                            {
+                                "type": "group",
+                                "header": "Birdramon Flights",
+                                "dock": "top",
+                                "content": { "type": "layout", "key": "flight_grid" }
+                            },
+                            {
+                                "type": "group",
+                                "header": "Prosperity Points",
+                                "dock": "top",
+                                "content": { "type": "layout", "key": "prosperity_grid" }
+                            },
+                            {
+                                "type": "group",
+                                "header": "Progressive Bundles",
+                                "dock": "top",
+                                "content": { "type": "layout", "key": "progressive_grid" }
+                            },
+                            {
+                                "type": "group",
+                                "header": "Recruits (Individual)",
+                                "dock": "top",
+                                "content": { "type": "layout", "key": "recruit_grid" }
+                            }
+                        ]
+                    },
+                    {
+                        "type": "map",
+                        "maps": ["file_island"]
+                    }
+                ]
+            }
+        }
+    }
+}

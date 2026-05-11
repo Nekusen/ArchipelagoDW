@@ -1,0 +1,1153 @@
+[
+    {
+        "name": "File City",
+        "chest_unopened_img": "images/items/jijimon.png",
+        "chest_opened_img": "images/items/jijimon_opened.png",
+        "children": [
+            {
+                "name": "Greymon",
+                "access_rules": ["$has_pp|prosperity_counter|15, greymon_soul, agumon,agumon"],
+                "sections": [
+                    {
+                        "name": "Defeat Greymon",
+                        "hosted_item": "greymon_hosted"
+                    },
+					{
+						"name": "Prosperity Point",
+                        "item_count": 2
+					}
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 753,
+                        "y": 684
+                    }
+                ]
+            },
+            {
+                "name": "Airdramon",
+                "access_rules": ["$has_pp|prosperity_counter|50, airdramon_soul,agumon,agumon"],
+                "sections": [
+                    {
+                        "name": "Defeat Airdramon",
+                        "hosted_item": "airdramon_hosted"
+                    },
+					{
+						"name": "Prosperity Point",
+                        "item_count": 2
+					}
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 792,
+                        "y": 684
+                    }
+                ]
+            }          
+        ]
+    },
+    {
+        "name": "Native Forest",
+        "chest_unopened_img": "images/items/jijimon.png",
+        "chest_opened_img": "images/items/jijimon_opened.png",
+        "children": [
+            {
+                "name": "Agumon",
+                "access_rules":["agumon_soul"],
+                "sections": [
+                    {
+                        "name": "Defeat Agumon",
+                        "hosted_item": "agumon_hosted"
+                    },
+					{
+						"name": "Prosperity Point"
+					}
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 695,
+                        "y": 695
+                    }
+                ]
+            },
+            {
+                "name": "Palmon",
+                "access_rules":["palmon_soul,agumon"],
+                "sections": [
+                    {
+                        "name": "Defeat Palmon",
+                        "hosted_item": "palmon_hosted"
+                    },
+					{
+						"name": "Prosperity Point"
+					}
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 798,
+                        "y": 807
+                    }
+                ]
+            },
+            {
+                "name": "Kunemon",
+                "access_rules":["kunemon_soul,agumon"],
+                "sections": [
+                    {
+                        "name": "Defeat Kunemon",
+                        "hosted_item": "kunemon_hosted"
+                    },
+					{
+						"name": "Prosperity Point"
+					}
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 906,
+                        "y": 863
+                    }
+                ]
+            },
+            {
+                "name": "Coelamon",
+                "access_rules":["coelamon_soul,agumon"],
+                "sections": [
+                    {
+                        "name": "Recruit Coelamon",
+                        "hosted_item": "coelamon_hosted"
+                    },
+					{
+						"name": "Prosperity Point",
+                        "item_count": 2
+					}
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 999,
+                        "y": 929
+                    }
+                ]
+            },
+            {
+                "name": "Seadramon",
+                "access_rules": ["$savanna, shellmon, seadramon_soul,agumon"],
+                "sections": [
+                    {
+                        "name": "Recruit Seadramon",
+                        "hosted_item": "seadramon_hosted"
+                    },
+					{
+						"name": "Prosperity Point",
+                        "item_count": 2
+					}
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 668,
+                        "y": 959
+                    }
+                ]
+            },
+            {
+                "name": "Ninjamon",
+                "access_rules": ["$secret_item_shop, ninjamon_soul,agumon"],
+                "sections": [
+                    {
+                        "name": "Defeat Ninjamon",
+                        "hosted_item": "ninjamon_hosted"
+                    },
+					{
+						"name": "Prosperity Point",
+                        "item_count": 2
+					}
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 935,
+                        "y": 740
+                    }
+                ]
+            },
+            {
+                "name": "Etemon",
+                "access_rules": ["$has_pp|prosperity_counter|50, etemon_soul,agumon"],
+                "sections": [
+                    {
+                        "name": "Defeat Etemon",
+                        "hosted_item": "etemon_hosted"
+                    },
+					{
+						"name": "Prosperity Point",
+                        "item_count": 3
+					}
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 857,
+                        "y": 810
+                    }
+                ]
+            }      
+        ]
+    },
+    {
+        "name": "Tropical Jungle",
+        "chest_unopened_img": "images/items/jijimon.png",
+        "chest_opened_img": "images/items/jijimon_opened.png",
+        "children": [
+            {
+                "name": "Betamon",
+                "access_rules": ["betamon_soul,agumon"],
+                "sections": [
+                    {
+                        "name": "Recruit Betamon",
+                        "hosted_item": "betamon_hosted"
+                    },
+					{
+						"name": "Prosperity Point"
+					}
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 1113,
+                        "y": 683
+                    }
+                ]
+            },
+            {
+                "name": "Vegiemon",
+                "access_rules": ["palmon,vegiemon_soul,agumon"],
+                "sections": [
+                    {
+                        "name": "Defeat Vegiemon",
+                        "hosted_item": "vegiemon_hosted"
+                    },
+					{
+						"name": "Prosperity Point",
+                        "item_count": 2
+					}
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 1200,
+                        "y": 733
+                    }
+                ]
+            },
+            {
+                "name": "Centarumon",
+                "access_rules": ["centarumon_soul,agumon"],
+                "sections": [
+                    {
+                        "name": "Recruit Centarumon",
+                        "hosted_item": "centarumon_hosted"
+                    },
+					{
+						"name": "Prosperity Point",
+                        "item_count": 2
+					}
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 1272,
+                        "y": 720
+                    }
+                ]
+            },
+            {
+                "name": "Piximon",
+                "access_rules": ["pixiemon_soul,agumon"],
+                "sections": [
+                    {
+                        "name": "Defeat Piximon",
+                        "hosted_item": "piximon_hosted"
+                    },
+					{
+						"name": "Prosperity Point",
+                        "item_count": 3
+					}
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 965,
+                        "y": 691
+                    }
+                ]
+            }          
+        ]
+    },
+    {
+        "name": "Ancient Dino Region",
+        "chest_unopened_img": "images/items/jijimon.png",
+        "chest_opened_img": "images/items/jijimon_opened.png",
+        "access_rules": ["centarumon"],
+        "children": [
+            {
+                "name": "Tyrannomon",
+                "access_rules": ["centarumon,tyrannomon_soul,agumon"],
+                "sections": [
+                    {
+                        "name": "Recruit Tyrannomon",
+                        "hosted_item": "tyrannomon_hosted"
+                    },
+					{
+						"name": "Prosperity Point",
+                        "item_count": 2
+					}
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 1198,
+                        "y": 637
+                    }
+                ]
+            },
+            {
+                "name": "Nanimon",
+                "access_rules": ["$nani_reqs, nanimon_soul,agumon"],
+                "sections": [
+                    {
+                        "name": "Recruit Nanimon",
+                        "hosted_item": "nanimon_hosted"
+                    },
+					{
+						"name": "Prosperity Point"
+					}
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 1198,
+                        "y": 577
+                    }
+                ]
+            }         
+        ]
+    },
+    {
+        "name": "Grey Lord Mansion",
+        "chest_unopened_img": "images/items/jijimon.png",
+        "chest_opened_img": "images/items/jijimon_opened.png",
+        "children": [
+            {
+                "name": "Bakemon",
+                "access_rules": ["bakemon_soul,agumon"],
+                "sections": [
+                    {
+                        "name": "Recruit Bakemon",
+                        "hosted_item": "bakemon_hosted"
+                    },
+					{
+						"name": "Prosperity Point",
+                        "item_count": 2
+					}
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 1015,
+                        "y": 491
+                    }
+                ]
+            },
+            {
+                "name": "SkullGreymon",
+                "access_rules": ["greymon,shellmon,$has_pp|prosperity_counter|50,skullgreymon_soul,agumon"],
+                "sections": [
+                    {
+                        "name": "Defeat SkullGreymon",
+                        "hosted_item": "skullgreymon_hosted"
+                    },
+					{
+						"name": "Prosperity Point",
+                        "item_count": 3
+					}
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 978,
+                        "y": 432
+                    }
+                ]
+            }          
+        ]
+    },
+    {
+        "name": "Great Canyon",
+        "chest_unopened_img": "images/items/jijimon.png",
+        "chest_opened_img": "images/items/jijimon_opened.png",
+        "children": [
+            {
+                "name": "Monochromon",
+                "access_rules": ["monochromon_soul,agumon"],
+                "sections": [
+                    {
+                        "name": "Recruit Monochromon",
+                        "hosted_item": "monochromon_hosted"
+                    },
+					{
+						"name": "Prosperity Point",
+                        "item_count": 2
+					}
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 1322,
+                        "y": 504
+                    }
+                ]
+            },
+            {
+                "name": "Birdramon",
+                "access_rules": ["birdramon_soul,agumon"],
+                "sections": [
+                    {
+                        "name": "Defeat Birdramon",
+                        "hosted_item": "birdramon_hosted"
+                    },
+					{
+						"name": "Prosperity Point",
+                        "item_count": 2
+					}
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 1333,
+                        "y": 267
+                    }
+                ]
+            },
+            {
+                "name": "Shellmon",
+                "access_rules": ["$has_pp|prosperity_counter|6,shellmon_soul,agumon"],
+                "sections": [
+                    {
+                        "name": "Recruit Shellmon",
+                        "hosted_item": "shellmon_hosted"
+                    },
+					{
+						"name": "Prosperity Point",
+                        "item_count": 2
+					}
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 1215,
+                        "y": 217
+                    }
+                ]
+            }          
+        ]
+    },
+    {
+        "name": "Freezeland",
+        "chest_unopened_img": "images/items/jijimon.png",
+        "chest_opened_img": "images/items/jijimon_opened.png",
+        "children": [
+            {
+                "name": "Penguinmon",
+                "access_rules": ["penguinmon_soul,agumon"],
+                "sections": [
+                    {
+                        "name": "Recruit Penguinmon",
+                        "hosted_item": "penguinmon_hosted"
+                    },
+					{
+						"name": "Prosperity Point"
+					}
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 983,
+                        "y": 156
+                    }
+                ]
+            },
+            {
+                "name": "Mojyamon",
+                "access_rules": ["mojyamon_soul,agumon"],
+                "sections": [
+                    {
+                        "name": "Recruit Mojyamon",
+                        "hosted_item": "mojyamon_hosted"
+                    },
+					{
+						"name": "Prosperity Point",
+                        "item_count": 2
+					}
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 1124,
+                        "y": 130
+                    }
+                ]
+            },
+            {
+                "name": "Frigimon",
+                "access_rules": ["frigimon_soul,agumon"],
+                "sections": [
+                    {
+                        "name": "Recruit Frigimon",
+                        "hosted_item": "frigimon_hosted"
+                    },
+					{
+						"name": "Prosperity Point",
+                        "item_count": 2
+					}
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 730,
+                        "y": 141
+                    }
+                ]
+            },
+            {
+                "name": "Garurumon",
+                "access_rules": ["garurumon_soul,agumon"],
+                "sections": [
+                    {
+                        "name": "Defeat Garurumon",
+                        "hosted_item": "garurumon_hosted"
+                    },
+					{
+						"name": "Prosperity Point",
+                        "item_count": 2
+					}
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 642,
+                        "y": 131
+                    }
+                ]
+            },
+            {
+                "name": "Angemon",
+                "access_rules": ["angemon_soul,agumon"],
+                "sections": [
+                    {
+                        "name": "Recruit Angemon",
+                        "hosted_item": "angemon_hosted"
+                    },
+					{
+						"name": "Prosperity Point",
+                        "item_count": 2
+					}
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 860,
+                        "y": 341
+                    }
+                ]
+            },
+            {
+                "name": "Whamon",
+                "access_rules": ["$has_pp|prosperity_counter|6,whamon_soul,agumon"],
+                "sections": [
+                    {
+                        "name": "Recruit Whamon",
+                        "hosted_item": "whamon_hosted"
+                    },
+					{
+						"name": "Prosperity Point",
+                        "item_count": 2
+					}
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 1026,
+                        "y": 207
+                    }
+                ]
+            }          
+        ]
+    },
+    {
+        "name": "Drill Tunnel",
+        "chest_unopened_img": "images/items/jijimon.png",
+        "chest_opened_img": "images/items/jijimon_opened.png",
+        "children": [
+            {
+                "name": "Meramon",
+                "access_rules": ["meramon_soul,agumon"],
+                "sections": [
+                    {
+                        "name": "Defeat Meramon",
+                        "hosted_item": "meramon_hosted"
+                    },
+					{
+						"name": "Prosperity Point",
+                        "item_count": 2
+					}
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 590,
+                        "y": 750
+                    }
+                ]
+            },
+            {
+                "name": "Drimogemon",
+                "access_rules": ["meramon,drimogemon_soul,agumon"],
+                "sections": [
+                    {
+                        "name": "Recruit Drimogemon",
+                        "hosted_item": "drimogemon_hosted"
+                    },
+					{
+						"name": "Prosperity Point",
+                        "item_count": 2
+					}
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 650,
+                        "y": 750
+                    }
+                ]
+            },
+            {
+                "name": "Ogremon",
+                "access_rules": ["$ogre_reqs,ogremon_soul,agumon"],
+                "sections": [
+                    {
+                        "name": "Defeat Ogremon",
+                        "hosted_item": "ogremon_hosted"
+                    },
+					{
+						"name": "Prosperity Point",
+                        "item_count": 2
+					}
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 530,
+                        "y": 750
+                    }
+                ]
+            }          
+        ]
+    },
+    {
+        "name": "Mt. Panorama",
+        "chest_unopened_img": "images/items/jijimon.png",
+        "chest_opened_img": "images/items/jijimon_opened.png",
+        "access_rules": ["$panorama"],
+        "children": [
+            {
+                "name": "Unimon",
+                "access_rules": ["mon,meramon,unimon_soul,agumon"],
+                "sections": [
+                    {
+                        "name": "Recruit Unimon",
+                        "hosted_item": "unimon_hosted"
+                    },
+					{
+						"name": "Prosperity Point",
+                        "item_count": 2
+					}
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 520,
+                        "y": 650
+                    }
+                ]
+            },
+            {
+                "name": "Mamemon",
+                "access_rules": ["meramon,mamemon_soul,agumon"],
+                "sections": [
+                    {
+                        "name": "Defeat Mamemon",
+                        "hosted_item": "mamemon_hosted"
+                    },
+					{
+						"name": "Prosperity Point",
+                        "item_count": 3
+					}
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 460,
+                        "y": 650
+                    }
+                ]
+            },
+            {
+                "name": "Vademon",
+                "access_rules": ["shellmon,$has_pp|prosperity_counter|45,meramon,vademon_soul,agumon"],
+                "sections": [
+                    {
+                        "name": "Recruit Vademon",
+                        "hosted_item": "vademon_hosted"
+                    },
+					{
+						"name": "Prosperity Point",
+                        "item_count": 3
+					}
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 580,
+                        "y": 650
+                    }
+                ]
+            }          
+        ]
+    },
+    {
+        "name": "Gear Savanna",
+        "chest_unopened_img": "images/items/jijimon.png",
+        "chest_opened_img": "images/items/jijimon_opened.png",
+        "access_rules": ["$savanna"],
+        "children": [
+            {
+                "name": "Elecmon",
+                "access_rules": ["elecmon_soul,agumon"],
+                "sections": [
+                    {
+                        "name": "Recruit Elecmon",
+                        "hosted_item": "elecmon_hosted"
+                    },
+					{
+						"name": "Prosperity Point"
+					}
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 227,
+                        "y": 574
+                    }
+                ]
+            },
+            {
+                "name": "Patamon",
+                "access_rules": ["patamon_soul,agumon"],
+                "sections": [
+                    {
+                        "name": "Defeat Patamon",
+                        "hosted_item": "patamon_hosted"
+                    },
+					{
+						"name": "Prosperity Point"
+					}
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 287,
+                        "y": 574
+                    }
+                ]
+            },
+            {
+                "name": "Biyomon",
+                "access_rules": ["biyomon_soul,agumon"],
+                "sections": [
+                    {
+                        "name": "Recruit Biyomon",
+                        "hosted_item": "biyomon_hosted"
+                    },
+					{
+						"name": "Prosperity Point"
+					}
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 287,
+                        "y": 514
+                    }
+                ]
+            },
+            {
+                "name": "Leomon",
+                "access_rules": ["$has_pp|prosperity_counter|50,meramon,leomon_soul,agumon"],
+                "sections": [
+                    {
+                        "name": "Recruit Leomon",
+                        "hosted_item": "leomon_hosted"
+                    },
+					{
+						"name": "Prosperity Point",
+                        "item_count": 2
+					}
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 120,
+                        "y": 680
+                    }
+                ]
+            },
+            {
+                "name": "Sukamon",
+                "access_rules": ["sukamon_soul,agumon"],
+                "sections": [
+                    {
+                        "name": "Recruit Sukamon",
+                        "hosted_item": "sukamon_hosted"
+                    },
+					{
+						"name": "Prosperity Point"
+					}
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 360,
+                        "y": 450
+                    }
+                ]
+            }          
+        ]
+    },
+    {
+        "name": "Misty Trees",
+        "chest_unopened_img": "images/items/jijimon.png",
+        "chest_opened_img": "images/items/jijimon_opened.png",
+        "access_rules": ["$misty"],
+        "children": [
+            {
+                "name": "Gabumon",
+                "access_rules": ["gabumon_soul,agumon"],
+                "sections": [
+                    {
+                        "name": "Recruit Gabumon",
+                        "hosted_item": "gabumon_hosted"
+                    },
+					{
+						"name": "Prosperity Point"
+					}
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 440,
+                        "y": 270
+                    }
+                ]
+            },
+            {
+                "name": "Kokatorimon",
+                "access_rules": ["kokatorimon_soul,agumon"],
+                "sections": [
+                    {
+                        "name": "Recruit Kokatorimon",
+                        "hosted_item": "kokatorimon_hosted"
+                    },
+					{
+						"name": "Prosperity Point",
+                        "item_count": 2
+					}
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 500,
+                        "y": 270
+                    }
+                ]
+            }        
+        ]
+    },
+    {
+        "name": "Toy Town",
+        "chest_unopened_img": "images/items/jijimon.png",
+        "chest_opened_img": "images/items/jijimon_opened.png",
+        "access_rules": ["$toy"],
+        "children": [
+            {
+                "name": "Monzaemon",
+                "access_rules": ["monzaemon_soul,agumon"],
+                "sections": [
+                    {
+                        "name": "Recruit Monzaemon",
+                        "hosted_item": "monzaemon_hosted"
+                    },
+					{
+						"name": "Prosperity Point",
+                        "item_count": 3
+					}
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 500,
+                        "y": 190
+                    }
+                ]
+            }      
+        ]
+    },
+    {
+        "name": "Factorial Town",
+        "chest_unopened_img": "images/items/jijimon.png",
+        "chest_opened_img": "images/items/jijimon_opened.png",
+        "access_rules": ["$factorial"],
+        "children": [
+            {
+                "name": "Andromon",
+                "access_rules": ["numemon,andromon_soul,agumon"],
+                "sections": [
+                    {
+                        "name": "Recruit Andromon",
+                        "hosted_item": "andromon_hosted"
+                    },
+					{
+						"name": "Prosperity Point",
+                        "item_count": 3
+					}
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 220,
+                        "y": 430
+                    }
+                ]
+            },
+            {
+                "name": "Giromon",
+                "access_rules": ["numemon,giromon_soul,agumon"],
+                "sections": [
+                    {
+                        "name": "Defeat Giromon",
+                        "hosted_item": "giromon_hosted"
+                    },
+					{
+						"name": "Prosperity Point",
+                        "item_count": 3
+					}
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 280,
+                        "y": 430
+                    }
+                ]
+            },
+            {
+                "name": "MetalMamemon",
+                "access_rules": ["whamon,metalmamemon_soul,agumon"],
+                "sections": [
+                    {
+                        "name": "Defeat MetalMamemon",
+                        "hosted_item": "metalmamemon_hosted"
+                    },
+					{
+						"name": "Prosperity Point",
+                        "item_count": 3
+					}
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 160,
+                        "y": 430
+                    }
+                ]
+            },
+            {
+                "name": "Numemon",
+                "access_rules": ["whamon,numemon_soul,agumon"],
+                "sections": [
+                    {
+                        "name": "Recruit Numemon",
+                        "hosted_item": "numemon_hosted"
+                    },
+					{
+						"name": "Prosperity Point"
+					}
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 190,
+                        "y": 490
+                    }
+                ]
+            }        
+        ]
+    },
+    {
+        "name": "Beetle Land",
+        "chest_unopened_img": "images/items/jijimon.png",
+        "chest_opened_img": "images/items/jijimon_opened.png",
+        "access_rules": ["$beetle"],
+        "children": [
+            {
+                "name": "Kabuterimon",
+                "access_rules": ["seadramon,kabuterimon_soul,agumon"],
+                "sections": [
+                    {
+                        "name": "Recruit Kabuterimon",
+                        "hosted_item": "kabuterimon_hosted"
+                    },
+					{
+						"name": "Prosperity Point",
+                        "item_count": 2
+					}
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 350,
+                        "y": 1000
+                    }
+                ]
+            },
+            {
+                "name": "Kuwagamon",
+                "access_rules": ["seadramon,kuwagamon_soul,agumon"],
+                "sections": [
+                    {
+                        "name": "Recruit Kuwagamon",
+                        "hosted_item": "kuwagamon_hosted"
+                    },
+					{
+						"name": "Prosperity Point",
+                        "item_count": 2
+					}
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 410,
+                        "y": 1000
+                    }
+                ]
+            }    
+        ]
+    },
+    {
+        "name": "Mt. Infinity",
+        "chest_unopened_img": "images/items/jijimon.png",
+        "chest_opened_img": "images/items/jijimon_opened.png",
+        "access_rules": ["$infinity"],
+        "children": [
+            {
+                "name": "Devimon",
+                "access_rules": ["$has_pp|prosperity_counter|50,devimon_soul,agumon"],
+                "sections": [
+                    {
+                        "name": "Defeat Devimon",
+                        "hosted_item": "devimon_hosted"
+                    },
+					{
+						"name": "Prosperity Point",
+                        "item_count": 2
+					}
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 570,
+                        "y": 400
+                    }
+                ]
+            },
+            {
+                "name": "MetalGreymon",
+                "access_rules": ["$has_pp|prosperity_counter|50,greymon,metalgreymon_soul,agumon"],
+                "sections": [
+                    {
+                        "name": "Defeat MetalGreymon",
+                        "hosted_item": "metalgreymon_hosted"
+                    },
+					{
+						"name": "Prosperity Point",
+                        "item_count": 3
+					}
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 630,
+                        "y": 400
+                    }
+                ]
+            },
+            {
+                "name": "Megadramon",
+                "access_rules": ["$has_pp|prosperity_counter|50,megadramon_soul,agumon"],
+                "sections": [
+                    {
+                        "name": "Defeat Megadramon",
+                        "hosted_item": "megadramon_hosted"
+                    },
+					{
+						"name": "Prosperity Point",
+                        "item_count": 3
+					}
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 690,
+                        "y": 400
+                    }
+                ]
+            },
+            {
+                "name": "Digitamamon",
+                "access_rules": ["$has_pp|prosperity_counter|50,digitamamon_soul,agumon"],
+                "sections": [
+                    {
+                        "name": "Defeat Digitamamon",
+                        "hosted_item": "digitamamon_hosted"
+                    },
+					{
+						"name": "Prosperity Point",
+                        "item_count": 3
+					}
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 750,
+                        "y": 400
+                    }
+                ]
+            }        
+        ]
+    }
+]

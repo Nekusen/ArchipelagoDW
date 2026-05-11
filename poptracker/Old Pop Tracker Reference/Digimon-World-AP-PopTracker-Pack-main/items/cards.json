@@ -1,0 +1,404 @@
+[
+    {
+        "name": "Player Card",
+        "type": "toggle",
+        "img": "images/cards/player_card.png",
+        "codes": "player_card"
+    },
+    {
+        "name": "Phoenixmon Card",
+        "type": "toggle",
+        "img": "images/cards/phoenixmon_card.png",
+        "codes": "phoenixmon_card"
+    },
+    {
+        "name": "H-Kabuterimon Card",
+        "type": "toggle",
+        "img": "images/cards/h_kabuterimon_card.png",
+        "codes": "h_kabuterimon_card"
+    },
+    {
+        "name": "Megaseadramon Card",
+        "type": "toggle",
+        "img": "images/cards/megaseadramon_card.png",
+        "codes": "megaseadramon_card"
+    },
+    {
+        "name": "Shogungeckomon Card",
+        "type": "toggle",
+        "img": "images/cards/shogungeckomon_card.png",
+        "codes": "shogungeckomon_card"
+    },
+    {
+        "name": "Myotismon Card",
+        "type": "toggle",
+        "img": "images/cards/myotismon_card.png",
+        "codes": "myotismon_card"
+    },
+    {
+        "name": "Metalgreymon Card",
+        "type": "toggle",
+        "img": "images/cards/metalgreymon_card.png",
+        "codes": "metalgreymon_card"
+    },
+    {
+        "name": "Mamemon Card",
+        "type": "toggle",
+        "img": "images/cards/mamemon_card.png",
+        "codes": "mamemon_card"
+    },
+    {
+        "name": "Monzaeemon Card",
+        "type": "toggle",
+        "img": "images/cards/monzaeemon_card.png",
+        "codes": "monzaemon_card"
+    },
+    {
+        "name": "Skullgreymon Card",
+        "type": "toggle",
+        "img": "images/cards/skullgreymon_card.png",
+        "codes": "skullgreymon_card"
+    },
+    {
+        "name": "Metalmamemon Card",
+        "type": "toggle",
+        "img": "images/cards/metalmamemon_card.png",
+        "codes": "metalmamemon_card"
+    },
+    {
+        "name": "Vademon Card",
+        "type": "toggle",
+        "img": "images/cards/vademon_card.png",
+        "codes": "vademon_card"
+    },
+    {
+        "name": "Andromon Card",
+        "type": "toggle",
+        "img": "images/cards/andromon_card.png",
+        "codes": "andromon_card"
+    },
+    {
+        "name": "Giromon Card",
+        "type": "toggle",
+        "img": "images/cards/giromon_card.png",
+        "codes": "giromon_card"
+    },
+    {
+        "name": "Etemon Card",
+        "type": "toggle",
+        "img": "images/cards/etemon_card.png",
+        "codes": "etemon_card"
+    },
+    {
+        "name": "Megadramon Card",
+        "type": "toggle",
+        "img": "images/cards/megadramon_card.png",
+        "codes": "megadramon_card"
+    },
+    {
+        "name": "Piximon Card",
+        "type": "toggle",
+        "img": "images/cards/piximon_card.png",
+        "codes": "piximon_card"
+    },
+    {
+        "name": "Digitamamon Card",
+        "type": "toggle",
+        "img": "images/cards/digitamamon_card.png",
+        "codes": "digitamamon_card"
+    },
+    {
+        "name": "Geckomon Card",
+        "type": "toggle",
+        "img": "images/cards/geckomon_card.png",
+        "codes": "geckomon_card"
+    },
+    {
+        "name": "Warumonzaemon Card",
+        "type": "toggle",
+        "img": "images/cards/warumonzaemon_card.png",
+        "codes": "warumonzaemon_card"
+    },
+    {
+        "name": "Jijimon Card",
+        "type": "toggle",
+        "img": "images/cards/jijimon_card.png",
+        "codes": "jijimon_card"
+    },
+    {
+        "name": "King of Sukamon Card",
+        "type": "toggle",
+        "img": "images/cards/king_of_sukamon_card.png",
+        "codes": "king_of_sukamon_card"
+    },
+    {
+        "name": "Cherrymon Card",
+        "type": "toggle",
+        "img": "images/cards/cherrymon_card.png",
+        "codes": "cherrymon_card"
+    },
+    {
+        "name": "Guardromon Card",
+        "type": "toggle",
+        "img": "images/cards/guardromon_card.png",
+        "codes": "guardromon_card"
+    },
+    {
+        "name": "Hagurumon Card",
+        "type": "toggle",
+        "img": "images/cards/hagurumon_card.png",
+        "codes": "hagurumon_card"
+    },
+    {
+        "name": "Brachiomon Card",
+        "type": "toggle",
+        "img": "images/cards/brachiomon_card.png",
+        "codes": "brachiomon_card"
+    },
+    {
+        "name": "Greymon Card",
+        "type": "toggle",
+        "img": "images/cards/greymon_card.png",
+        "codes": "greymon_card"
+    },
+    {
+        "name": "Devimon Card",
+        "type": "toggle",
+        "img": "images/cards/devimon_card.png",
+        "codes": "devimon_card"
+    },
+    {
+        "name": "Airdramon Card",
+        "type": "toggle",
+        "img": "images/cards/airdramon_card.png",
+        "codes": "airdramon_card"
+    },
+    {
+        "name": "Tyrannomon Card",
+        "type": "toggle",
+        "img": "images/cards/tyrannomon_card.png",
+        "codes": "tyrannomon_card"
+    },
+    {
+        "name": "Meramon Card",
+        "type": "toggle",
+        "img": "images/cards/meramon_card.png",
+        "codes": "meramon_card"
+    },
+    {
+        "name": "Seadramon Card",
+        "type": "toggle",
+        "img": "images/cards/seadramon_card.png",
+        "codes": "seadramon_card"
+    },
+    {
+        "name": "Kabuterimon Card",
+        "type": "toggle",
+        "img": "images/cards/kabuterimon_card.png",
+        "codes": "kabuterimon_card"
+    },
+    {
+        "name": "Angemon Card",
+        "type": "toggle",
+        "img": "images/cards/angemon_card.png",
+        "codes": "angemon_card"
+    },
+    {
+        "name": "Birdramon Card",
+        "type": "toggle",
+        "img": "images/cards/birdramon_card.png",
+        "codes": "birdramon_card"
+    },
+    {
+        "name": "Garurumon Card",
+        "type": "toggle",
+        "img": "images/cards/garurumon_card.png",
+        "codes": "garurumon_card"
+    },
+    {
+        "name": "Frigimon Card",
+        "type": "toggle",
+        "img": "images/cards/frigimon_card.png",
+        "codes": "frigimon_card"
+    },
+    {
+        "name": "Whamon Card",
+        "type": "toggle",
+        "img": "images/cards/whamon_card.png",
+        "codes": "whamon_card"
+    },
+    {
+        "name": "Unimon Card",
+        "type": "toggle",
+        "img": "images/cards/unimon_card.png",
+        "codes": "unimon_card"
+    },
+    {
+        "name": "Ogremon Card",
+        "type": "toggle",
+        "img": "images/cards/ogremon_card.png",
+        "codes": "ogremon_card"
+    },
+    {
+        "name": "Shellmon Card",
+        "type": "toggle",
+        "img": "images/cards/shellmon_card.png",
+        "codes": "shellmon_card"
+    },
+    {
+        "name": "Centarumon Card",
+        "type": "toggle",
+        "img": "images/cards/centarumon_card.png",
+        "codes": "centarumon_card"
+    },
+    {
+        "name": "Bakemon Card",
+        "type": "toggle",
+        "img": "images/cards/bakemon_card.png",
+        "codes": "bakemon_card"
+    },
+    {
+        "name": "Drimogemon Card",
+        "type": "toggle",
+        "img": "images/cards/drimogemon_card.png",
+        "codes": "drimogemon_card"
+    },
+    {
+        "name": "Monochromon Card",
+        "type": "toggle",
+        "img": "images/cards/monochromon_card.png",
+        "codes": "monochromon_card"
+    },
+    {
+        "name": "Leomon Card",
+        "type": "toggle",
+        "img": "images/cards/leomon_card.png",
+        "codes": "leomon_card"
+    },
+    {
+        "name": "Coelamon Card",
+        "type": "toggle",
+        "img": "images/cards/coelamon_card.png",
+        "codes": "coelamon_card"
+    },
+    {
+        "name": "Kokatorimon Card",
+        "type": "toggle",
+        "img": "images/cards/kokatorimon_card.png",
+        "codes": "kokatorimon_card"
+    },
+    {
+        "name": "Kuwagamon Card",
+        "type": "toggle",
+        "img": "images/cards/kuwagamon_card.png",
+        "codes": "kuwagamon_card"
+    },
+    {
+        "name": "Mojyamon Card",
+        "type": "toggle",
+        "img": "images/cards/mojyamon_card.png",
+        "codes": "mojyamon_card"
+    },
+    {
+        "name": "Ninjamon Card",
+        "type": "toggle",
+        "img": "images/cards/ninjamon_card.png",
+        "codes": "ninjamon_card"
+    },
+    {
+        "name": "Penguinmon Card",
+        "type": "toggle",
+        "img": "images/cards/penguinmon_card.png",
+        "codes": "penguinmon_card"
+    },
+    {
+        "name": "Otamamon Card",
+        "type": "toggle",
+        "img": "images/cards/otamamon_card.png",
+        "codes": "otamamon_card"
+    },
+    {
+        "name": "Tentomon Card",
+        "type": "toggle",
+        "img": "images/cards/tentomon_card.png",
+        "codes": "tentomon_card"
+    },
+    {
+        "name": "Yanmamon Card",
+        "type": "toggle",
+        "img": "images/cards/yanmamon_card.png",
+        "codes": "yanmamon_card"
+    },
+    {
+        "name": "Gotsumon Card",
+        "type": "toggle",
+        "img": "images/cards/gotsumon_card.png",
+        "codes": "gotsumon_card"
+    },
+    {
+        "name": "Darkrizamon Card",
+        "type": "toggle",
+        "img": "images/cards/darkrizamon_card.png",
+        "codes": "darkrizamon_card"
+    },
+    {
+        "name": "Demimeramon Card",
+        "type": "toggle",
+        "img": "images/cards/demimeramon_card.png",
+        "codes": "demimeramon_card"
+    },
+    {
+        "name": "ToyAgumon Card",
+        "type": "toggle",
+        "img": "images/cards/toyagumon_card.png",
+        "codes": "toyagumon_card"
+    },
+    {
+        "name": "DemiMeramon Card",
+        "type": "toggle",
+        "img": "images/cards/demimeramon_card.png",
+        "codes": "demimeramon_card"
+    },
+    {
+        "name": "Tankmon Card",
+        "type": "toggle",
+        "img": "images/cards/tankmon_card.png",
+        "codes": "tankmon_card"
+    },
+    {
+        "name": "Goburimon Card",
+        "type": "toggle",
+        "img": "images/cards/goburimon_card.png",
+        "codes": "goburimon_card"
+    },
+    {
+        "name": "Numemon Card",
+        "type": "toggle",
+        "img": "images/cards/numemon_card.png",
+        "codes": "numemon_card"
+    },
+    {
+        "name": "Vegiemon Card",
+        "type": "toggle",
+        "img": "images/cards/vegiemon_card.png",
+        "codes": "vegiemon_card"
+    },
+    {
+        "name": "Sukamon Card",
+        "type": "toggle",
+        "img": "images/cards/sukamon_card.png",
+        "codes": "sukamon_card"
+    },
+    {
+        "name": "Nanimon Card",
+        "type": "toggle",
+        "img": "images/cards/nanimon_card.png",
+        "codes": "nanimon_card"
+    },
+    {
+        "name": "Machinedramon Card",
+        "type": "toggle",
+        "img": "images/cards/machinedramon_card.png",
+        "codes": "machinedramon_card"
+    }
+]

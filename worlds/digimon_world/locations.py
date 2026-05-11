@@ -379,15 +379,18 @@ _POSTGAME_CHEST_REGIONS: Final[frozenset[str]] = frozenset({
 # Key (Grey Lord's Mansion foyer — placed in Overdell because the
 # pickup site is in a non-key-gated area), Frig Key (Myotismon dialog
 # inside Grey Lord's Mansion proper, gated on Mansion Key by region
-# wiring), Steak (Overdell fridge interaction, gated on Frig Key by
-# in-game flow), Gear (Toy Town WaruMonzaemon defeat cutscene), Rain
-# Plant (Tanemon planter in Native Forest, gated on Palmon Recruit
-# and day-15 timer), Blue Flute (Seadramon friendship cutscene from
+# wiring), Gear (Toy Town WaruMonzaemon defeat cutscene), Rain Plant
+# (Tanemon planter in Native Forest, gated on Palmon Recruit and
+# day-15 timer), Blue Flute (Seadramon friendship cutscene from
 # fishing in Greatlake; replaces the dropped Seadramon recruit
 # location), Leomonstone (Leomon's Ancestral Cave in Drill Tunnel
 # B3F, gated on Prosperity 45 since the cave entrance only opens
 # after Drimogemon digs through). Only Amazing Rod remains to be
 # wired up.
+#
+# Steak is NOT an AP location: vanilla DW1 spawns Steak from the
+# Overdell fridge interaction (gated on Frig Key) and it is left
+# entirely on the vanilla path.
 #
 # Note: ``Lava Cave Access``, ``Tropical Jungle Bridge`` and
 # ``Great Canyon Bridge`` are AP **items** but **not AP locations**
@@ -400,7 +403,6 @@ _KEYITEM_LOCATIONS: Final[dict[str, LocationEntry]] = {
     "Old Fishrod Pickup":            LocationEntry(69_004_000, "Gear Savanna"),
     "Mansion Key Pickup":            LocationEntry(69_004_004, "Overdell"),
     "Frig Key Pickup":               LocationEntry(69_004_005, "Grey Lord's Mansion"),
-    "Steak Pickup":                  LocationEntry(69_004_006, "Overdell"),
     "Gear Pickup":                   LocationEntry(69_004_007, "Toy Town"),
     "Rain Plant Pickup":             LocationEntry(69_004_008, "Native Forest"),
     "Blue Flute Pickup":             LocationEntry(69_004_009, "Greatlake"),
@@ -454,7 +456,7 @@ _VENDING_LOCATIONS: Final[dict[str, LocationEntry]] = {
     name: LocationEntry(69_055_000 + i, VENDING_LOCATION_REGIONS[name])
     for i, name in enumerate(VENDING_LOCATION_NAMES)
 }
-assert len(_VENDING_LOCATIONS) == 12, len(_VENDING_LOCATIONS)
+assert len(_VENDING_LOCATIONS) == 10, len(_VENDING_LOCATIONS)
 
 
 # =============================================================================

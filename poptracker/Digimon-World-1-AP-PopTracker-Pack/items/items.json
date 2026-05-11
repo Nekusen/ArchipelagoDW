@@ -1,0 +1,374 @@
+[
+  {
+    "name": "Mansion Key",
+    "type": "toggle",
+    "img": "images/items/jijimon.png",
+    "codes": "mansion_key"
+  },
+  {
+    "name": "Gear",
+    "type": "toggle",
+    "img": "images/items/jijimon.png",
+    "codes": "gear"
+  },
+  {
+    "name": "Frig Key",
+    "type": "toggle",
+    "img": "images/items/jijimon.png",
+    "codes": "frig_key"
+  },
+  {
+    "name": "Blue Flute",
+    "type": "toggle",
+    "img": "images/items/jijimon.png",
+    "codes": "blue_flute"
+  },
+  {
+    "name": "Old Fishrod",
+    "type": "toggle",
+    "img": "images/items/jijimon.png",
+    "codes": "old_fishrod"
+  },
+  {
+    "name": "Amazing rod",
+    "type": "toggle",
+    "img": "images/items/jijimon.png",
+    "codes": "amazing_rod"
+  },
+  {
+    "name": "Rain Plant",
+    "type": "toggle",
+    "img": "images/items/jijimon.png",
+    "codes": "rain_plant"
+  },
+  {
+    "name": "Leomonstone",
+    "type": "toggle",
+    "img": "images/items/jijimon.png",
+    "codes": "leomonstone"
+  },
+  {
+    "name": "Lava Cave Access",
+    "type": "toggle",
+    "img": "images/items/jijimon.png",
+    "codes": "lava_cave_access"
+  },
+  {
+    "name": "Tropical Jungle Bridge",
+    "type": "toggle",
+    "img": "images/items/jijimon.png",
+    "codes": "tropical_jungle_bridge"
+  },
+  {
+    "name": "Great Canyon Bridge",
+    "type": "toggle",
+    "img": "images/items/jijimon.png",
+    "codes": "great_canyon_bridge"
+  },
+  {
+    "name": "Birdramon Flight: Gear Savanna",
+    "type": "toggle",
+    "img": "images/items/jijimon.png",
+    "codes": "flight_gear_savanna"
+  },
+  {
+    "name": "Birdramon Flight: Ancient Dino Region",
+    "type": "toggle",
+    "img": "images/items/jijimon.png",
+    "codes": "flight_ancient_dino_region"
+  },
+  {
+    "name": "Birdramon Flight: Freezeland",
+    "type": "toggle",
+    "img": "images/items/jijimon.png",
+    "codes": "flight_freezeland"
+  },
+  {
+    "name": "Birdramon Flight: Misty Trees",
+    "type": "toggle",
+    "img": "images/items/jijimon.png",
+    "codes": "flight_misty_trees"
+  },
+  {
+    "name": "Birdramon Flight: Beetle Land",
+    "type": "toggle",
+    "img": "images/items/jijimon.png",
+    "codes": "flight_beetle_land"
+  },
+  {
+    "name": "Whamon Recruit",
+    "type": "toggle",
+    "img": "images/items/jijimon.png",
+    "codes": "recruit_whamon"
+  },
+  {
+    "name": "Birdramon Recruit",
+    "type": "toggle",
+    "img": "images/items/jijimon.png",
+    "codes": "recruit_birdramon"
+  },
+  {
+    "name": "Palmon Recruit",
+    "type": "toggle",
+    "img": "images/items/jijimon.png",
+    "codes": "recruit_palmon"
+  },
+  {
+    "name": "Shellmon Recruit",
+    "type": "toggle",
+    "img": "images/items/jijimon.png",
+    "codes": "recruit_shellmon"
+  },
+  {
+    "name": "Centarumon Recruit",
+    "type": "toggle",
+    "img": "images/items/jijimon.png",
+    "codes": "recruit_centarumon"
+  },
+  {
+    "name": "Vegiemon Recruit",
+    "type": "toggle",
+    "img": "images/items/jijimon.png",
+    "codes": "recruit_vegiemon"
+  },
+  {
+    "name": "Kunemon Recruit",
+    "type": "toggle",
+    "img": "images/items/jijimon.png",
+    "codes": "recruit_kunemon"
+  },
+  {
+    "name": "Etemon Recruit",
+    "type": "toggle",
+    "img": "images/items/jijimon.png",
+    "codes": "recruit_etemon"
+  },
+  {
+    "name": "Angemon Recruit",
+    "type": "toggle",
+    "img": "images/items/jijimon.png",
+    "codes": "recruit_angemon"
+  },
+  {
+    "name": "Ninjamon Recruit",
+    "type": "toggle",
+    "img": "images/items/jijimon.png",
+    "codes": "recruit_ninjamon"
+  },
+  {
+    "name": "Bakemon Recruit",
+    "type": "toggle",
+    "img": "images/items/jijimon.png",
+    "codes": "recruit_bakemon"
+  },
+  {
+    "name": "Sukamon Recruit",
+    "type": "toggle",
+    "img": "images/items/jijimon.png",
+    "codes": "recruit_sukamon"
+  },
+  {
+    "name": "Leomon Recruit",
+    "type": "toggle",
+    "img": "images/items/jijimon.png",
+    "codes": "recruit_leomon"
+  },
+  {
+    "name": "Andromon Recruit",
+    "type": "toggle",
+    "img": "images/items/jijimon.png",
+    "codes": "recruit_andromon"
+  },
+  {
+    "name": "Kokatorimon Recruit",
+    "type": "toggle",
+    "img": "images/items/jijimon.png",
+    "codes": "recruit_kokatorimon"
+  },
+  {
+    "name": "Monzaemon Recruit",
+    "type": "toggle",
+    "img": "images/items/jijimon.png",
+    "codes": "recruit_monzaemon"
+  },
+  {
+    "name": "Elecmon Recruit",
+    "type": "toggle",
+    "img": "images/items/jijimon.png",
+    "codes": "recruit_elecmon"
+  },
+  {
+    "name": "Ogremon Recruit",
+    "type": "toggle",
+    "img": "images/items/jijimon.png",
+    "codes": "recruit_ogremon"
+  },
+  {
+    "name": "Progressive Item Shop",
+    "type": "progressive",
+    "codes": "prog_item_shop",
+    "allow_disabled": false,
+    "stages": [
+      {
+        "img": "images/items/jijimon.png",
+        "codes": "prog_item_shop",
+        "inherit_codes": false
+      },
+      {
+        "img": "images/items/jijimon.png",
+        "codes": "prog_item_shop_1",
+        "inherit_codes": false
+      },
+      {
+        "img": "images/items/jijimon.png",
+        "codes": "prog_item_shop_2",
+        "inherit_codes": false
+      },
+      {
+        "img": "images/items/jijimon.png",
+        "codes": "prog_item_shop_3",
+        "inherit_codes": false
+      }
+    ]
+  },
+  {
+    "name": "Progressive Secret Shop",
+    "type": "progressive",
+    "codes": "prog_secret_shop",
+    "allow_disabled": false,
+    "stages": [
+      {
+        "img": "images/items/jijimon.png",
+        "codes": "prog_secret_shop",
+        "inherit_codes": false
+      },
+      {
+        "img": "images/items/jijimon.png",
+        "codes": "prog_secret_shop_1",
+        "inherit_codes": false
+      },
+      {
+        "img": "images/items/jijimon.png",
+        "codes": "prog_secret_shop_2",
+        "inherit_codes": false
+      }
+    ]
+  },
+  {
+    "name": "Progressive Restaurant",
+    "type": "progressive",
+    "codes": "prog_restaurant",
+    "allow_disabled": false,
+    "stages": [
+      {
+        "img": "images/items/jijimon.png",
+        "codes": "prog_restaurant",
+        "inherit_codes": false
+      },
+      {
+        "img": "images/items/jijimon.png",
+        "codes": "prog_restaurant_1",
+        "inherit_codes": false
+      },
+      {
+        "img": "images/items/jijimon.png",
+        "codes": "prog_restaurant_2",
+        "inherit_codes": false
+      },
+      {
+        "img": "images/items/jijimon.png",
+        "codes": "prog_restaurant_3",
+        "inherit_codes": false
+      }
+    ]
+  },
+  {
+    "name": "Progressive Arena",
+    "type": "progressive",
+    "codes": "prog_arena",
+    "allow_disabled": false,
+    "stages": [
+      {
+        "img": "images/items/jijimon.png",
+        "codes": "prog_arena",
+        "inherit_codes": false
+      },
+      {
+        "img": "images/items/jijimon.png",
+        "codes": "prog_arena_1",
+        "inherit_codes": false
+      },
+      {
+        "img": "images/items/jijimon.png",
+        "codes": "prog_arena_2",
+        "inherit_codes": false
+      },
+      {
+        "img": "images/items/jijimon.png",
+        "codes": "prog_arena_3",
+        "inherit_codes": false
+      },
+      {
+        "img": "images/items/jijimon.png",
+        "codes": "prog_arena_4",
+        "inherit_codes": false
+      }
+    ]
+  },
+  {
+    "name": "Progressive Green Gym",
+    "type": "progressive",
+    "codes": "prog_green_gym",
+    "allow_disabled": false,
+    "stages": [
+      {
+        "img": "images/items/jijimon.png",
+        "codes": "prog_green_gym",
+        "inherit_codes": false
+      },
+      {
+        "img": "images/items/jijimon.png",
+        "codes": "prog_green_gym_1",
+        "inherit_codes": false
+      },
+      {
+        "img": "images/items/jijimon.png",
+        "codes": "prog_green_gym_2",
+        "inherit_codes": false
+      }
+    ]
+  },
+  {
+    "name": "Progressive Treasure Hunt",
+    "type": "progressive",
+    "codes": "prog_treasure_hunt",
+    "allow_disabled": false,
+    "stages": [
+      {
+        "img": "images/items/jijimon.png",
+        "codes": "prog_treasure_hunt",
+        "inherit_codes": false
+      },
+      {
+        "img": "images/items/jijimon.png",
+        "codes": "prog_treasure_hunt_1",
+        "inherit_codes": false
+      },
+      {
+        "img": "images/items/jijimon.png",
+        "codes": "prog_treasure_hunt_2",
+        "inherit_codes": false
+      }
+    ]
+  },
+  {
+    "name": "Prosperity Point",
+    "type": "consumable",
+    "img": "images/items/jijimon.png",
+    "codes": "prosperity_point",
+    "max_quantity": 100,
+    "increment": 1,
+    "decrement": 1,
+    "initial_quantity": 0
+  }
+]

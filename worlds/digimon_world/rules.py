@@ -308,13 +308,13 @@ def _vegimon_extra(_world: DigimonWorldWorld):
 
 
 def _skullgreymon_extra(_world: DigimonWorldWorld):
-    # Per user (2026-05-08): SkullGreymon is recruited by entering Grey
-    # Lord's Mansion (Mansion Key), feeding it Steak, and having
-    # Shellmon already recruited. Frig Key / Freezeland reachability —
-    # which the prior rule used as an approximation for "the player can
-    # actually obtain Steak" — are not part of the recruit gate and
-    # have been removed.
-    return Has("Mansion Key") & Has("Steak") & Has("Shellmon Recruit")
+    # SkullGreymon is recruited by entering Grey Lord's Mansion
+    # (Mansion Key), feeding him Steak, and having Shellmon already
+    # recruited. Steak isn't AP-randomized — vanilla DW1 spawns it from
+    # the Overdell fridge when the player uses Frig Key on it — so
+    # ``Has("Frig Key")`` is the canonical "the player can obtain
+    # Steak" approximation.
+    return Has("Mansion Key") & Has("Frig Key") & Has("Shellmon Recruit")
 
 
 def _monzaemon_extra(_world: DigimonWorldWorld):
@@ -386,6 +386,43 @@ def _unimon_extra(_world: DigimonWorldWorld):
     return Has("Centarumon Recruit")
 
 
+# Coelamon's recruit fires when his "take you across the water" case
+# resolves into "Coelamon joins the city". In shuffled mode the patcher
+# rewrites his Section_51 branch target so case 1 ("I'll take you
+# across") is dead until trigger 185 — the Tropical Jungle Bridge bit —
+# is set (see ``ROM_COELAMON_GATE_OFFSETS`` in addresses.py). Without
+# the AP item, the cutscene that fires the recruit location never
+# completes, so AP logic must AND the bridge in too even though the
+# spawn point is geographically in Native Forest.
+#
+# In vanilla / always_open mode the bridge bit is set organically (or
+# pre-pinned), so no extra rule is needed. Returning ``None`` keeps
+# the recruit freely reachable in those modes.
+def _coelamon_extra(world: DigimonWorldWorld):
+    if int(world.options.bridge_unlock.value) == _OPT_SHUFFLED:
+        return Has("Tropical Jungle Bridge")
+    return None
+
+
+# Drimogemon is the in-game source of "Lava Cave Access" — vanilla
+# DW1 has him dig the Drill Tunnel boulder open after he's beaten.
+# In shuffled mode the boulder gate is rewritten to read trigger 145
+# (the AP-controlled Lava Cave Access bit; see
+# ``ROM_LAVA_CAVE_GATE_OFFSETS``), and Drimogemon's recruit chain
+# threads through the lava-cave side of the tunnel before he joins
+# the city. Without the AP item, the encounters that complete his
+# recruit cutscene aren't reachable, so logic must require the item
+# in shuffled mode.
+#
+# Vanilla mode keeps the digimon-tier whitelist on the boulder, which
+# is the player's responsibility (no AP item exists in the pool), so
+# we return ``None`` and leave the recruit freely reachable in logic.
+def _drimogemon_extra(world: DigimonWorldWorld):
+    if int(world.options.lava_cave_access.value) == _LCA_SHUFFLED:
+        return Has("Lava Cave Access")
+    return None
+
+
 _RECRUIT_EXTRA_RULES = {
     # Seadramon dropped 2026-05-09 (recruit cutscene IS Blue Flute pickup).
     # The rod-required rule moved to ``Blue Flute Pickup`` in
@@ -407,6 +444,10 @@ _RECRUIT_EXTRA_RULES = {
     # ``_set_entrance_rules``); no extra rule on the Tyrannomon
     # location needed because the region access already implies it.
     "Unimon":       _unimon_extra,
+    # Shuffled-mode option gates: each is a no-op rule in non-shuffled
+    # modes (the corresponding AP item isn't in the pool).
+    "Coelamon":     _coelamon_extra,
+    "Drimogemon":   _drimogemon_extra,
 }
 
 
@@ -456,11 +497,9 @@ def _set_keyitem_pickup_rules(world: DigimonWorldWorld) -> None:
 
     Most keyitem pickups need no extra rule beyond region reach (Old
     Fishrod Pickup, Mansion Key Pickup, Frig Key Pickup, Gear Pickup) —
-    region wiring covers the prerequisites. Four have additional
+    region wiring covers the prerequisites. Three have additional
     gates:
 
-    * ``Steak Pickup`` requires Frig Key in hand (the fridge cutscene
-      checks ``item(123) >= 1``).
     * ``Rain Plant Pickup`` requires Palmon Recruit (the cutscene's
       section gate is ``trigger(76) == false AND trigger(246) == true``,
       and trigger 246 is set on Palmon recruit completion). The day-
@@ -475,7 +514,6 @@ def _set_keyitem_pickup_rules(world: DigimonWorldWorld) -> None:
 
     mt_threshold = int(world.options.prosperity_goal.value)
 
-    world.set_rule(world.get_location("Steak Pickup"), Has("Frig Key"))
     world.set_rule(world.get_location("Rain Plant Pickup"), Has("Palmon Recruit"))
     world.set_rule(
         world.get_location("Blue Flute Pickup"),

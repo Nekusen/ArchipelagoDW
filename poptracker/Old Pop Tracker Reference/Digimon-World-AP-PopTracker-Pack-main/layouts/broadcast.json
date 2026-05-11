@@ -1,0 +1,43 @@
+﻿{
+    "tracker_broadcast": {
+        "type": "container",
+        "background": "#212121",
+        "content": {
+            "type": "dock",
+            "dropshadow": true,
+            "content": [
+                {
+                    "type": "dock",
+                    "dock": "left",
+                    "content": [
+                        {
+                            "type": "dock",
+                            "dock": "top",
+                            "v_alignment": "stretch",
+                            "content": [
+                                {
+                                    "type": "group",
+                                    "header": "Digimon Recruitment",
+                                    "dock": "top",
+                                    "content": {
+                                        "type": "layout",
+                                        "key": "digimon_grid"
+                                    }
+                                },
+                                {
+                                    "type": "group",
+                                    "header": "File City Progress",
+                                    "dock": "top",
+                                    "content": {
+                                        "type": "layout",
+                                        "key": "building_grid"
+                                    }
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ]
+		}
+    }
+}

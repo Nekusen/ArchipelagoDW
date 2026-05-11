@@ -1,0 +1,746 @@
+[
+    {
+        "name": "Agumon",
+        "type": "toggle",
+        "img": "images/digimon/agumon-icon.png",
+        "codes": "agumon"
+    },    {
+        "name": "Gabumon",
+        "type": "toggle",
+        "img": "images/digimon/gabumon-icon.png",
+        "codes": "gabumon"
+    },
+    {
+        "name": "Patamon",
+        "type": "toggle",
+        "img": "images/digimon/patamon-icon.png",
+        "codes": "patamon"
+    },
+	{
+        "name": "Biyomon",
+        "type": "toggle",
+        "img": "images/digimon/biyomon-icon.png",
+        "codes": "biyomon"
+    },
+	{
+        "name": "Elecmon",
+        "type": "toggle",
+        "img": "images/digimon/elecmon-icon.png",
+        "codes": "elecmon"
+    },
+	{
+        "name": "Kunemon",
+        "type": "toggle",
+        "img": "images/digimon/kunemon-icon.png",
+        "codes": "kunemon"
+    },
+	{
+        "name": "Palmon",
+        "type": "toggle",
+        "img": "images/digimon/palmon-icon.png",
+        "codes": "palmon"
+    },
+	{
+        "name": "Betamon",
+        "type": "toggle",
+        "img": "images/digimon/betamon-icon.png",
+        "codes": "betamon"
+    },
+	{
+        "name": "Penguinmon",
+        "type": "toggle",
+        "img": "images/digimon/penguinmon-icon.png",
+        "codes": "penguinmon"
+    },
+	{
+        "name": "Greymon",
+        "type": "toggle",
+        "img": "images/digimon/greymon-icon.png",
+        "codes": "greymon"
+    },
+	{
+        "name": "Monochromon",
+        "type": "toggle",
+        "img": "images/digimon/monochromon-icon.png",
+        "codes": "monochromon"
+    },
+	{
+        "name": "Ogremon",
+        "type": "toggle",
+        "img": "images/digimon/ogremon-icon.png",
+        "codes": "ogremon"
+    },
+	{
+        "name": "Airdramon",
+        "type": "toggle",
+        "img": "images/digimon/airdramon-icon.png",
+        "codes": "airdramon"
+    },
+	{
+        "name": "Kuwagamon",
+        "type": "toggle",
+        "img": "images/digimon/kuwagamon-icon.png",
+        "codes": "kuwagamon"
+    },
+	{
+        "name": "Whamon",
+        "type": "toggle",
+        "img": "images/digimon/whamon-icon.png",
+        "codes": "whamon"
+    },
+	{
+        "name": "Frigimon",
+        "type": "toggle",
+        "img": "images/digimon/frigimon-icon.png",
+        "codes": "frigimon"
+    },
+	{
+        "name": "Nanimon",
+        "type": "toggle",
+        "img": "images/digimon/nanimon-icon.png",
+        "codes": "nanimon"
+    },
+	{
+        "name": "Meramon",
+        "type": "toggle",
+        "img": "images/digimon/meramon-icon.png",
+        "codes": "meramon"
+    },
+	{
+        "name": "Drimogemon",
+        "type": "toggle",
+        "img": "images/digimon/drimogemon-icon.png",
+        "codes": "drimogemon"
+    },
+	{
+        "name": "Leomon",
+        "type": "toggle",
+        "img": "images/digimon/leomon-icon.png",
+        "codes": "leomon"
+    },
+	{
+        "name": "Kokatorimon",
+        "type": "toggle",
+        "img": "images/digimon/kokatorimon-icon.png",
+        "codes": "kokatorimon"
+    },
+	{
+        "name": "Vegiemon",
+        "type": "toggle",
+        "img": "images/digimon/vegiemon-icon.png",
+        "codes": "vegiemon"
+    },
+	{
+        "name": "Shellmon",
+        "type": "toggle",
+        "img": "images/digimon/shellmon-icon.png",
+        "codes": "shellmon"
+    },
+	{
+        "name": "Mojyamon",
+        "type": "toggle",
+        "img": "images/digimon/mojyamon-icon.png",
+        "codes": "mojyamon"
+    },
+	{
+        "name": "Birdramon",
+        "type": "toggle",
+        "img": "images/digimon/birdramon-icon.png",
+        "codes": "birdramon"
+    },
+	{
+        "name": "Tyrannomon",
+        "type": "toggle",
+        "img": "images/digimon/tyrannomon-icon.png",
+        "codes": "tyrannomon"
+    },
+	{
+        "name": "Angemon",
+        "type": "toggle",
+        "img": "images/digimon/angemon-icon.png",
+        "codes": "angemon"
+    },
+	{
+        "name": "Unimon",
+        "type": "toggle",
+        "img": "images/digimon/unimon-icon.png",
+        "codes": "unimon"
+    },
+	{
+        "name": "Ninjamon",
+        "type": "toggle",
+        "img": "images/digimon/ninjamon-icon.png",
+        "codes": "ninjamon"
+    },
+	{
+        "name": "Coelamon",
+        "type": "toggle",
+        "img": "images/digimon/coelamon-icon.png",
+        "codes": "coelamon"
+    },
+	{
+        "name": "Numemon",
+        "type": "toggle",
+        "img": "images/digimon/numemon-icon.png",
+        "codes": "numemon"
+    },
+	{
+        "name": "Centarumon",
+        "type": "toggle",
+        "img": "images/digimon/centarumon-icon.png",
+        "codes": "centarumon"
+    },
+	{
+        "name": "Devimon",
+        "type": "toggle",
+        "img": "images/digimon/devimon-icon.png",
+        "codes": "devimon"
+    },
+	{
+        "name": "Bakemon",
+        "type": "toggle",
+        "img": "images/digimon/bakemon-icon.png",
+        "codes": "bakemon"
+    },
+	{
+        "name": "Kabuterimon",
+        "type": "toggle",
+        "img": "images/digimon/kabuterimon-icon.png",
+        "codes": "kabuterimon"
+    },
+	{
+        "name": "Seadramon",
+        "type": "toggle",
+        "img": "images/digimon/seadramon-icon.png",
+        "codes": "seadramon"
+    },
+	{
+        "name": "Garurumon",
+        "type": "toggle",
+        "img": "images/digimon/garurumon-icon.png",
+        "codes": "garurumon"
+    },
+	{
+        "name": "Sukamon",
+        "type": "toggle",
+        "img": "images/digimon/sukamon-icon.png",
+        "codes": "sukamon"
+    },
+	{
+        "name": "MetalGreymon",
+        "type": "toggle",
+        "img": "images/digimon/metalgreymon-icon.png",
+        "codes": "metalgreymon"
+    },
+	{
+        "name": "SkullGreymon",
+        "type": "toggle",
+        "img": "images/digimon/skullgreymon-icon.png",
+        "codes": "skullgreymon"
+    },
+	{
+        "name": "Giromon",
+        "type": "toggle",
+        "img": "images/digimon/giromon-icon.png",
+        "codes": "giromon"
+    },
+	{
+        "name": "Mamemon",
+        "type": "toggle",
+        "img": "images/digimon/mamemon-icon.png",
+        "codes": "mamemon"
+    },
+	{
+        "name": "Monzaemon",
+        "type": "toggle",
+        "img": "images/digimon/monzaemon-icon.png",
+        "codes": "monzaemon"
+    },
+	{
+        "name": "Digitamamon",
+        "type": "toggle",
+        "img": "images/digimon/digitamamon-icon.png",
+        "codes": "digitamamon"
+    },
+	{
+        "name": "Andromon",
+        "type": "toggle",
+        "img": "images/digimon/andromon-icon.png",
+        "codes": "andromon"
+    },
+	{
+        "name": "Megadramon",
+        "type": "toggle",
+        "img": "images/digimon/megadramon-icon.png",
+        "codes": "megadramon"
+    },
+	{
+        "name": "Piximon",
+        "type": "toggle",
+        "img": "images/digimon/piximon-icon.png",
+        "codes": "piximon"
+    },
+	{
+        "name": "MetalMamemon",
+        "type": "toggle",
+        "img": "images/digimon/metalmamemon-icon.png",
+        "codes": "metalmamemon"
+    },
+	{
+        "name": "Vademon",
+        "type": "toggle",
+        "img": "images/digimon/vademon-icon.png",
+        "codes": "vademon"
+    },
+	{
+        "name": "Etemon",
+        "type": "toggle",
+        "img": "images/digimon/etemon-icon.png",
+        "codes": "etemon"
+    },
+	{
+        "name": "Prosperity Points",
+        "type": "consumable",
+        "max_quantity": 100,
+        "increment": 1,
+        "decrement": 1,
+        "initial_quantity": 1,
+        "img": "images/items/jijimon.png",
+        "codes": "prosperity,prosperity_counter"
+    },
+    {
+        "name": "Progressive Stat Upgrades",
+        "codes": "stat",
+        "allow_disabled": false,
+        "type": "progressive",
+        "stages": [
+            {
+                "disabled_img": "images/items/stat_bar.png",
+                "img": "images/items/stat_bar.png",
+                "codes": "stat",
+                "inherit_codes":false
+            },
+            {
+                "disabled_img": "images/items/stat_bar.png",
+                "img_mods": "overlay|images/overlays/1.png",
+                "img": "images/items/stat_bar.png",
+                "codes": "stat_1",
+                "inherit_codes":false
+            }, 
+            {
+                "img_mods": "overlay|images/overlays/2.png",
+                "img": "images/items/stat_bar.png",
+                "codes": "stat_2",
+                "inherit_codes":false
+            },
+            {
+                "img_mods": "overlay|images/overlays/3.png",
+                "img": "images/items/stat_bar.png",
+                "codes": "stat_3",
+                "inherit_codes":false
+            },
+            {
+                "img_mods": "overlay|images/overlays/4.png",
+                "img": "images/items/stat_bar.png",
+                "codes": "stat_4",
+                "inherit_codes":false
+            },
+            {
+                "img_mods": "overlay|images/overlays/5.png",
+                "img": "images/items/stat_bar.png",
+                "codes": "stat_5",
+                "inherit_codes":false
+            },
+            {
+                "img_mods": "overlay|images/overlays/6.png",
+                "img": "images/items/stat_bar.png",
+                "codes": "stat_6",
+                "inherit_codes":false
+            },
+            {
+                "img_mods": "overlay|images/overlays/7.png",
+                "img": "images/items/stat_bar.png",
+                "codes": "stat_7",
+                "inherit_codes":false
+            },
+            {
+                "img_mods": "overlay|images/overlays/8.png",
+                "img": "images/items/stat_bar.png",
+                "codes": "stat_8",
+                "inherit_codes":false
+            },
+            {
+                "img_mods": "overlay|images/overlays/9.png",
+                "img": "images/items/stat_bar.png",
+                "codes": "stat_9",
+                "inherit_codes":false
+            }
+        ]
+    },
+	{
+        "name": "Item Bank",
+        "type": "toggle",
+        "img": "images/buildings/item_bank.png",
+        "codes": "item_bank"
+    },
+	{
+        "name": "Clinic",
+        "type": "toggle",
+        "img": "images/buildings/clinic.png",
+        "codes": "clinic"
+    },
+	{
+        "name": "Restaurant",
+        "type": "toggle",
+        "img": "images/buildings/restaurant.png",
+        "codes": "restaurant"
+    },
+	{
+        "name": "Birdra Transport",
+        "type": "toggle",
+        "img": "images/buildings/birdra_transport.png",
+        "codes": "birdra_transport"
+    },
+    {
+        "name": "Meat Farm",
+        "codes": "meat_farm",
+        "allow_disabled": false,
+        "type": "progressive",
+        "stages": [
+            {
+                "disabled_img": "images/buildings/meat_farm_1.png",
+                "img": "images/buildings/meat_farm_1.png",
+                "codes": "meat_farm_1",
+                "inherit_codes":false
+            },
+            {
+                "img": "images/buildings/meat_farm_2.png",
+                "codes": "meat_farm_2",
+                "inherit_codes":false
+            }, 
+            {
+                "img": "images/buildings/meat_farm_3.png",
+                "codes": "meat_farm_3",
+                "inherit_codes":false
+            }
+        ]
+    },
+    {
+        "name": "Item Shop",
+        "codes": "item_shop",
+        "type": "progressive",
+        "stages": [
+            {
+                "disabled_img": "images/buildings/item_stall.png",
+                "img": "images/buildings/item_stall.png",
+                "codes": "item_shop_1",
+                "inherit_codes":false
+            },
+            {
+                "img": "images/buildings/item_shop.png",
+                "codes": "item_shop_2",
+                "inherit_codes":false
+            }
+        ]
+    },
+    {
+        "name": "Agumon Soul",
+        "type": "static",
+        "img": "images/digimon/agumon-icon.png",
+        "codes": "agumon_soul"
+    },
+    {
+        "name": "Gabumon Soul",
+        "type": "toggle",
+        "img": "images/digimon/gabumon-icon.png",
+        "codes": "gabumon_soul"
+    },
+    {
+        "name": "Patamon Soul",
+        "type": "toggle",
+        "img": "images/digimon/patamon-icon.png",
+        "codes": "patamon_soul"
+    },
+	{
+        "name": "Biyomon Soul",
+        "type": "toggle",
+        "img": "images/digimon/biyomon-icon.png",
+        "codes": "biyomon_soul"
+    },
+	{
+        "name": "Elecmon Soul",
+        "type": "toggle",
+        "img": "images/digimon/elecmon-icon.png",
+        "codes": "elecmon_soul"
+    },
+	{
+        "name": "Kunemon Soul",
+        "type": "toggle",
+        "img": "images/digimon/kunemon-icon.png",
+        "codes": "kunemon_soul"
+    },
+	{
+        "name": "Palmon Soul",
+        "type": "toggle",
+        "img": "images/digimon/palmon-icon.png",
+        "codes": "palmon_soul"
+    },
+	{
+        "name": "Betamon Soul",
+        "type": "toggle",
+        "img": "images/digimon/betamon-icon.png",
+        "codes": "betamon_soul"
+    },
+	{
+        "name": "Penguinmon Soul",
+        "type": "toggle",
+        "img": "images/digimon/penguinmon-icon.png",
+        "codes": "penguinmon_soul"
+    },
+	{
+        "name": "Greymon Soul",
+        "type": "toggle",
+        "img": "images/digimon/greymon-icon.png",
+        "codes": "greymon_soul"
+    },
+	{
+        "name": "Monochromon Soul",
+        "type": "toggle",
+        "img": "images/digimon/monochromon-icon.png",
+        "codes": "monochromon_soul"
+    },
+	{
+        "name": "Ogremon Soul",
+        "type": "toggle",
+        "img": "images/digimon/ogremon-icon.png",
+        "codes": "ogremon_soul"
+    },
+	{
+        "name": "Airdramon Soul",
+        "type": "toggle",
+        "img": "images/digimon/airdramon-icon.png",
+        "codes": "airdramon_soul"
+    },
+	{
+        "name": "Kuwagamon Soul",
+        "type": "toggle",
+        "img": "images/digimon/kuwagamon-icon.png",
+        "codes": "kuwagamon_soul"
+    },
+	{
+        "name": "Whamon Soul",
+        "type": "toggle",
+        "img": "images/digimon/whamon-icon.png",
+        "codes": "whamon_soul"
+    },
+	{
+        "name": "Frigimon Soul",
+        "type": "toggle",
+        "img": "images/digimon/frigimon-icon.png",
+        "codes": "frigimon_soul"
+    },
+	{
+        "name": "Nanimon Soul",
+        "type": "toggle",
+        "img": "images/digimon/nanimon-icon.png",
+        "codes": "nanimon_soul"
+    },
+	{
+        "name": "Meramon Soul",
+        "type": "toggle",
+        "img": "images/digimon/meramon-icon.png",
+        "codes": "meramon_soul"
+    },
+	{
+        "name": "Drimogemon Soul",
+        "type": "toggle",
+        "img": "images/digimon/drimogemon-icon.png",
+        "codes": "drimogemon_soul"
+    },
+	{
+        "name": "Leomon Soul",
+        "type": "toggle",
+        "img": "images/digimon/leomon-icon.png",
+        "codes": "leomon_soul"
+    },
+	{
+        "name": "Kokatorimon Soul",
+        "type": "toggle",
+        "img": "images/digimon/kokatorimon-icon.png",
+        "codes": "kokatorimon_soul"
+    },
+	{
+        "name": "Vegiemon Soul",
+        "type": "toggle",
+        "img": "images/digimon/vegiemon-icon.png",
+        "codes": "vegiemon_soul"
+    },
+	{
+        "name": "Shellmon Soul",
+        "type": "toggle",
+        "img": "images/digimon/shellmon-icon.png",
+        "codes": "shellmon_soul"
+    },
+	{
+        "name": "Mojyamon Soul",
+        "type": "toggle",
+        "img": "images/digimon/mojyamon-icon.png",
+        "codes": "mojyamon_soul"
+    },
+	{
+        "name": "Birdramon Soul",
+        "type": "toggle",
+        "img": "images/digimon/birdramon-icon.png",
+        "codes": "birdramon_soul"
+    },
+	{
+        "name": "Tyrannomon Soul",
+        "type": "toggle",
+        "img": "images/digimon/tyrannomon-icon.png",
+        "codes": "tyrannomon_soul"
+    },
+	{
+        "name": "Angemon Soul",
+        "type": "toggle",
+        "img": "images/digimon/angemon-icon.png",
+        "codes": "angemon_soul"
+    },
+	{
+        "name": "Unimon Soul",
+        "type": "toggle",
+        "img": "images/digimon/unimon-icon.png",
+        "codes": "unimon_soul"
+    },
+	{
+        "name": "Ninjamon Soul",
+        "type": "toggle",
+        "img": "images/digimon/ninjamon-icon.png",
+        "codes": "ninjamon_soul"
+    },
+	{
+        "name": "Coelamon Soul",
+        "type": "toggle",
+        "img": "images/digimon/coelamon-icon.png",
+        "codes": "coelamon_soul"
+    },
+	{
+        "name": "Numemon Soul",
+        "type": "toggle",
+        "img": "images/digimon/numemon-icon.png",
+        "codes": "numemon_soul"
+    },
+	{
+        "name": "Centarumon Soul",
+        "type": "toggle",
+        "img": "images/digimon/centarumon-icon.png",
+        "codes": "centarumon_soul"
+    },
+	{
+        "name": "Devimon Soul",
+        "type": "toggle",
+        "img": "images/digimon/devimon-icon.png",
+        "codes": "devimon_soul"
+    },
+	{
+        "name": "Bakemon Soul",
+        "type": "toggle",
+        "img": "images/digimon/bakemon-icon.png",
+        "codes": "bakemon_soul"
+    },
+	{
+        "name": "Kabuterimon Soul",
+        "type": "toggle",
+        "img": "images/digimon/kabuterimon-icon.png",
+        "codes": "kabuterimon_soul"
+    },
+	{
+        "name": "Seadramon Soul",
+        "type": "toggle",
+        "img": "images/digimon/seadramon-icon.png",
+        "codes": "seadramon_soul"
+    },
+	{
+        "name": "Garurumon Soul",
+        "type": "toggle",
+        "img": "images/digimon/garurumon-icon.png",
+        "codes": "garurumon_soul"
+    },
+	{
+        "name": "Sukamon Soul",
+        "type": "toggle",
+        "img": "images/digimon/sukamon-icon.png",
+        "codes": "sukamon_soul"
+    },
+	{
+        "name": "MetalGreymon Soul",
+        "type": "toggle",
+        "img": "images/digimon/metalgreymon-icon.png",
+        "codes": "metalgreymon_soul"
+    },
+	{
+        "name": "SkullGreymon Soul",
+        "type": "toggle",
+        "img": "images/digimon/skullgreymon-icon.png",
+        "codes": "skullgreymon_soul"
+    },
+	{
+        "name": "Giromon Soul",
+        "type": "toggle",
+        "img": "images/digimon/giromon-icon.png",
+        "codes": "giromon_soul"
+    },
+	{
+        "name": "Mamemon Soul",
+        "type": "toggle",
+        "img": "images/digimon/mamemon-icon.png",
+        "codes": "mamemon_soul"
+    },
+	{
+        "name": "Monzaemon Soul",
+        "type": "toggle",
+        "img": "images/digimon/monzaemon-icon.png",
+        "codes": "monzaemon_soul"
+    },
+	{
+        "name": "Digitamamon Soul",
+        "type": "toggle",
+        "img": "images/digimon/digitamamon-icon.png",
+        "codes": "digitamamon_soul"
+    },
+	{
+        "name": "Andromon Soul",
+        "type": "toggle",
+        "img": "images/digimon/andromon-icon.png",
+        "codes": "andromon_soul"
+    },
+	{
+        "name": "Megadramon Soul",
+        "type": "toggle",
+        "img": "images/digimon/megadramon-icon.png",
+        "codes": "megadramon_soul"
+    },
+	{
+        "name": "Piximon Soul",
+        "type": "toggle",
+        "img": "images/digimon/piximon-icon.png",
+        "codes": "piximon_soul"
+    },
+	{
+        "name": "MetalMamemon Soul",
+        "type": "toggle",
+        "img": "images/digimon/metalmamemon-icon.png",
+        "codes": "metalmamemon_soul"
+    },
+	{
+        "name": "Vademon Soul",
+        "type": "toggle",
+        "img": "images/digimon/vademon-icon.png",
+        "codes": "vademon_soul"
+    },
+	{
+        "name": "Etemon Soul",
+        "type": "toggle",
+        "img": "images/digimon/etemon-icon.png",
+        "codes": "etemon_soul"
+    }
+]

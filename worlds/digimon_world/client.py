@@ -125,6 +125,7 @@ from .data.addresses import (
     RAM_STAT_GAIN_MULT,
     RAM_TROPICAL_JUNGLE_BRIDGE_FIXED,
     RECRUIT_RAM_BITS,
+    tech_mastery_bit,
     STAT_CAP_FLAG_TARGET,
     STAT_CAP_TARGET,
     VENDING_LOCATION_RAM_BITS,
@@ -136,6 +137,7 @@ from .items import (
     PROSPERITY_PER_ITEM,
     PROSPERITY_POINT_NAME,
     digimon_id_for_recruit_item,
+    technique_slot_for_item,
 )
 
 if TYPE_CHECKING:
@@ -478,6 +480,38 @@ def _make_keyitem_bit_deliverer(byte_addr: int, bit_index: int) -> ItemDeliverer
     return deliver
 
 
+def _make_technique_bit_deliverer(slot: int) -> ItemDeliverer:
+    """Return an :class:`ItemDeliverer` that ORs a technique mastery
+    bit into the partner save block.
+
+    The mastery bitmap (:data:`RAM_TECH_MASTERY_BASE`) lives inside the
+    partner save block, so it gets cleared whenever the partner dies
+    and reincarnates as a fresh DigiTama (and possibly on
+    digivolution — exact behavior TBD per chat 2026-05-11). This
+    deliverer's idempotent OR-write is therefore only the immediate
+    grant; persistence across partner transitions is the job of
+    :meth:`DigimonWorldClient._reconcile_technique_bits`, which
+    re-asserts the bit on every watcher tick.
+
+    Setting the bit is sufficient to make the technique usable in
+    combat — DW1's combat-menu population reads this bitmap directly
+    (user-verified in-battle 2026-05-11).
+    """
+
+    byte_addr, bit_index = tech_mastery_bit(slot)
+    bit_mask = 1 << bit_index
+
+    async def deliver(ctx: BizHawkClientContext) -> list[RamWrite]:
+        current = (await bizhawk.read(
+            ctx.bizhawk_ctx, [(byte_addr, 1, DOMAIN_MAIN_RAM)],
+        ))[0]
+        if not current or (current[0] & bit_mask):
+            return []
+        return [(byte_addr, [current[0] | bit_mask], DOMAIN_MAIN_RAM)]
+
+    return deliver
+
+
 def _make_bank_deliverer(dw_code: int) -> ItemDeliverer:
     """Return an :class:`ItemDeliverer` that increments the bank slot
     quantity for a 2000-block ``dw_code`` (capped at
@@ -612,6 +646,14 @@ def _build_item_delivery_routes() -> dict[str, ItemDeliverer]:
         if name in BIRDRAMON_FLIGHT_RAM_BITS:
             byte_addr, bit_index = BIRDRAMON_FLIGHT_RAM_BITS[name]
             routes[name] = _make_keyitem_bit_deliverer(byte_addr, bit_index)
+            continue
+        # Technique mastery items: bit-OR into the partner save block.
+        # The immediate write is what _make_technique_bit_deliverer
+        # does; partner-rebirth / digivolution survival is enforced by
+        # the per-tick :meth:`_reconcile_technique_bits` loop.
+        tech_slot = technique_slot_for_item(name)
+        if tech_slot is not None:
+            routes[name] = _make_technique_bit_deliverer(tech_slot)
             continue
         if 2000 <= dw_code < 2000 + RAM_ITEM_BANK_SIZE:
             routes[name] = _make_bank_deliverer(dw_code)
@@ -867,6 +909,7 @@ class DigimonWorldClient(BizHawkClient):
             await self._deliver_items(ctx)
             await self._reconcile_recruits(ctx)
             await self._reconcile_keyitem_flags(ctx)
+            await self._reconcile_technique_bits(ctx)
             await self._reconcile_merit_shop_sentinel(ctx)
             if self._recycle_shop_locations:
                 await self._reconcile_recycle_shop_array(ctx)
@@ -1262,6 +1305,69 @@ class DigimonWorldClient(BizHawkClient):
                     new_value |= mask
                 else:
                     new_value &= ~mask & 0xFF
+            if new_value != current:
+                writes.append((byte_addr, [new_value], DOMAIN_MAIN_RAM))
+        if writes:
+            await bizhawk.write(ctx.bizhawk_ctx, writes)
+
+    async def _reconcile_technique_bits(self, ctx: BizHawkClientContext) -> None:
+        """Re-assert technique-mastery bits from AP-delivered items.
+
+        The mastery bitmap (:data:`RAM_TECH_MASTERY_BASE`, 8 bytes
+        spanning slots 0..56) lives in the partner save block and
+        resets on partner death/rebirth (and potentially digivolution).
+        AP delivery in :func:`_make_technique_bit_deliverer` is a
+        one-shot OR-write; this watcher pass forces the same bits
+        every tick so the grants survive partner transitions.
+
+        OR-only — never clears bits. Vanilla learning (training, brain
+        rolls, NPC teach, starter init) flips the same bits via DW1's
+        own paths, and we want those to stick alongside AP grants. A
+        bit that's set in the bitmap but corresponds to a tech AP
+        hasn't delivered is therefore left alone (it's vanilla
+        learning, not stale AP state).
+
+        Cheap: one batched 8-byte read, at most one batched 8-byte
+        write per tick. Skipped when ``technique_rewards`` is off
+        (no entries in :attr:`_received_technique_slots`) so seeds
+        that don't ship tech items pay no overhead beyond a name-table
+        scan.
+        """
+
+        # Derive target slots from items_received each tick — small
+        # cost (<=30 items per seed) and avoids needing a cached set
+        # that has to be invalidated on reconnect.
+        target_slots: set[int] = set()
+        for item in ctx.items_received:
+            item_name = ctx.item_names.lookup_in_game(item.item, ctx.game)
+            slot = technique_slot_for_item(item_name)
+            if slot is not None:
+                target_slots.add(slot)
+        if not target_slots:
+            return
+
+        # Build per-byte OR masks across the 8-byte bitmap.
+        masks_by_byte: dict[int, int] = {}
+        for slot in target_slots:
+            byte_addr, bit_index = tech_mastery_bit(slot)
+            masks_by_byte[byte_addr] = masks_by_byte.get(byte_addr, 0) | (1 << bit_index)
+
+        try:
+            blocks = await bizhawk.read(
+                ctx.bizhawk_ctx,
+                [(addr, 1, DOMAIN_MAIN_RAM) for addr in masks_by_byte],
+            )
+        except bizhawk.RequestFailedError:
+            return
+        if any(len(b) != 1 for b in blocks):
+            return
+
+        writes: list[RamWrite] = []
+        for (byte_addr, mask), block in zip(
+            masks_by_byte.items(), blocks, strict=True,
+        ):
+            current = block[0]
+            new_value = current | mask
             if new_value != current:
                 writes.append((byte_addr, [new_value], DOMAIN_MAIN_RAM))
         if writes:

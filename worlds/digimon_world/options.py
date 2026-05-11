@@ -301,6 +301,36 @@ class RecruitRandomization(DefaultOnToggle):
     display_name = "Recruit Randomization"
 
 
+class TechniqueRewards(Choice):
+    """Whether techniques can be received as AP item rewards.
+
+    * ``vanilla`` — techniques are learned only through DW1's normal
+      paths (training, brain rolls, NPC teach, starter init). No tech
+      items ship in the AP pool.
+    * ``ap_items`` — a random subset of the 56 player-masterable techs
+      is added to the AP pool as ``Tech: <name>`` items (one per chosen
+      tech, classification ``useful``). Receiving one ORs that tech's
+      mastery bit on the partner Digimon's save block, which makes the
+      tech immediately usable in combat (verified live 2026-05-11).
+      Vanilla in-game learning of the same techs still works in
+      parallel; the AP grant just flips the same bit earlier than the
+      player would normally reach it. The client re-asserts every
+      AP-granted bit each watcher tick so the mastery state survives
+      partner death/rebirth and digivolution. (Default.)
+
+    The subset is chosen per-seed via
+    :func:`worlds.digimon_world.items.choose_technique_pool`, which
+    picks ``world.random.randint(20, 30)`` techs uniformly from the
+    56-tech pool. Two seeds with the same flag still ship different
+    techs.
+    """
+
+    display_name = "Technique Rewards"
+    option_vanilla = 0
+    option_ap_items = 1
+    default = option_ap_items
+
+
 class VendingLocations(Toggle):
     """Add the consumable vending machines as AP locations.
 
@@ -583,6 +613,7 @@ class DigimonWorldOptions(PerGameCommonOptions):
     card_locations: CardLocations
     vending_locations: VendingLocations
     recycle_shop_locations: RecycleShopLocations
+    technique_rewards: TechniqueRewards
     god_mode: GodMode
 
 
@@ -591,7 +622,7 @@ option_groups: list[OptionGroup] = [
     OptionGroup(
         "Randomization",
         [
-            ChestRandomization, RecruitRandomization,
+            ChestRandomization, RecruitRandomization, TechniqueRewards,
             GroundItemRandomization, GroundItemFoodOnly,
             GroundItemMatchValue, GroundItemValueCutoff,
             StarterRandomization, StarterAllowFresh,

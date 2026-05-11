@@ -16,7 +16,8 @@ Region inventory (22 regions):
 
     * ``Tropical Jungle`` — gated by the TJ-bridge mode option.
     * ``Overdell`` — Bakemon, plus Grey Lord's Mansion (SkullGreymon
-      via Mansion Key + Frig Key + Steak from Freezeland).
+      via Mansion Key + Frig Key; Steak drops from the Overdell
+      fridge on the vanilla path).
     * ``Ancient Dino Region`` — Tyrannomon.
     * ``Greatlake`` (= Dragon Eye Lake cluster) — fishing region.
     * ``Beetle Land`` — only via Blue Flute / rod path or

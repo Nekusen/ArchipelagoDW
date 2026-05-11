@@ -250,7 +250,7 @@ class TestPhase4LogicVendingOn(DigimonWorldTestBase):
     def test_vending_count(self) -> None:
         from ..data.addresses import VENDING_LOCATION_NAMES
 
-        self.assertEqual(len(VENDING_LOCATION_NAMES), 12)
+        self.assertEqual(len(VENDING_LOCATION_NAMES), 10)
         for name in VENDING_LOCATION_NAMES:
             loc = self.multiworld.get_location(name, self.player)
             self.assertIsNotNone(loc.address, f"{name} should be id-bearing")
@@ -276,7 +276,7 @@ class TestPhase4LogicVendingOn(DigimonWorldTestBase):
 
         expected = {
             "Greatlake": 2, "Tropical Jungle": 2,
-            "Gear Savanna": 4, "Ancient Dino Region": 4,
+            "Gear Savanna": 2, "Ancient Dino Region": 4,
         }
         actual: dict[str, int] = {}
         for region in VENDING_LOCATION_REGIONS.values():

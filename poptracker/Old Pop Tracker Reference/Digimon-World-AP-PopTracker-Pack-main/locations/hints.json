@@ -1,0 +1,1497 @@
+[
+    {
+        "name": "A Hints",
+        "access_rules": ["{}"],
+        "children": [
+            {
+                "name": "Greymon Hint",
+                "sections": [
+                    {
+                        "name": "Defeat Greymon Hint",
+                        "visibility_rules": ["greymon_hint"]
+                    }
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 753,
+                        "y": 664
+                    }
+                ]
+            },
+            {
+                "name": "Airdramon Hint",
+                "sections": [
+                    {
+                        "name": "Defeat Airdramon Hint",
+                        "visibility_rules": ["airdramon_hint"]
+                    }
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 792,
+                        "y": 664
+                    }
+                ]
+            },
+            {
+                "name": "Agumon Hint",
+                "sections": [
+                    {
+                        "name": "Defeat Agumon Hint",
+                        "visibility_rules": ["agumon_hint"]
+                    }
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 695,
+                        "y": 675
+                    }
+                ]
+            },
+            {
+                "name": "Palmon Hint",
+                "sections": [
+                    {
+                        "name": "Defeat Palmon Hint",
+                        "visibility_rules": ["palmon_hint"]
+                    }
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 798,
+                        "y": 787
+                    }
+                ]
+            },
+            {
+                "name": "Kunemon Hint",
+                "sections": [
+                    {
+                        "name": "Defeat Kunemon Hint",
+                        "visibility_rules": ["kunemon_hint"]
+                    }
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 906,
+                        "y": 883
+                    }
+                ]
+            },
+            {
+                "name": "Coelamon Hint",
+                "sections": [
+                    {
+                        "name": "Recruit Coelamon Hint",
+                        "visibility_rules": ["coelamon_hint"]
+                    }
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 999,
+                        "y": 949
+                    }
+                ]
+            },
+            {
+                "name": "Seadramon Hint",
+                "sections": [
+                    {
+                        "name": "Recruit Seadramon Hint",
+                        "visibility_rules": ["seadramon_hint"]
+                    }
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 668,
+                        "y": 979
+                    }
+                ]
+            },
+            {
+                "name": "Ninjamon Hint",
+                "sections": [
+                    {
+                        "name": "Defeat Ninjamon Hint",
+                        "visibility_rules": ["ninjamon_hint"]
+                    }
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 935,
+                        "y": 760
+                    }
+                ]
+            },
+            {
+                "name": "Etemon Hint",
+                "sections": [
+                    {
+                        "name": "Defeat Etemon Hint",
+                        "visibility_rules": ["etemon_hint"]
+                    }
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 857,
+                        "y": 790
+                    }
+                ]
+            },
+            {
+                "name": "Betamon Hint",
+                "sections": [
+                    {
+                        "name": "Recruit Betamon Hint",
+                        "visibility_rules": ["betamon_hint"]
+                    }
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 1113,
+                        "y": 703
+                    }
+                ]
+            },
+            {
+                "name": "Vegiemon Hint",
+                "sections": [
+                    {
+                        "name": "Defeat Vegiemon Hint",
+                        "visibility_rules": ["vegiemon_hint"]
+                    }
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 1200,
+                        "y": 753
+                    }
+                ]
+            },
+            {
+                "name": "Centarumon Hint",
+                "sections": [
+                    {
+                        "name": "Recruit Centarumon Hint",
+                        "visibility_rules": ["centarumon_hint"]
+                    }
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 1272,
+                        "y": 740
+                    }
+                ]
+            },
+            {
+                "name": "Piximon Hint",
+                "sections": [
+                    {
+                        "name": "Defeat Piximon Hint",
+                        "visibility_rules": ["piximon_hint"]
+                    }
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 965,
+                        "y": 711
+                    }
+                ]
+            },
+            {
+                "name": "Tyrannomon Hint",
+                "sections": [
+                    {
+                        "name": "Recruit Tyrannomon Hint",
+                        "visibility_rules": ["tyrannomon_hint"]
+                    }
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 1198,
+                        "y": 657
+                    }
+                ]
+            },
+            {
+                "name": "Nanimon Hint",
+                "sections": [
+                    {
+                        "name": "Recruit Nanimon Hint",
+                        "visibility_rules": ["nanimon_hint"]
+                    }
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 1198,
+                        "y": 557
+                    }
+                ]
+            },
+            {
+                "name": "Bakemon Hint",
+                "sections": [
+                    {
+                        "name": "Recruit Bakemon Hint",
+                        "visibility_rules": ["bakemon_hint"]
+                    }
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 1015,
+                        "y": 511
+                    }
+                ]
+            },
+            {
+                "name": "SkullGreymon Hint",
+                "sections": [
+                    {
+                        "name": "Defeat SkullGreymon Hint",
+                        "visibility_rules": ["skullgreymon_hint"]
+                    }
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 978,
+                        "y": 412
+                    }
+                ]
+            },
+            {
+                "name": "Monochromon Hint",
+                "sections": [
+                    {
+                        "name": "Recruit Monochromon Hint",
+                        "visibility_rules": ["monochromon_hint"]
+                    }
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 1322,
+                        "y": 524
+                    }
+                ]
+            },
+            {
+                "name": "Birdramon Hint",
+                "sections": [
+                    {
+                        "name": "Defeat Birdramon Hint",
+                        "visibility_rules": ["birdramon_hint"]
+                    }
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 1333,
+                        "y": 247
+                    }
+                ]
+            },
+            {
+                "name": "Shellmon Hint",
+                "sections": [
+                    {
+                        "name": "Recruit Shellmon Hint",
+                        "visibility_rules": ["shellmon_hint"]
+                    }
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 1215,
+                        "y": 197
+                    }
+                ]
+            },
+            {
+                "name": "Penguinmon Hint",
+                "sections": [
+                    {
+                        "name": "Recruit Penguinmon Hint",
+                        "visibility_rules": ["penguinmon_hint"]
+                    }
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 983,
+                        "y": 136
+                    }
+                ]
+            },
+            {
+                "name": "Mojyamon Hint",
+                "sections": [
+                    {
+                        "name": "Recruit Mojyamon Hint",
+                        "visibility_rules": ["mojyamon_hint"]
+                    }
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 1124,
+                        "y": 110
+                    }
+                ]
+            },
+            {
+                "name": "Frigimon Hint",
+                "sections": [
+                    {
+                        "name": "Recruit Frigimon Hint",
+                        "visibility_rules": ["frigimon_hint"]
+                    }
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 730,
+                        "y": 121
+                    }
+                ]
+            },
+            {
+                "name": "Garurumon Hint",
+                "sections": [
+                    {
+                        "name": "Defeat Garurumon Hint",
+                        "visibility_rules": ["garurumon_hint"]
+                    }
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 642,
+                        "y": 111
+                    }
+                ]
+            },
+            {
+                "name": "Angemon Hint",
+                "sections": [
+                    {
+                        "name": "Recruit Angemon Hint",
+                        "visibility_rules": ["angemon_hint"]
+                    }
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 860,
+                        "y": 361
+                    }
+                ]
+            },
+            {
+                "name": "Whamon Hint",
+                "sections": [
+                    {
+                        "name": "Recruit Whamon Hint",
+                        "visibility_rules": ["whamon_hint"]
+                    }
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 1026,
+                        "y": 227
+                    }
+                ]
+            },
+            {
+                "name": "Meramon Hint",
+                "sections": [
+                    {
+                        "name": "Defeat Meramon Hint",
+                        "visibility_rules": ["meramon_hint"]
+                    }
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 590,
+                        "y": 770
+                    }
+                ]
+            },
+            {
+                "name": "Drimogemon Hint",
+                "sections": [
+                    {
+                        "name": "Recruit Drimogemon Hint",
+                        "visibility_rules": ["drimogemon_hint"]
+                    }
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 650,
+                        "y": 770
+                    }
+                ]
+            },
+            {
+                "name": "Ogremon Hint",
+                "sections": [
+                    {
+                        "name": "Defeat Ogremon Hint",
+                        "visibility_rules": ["ogremon_hint"]
+                    }
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 530,
+                        "y": 770
+                    }
+                ]
+            },
+            {
+                "name": "Unimon Hint",
+                "sections": [
+                    {
+                        "name": "Recruit Unimon Hint",
+                        "visibility_rules": ["unimon_hint"]
+                    }
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 520,
+                        "y": 670
+                    }
+                ]
+            },
+            {
+                "name": "Mamemon Hint",
+                "sections": [
+                    {
+                        "name": "Defeat Mamemon Hint",
+                        "visibility_rules": ["mamemon_hint"]
+                    }
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 460,
+                        "y": 670
+                    }
+                ]
+            },
+            {
+                "name": "Vademon Hint",
+                "sections": [
+                    {
+                        "name": "Recruit Vademon Hint",
+                        "visibility_rules": ["vademon_hint"]
+                    }
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 580,
+                        "y": 670
+                    }
+                ]
+            },
+            {
+                "name": "Elecmon Hint",
+                "sections": [
+                    {
+                        "name": "Recruit Elecmon Hint",
+                        "visibility_rules": ["elecmon_hint"]
+                    }
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 227,
+                        "y": 594
+                    }
+                ]
+            },
+            {
+                "name": "Patamon Hint",
+                "sections": [
+                    {
+                        "name": "Defeat Patamon Hint",
+                        "visibility_rules": ["patamon_hint"]
+                    }
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 287,
+                        "y": 594
+                    }
+                ]
+            },
+            {
+                "name": "Biyomon Hint",
+                "sections": [
+                    {
+                        "name": "Recruit Biyomon Hint",
+                        "visibility_rules": ["biyomon_hint"]
+                    }
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 287,
+                        "y": 494
+                    }
+                ]
+            },
+            {
+                "name": "Leomon Hint",
+                "sections": [
+                    {
+                        "name": "Recruit Leomon Hint",
+                        "visibility_rules": ["leomon_hint"]
+                    }
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 120,
+                        "y": 700
+                    }
+                ]
+            },
+            {
+                "name": "Sukamon Hint",
+                "sections": [
+                    {
+                        "name": "Recruit Sukamon Hint",
+                        "visibility_rules": ["sukamon_hint"]
+                    }
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 360,
+                        "y": 430
+                    }
+                ]
+            },
+            {
+                "name": "Gabumon Hint",
+                "sections": [
+                    {
+                        "name": "Recruit Gabumon Hint",
+                        "visibility_rules": ["gabumon_hint"]
+                    }
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 440,
+                        "y": 290
+                    }
+                ]
+            },
+            {
+                "name": "Kokatorimon Hint",
+                "sections": [
+                    {
+                        "name": "Recruit Kokatorimon Hint",
+                        "visibility_rules": ["kokatorimon_hint"]
+                    }
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 500,
+                        "y": 290
+                    }
+                ]
+            },
+            {
+                "name": "Monzaemon Hint",
+                "sections": [
+                    {
+                        "name": "Recruit Monzaemon Hint",
+                        "hosted_item": "monzaemon_hosted",
+                        "visibility_rules": ["monzaemon_hint"]
+                    }
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 500,
+                        "y": 170
+                    }
+                ]
+            },
+            {
+                "name": "Andromon Hint",
+                "sections": [
+                    {
+                        "name": "Recruit Andromon Hint",
+                        "visibility_rules": ["andromon_hint"]
+                    }
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 220,
+                        "y": 410
+                    }
+                ]
+            },
+            {
+                "name": "Giromon Hint",
+                "sections": [
+                    {
+                        "name": "Defeat Giromon Hint",
+                        "visibility_rules": ["giromon_hint"]
+                    }
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 280,
+                        "y": 410
+                    }
+                ]
+            },
+            {
+                "name": "MetalMamemon Hint",
+                "sections": [
+                    {
+                        "name": "Defeat MetalMamemon Hint",
+                        "visibility_rules": ["metalmamemon_hint"]
+                    }
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 160,
+                        "y": 410
+                    }
+                ]
+            },
+            {
+                "name": "Numemon Hint",
+                "sections": [
+                    {
+                        "name": "Recruit Numemon Hint",
+                        "visibility_rules": ["numemon_hint"]
+                    }
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 190,
+                        "y": 510
+                    }
+                ]
+            },
+            {
+                "name": "Kabuterimon Hint",
+                "sections": [
+                    {
+                        "name": "Recruit Kabuterimon Hint",
+                        "visibility_rules": ["kabuterimon_hint"]
+                    }
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 350,
+                        "y": 1020
+                    }
+                ]
+            },
+            {
+                "name": "Kuwagamon Hint",
+                "sections": [
+                    {
+                        "name": "Recruit Kuwagamon Hint",
+                        "visibility_rules": ["kuwagamon_hint"]
+                    }
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 410,
+                        "y": 1020
+                    }
+                ]
+            },
+            {
+                "name": "Devimon Hint",
+                "sections": [
+                    {
+                        "name": "Defeat Devimon Hint",
+                        "visibility_rules": ["devimon_hint"]
+                    }
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 570,
+                        "y": 380
+                    }
+                ]
+            },
+            {
+                "name": "MetalGreymon Hint",
+                "sections": [
+                    {
+                        "name": "Defeat MetalGreymon Hint",
+                        "visibility_rules": ["metalgreymon_hint"]
+                    }
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 630,
+                        "y": 380
+                    }
+                ]
+            },
+            {
+                "name": "Megadramon Hint",
+                "sections": [
+                    {
+                        "name": "Defeat Megadramon Hint",
+                        "visibility_rules": ["megadramon_hint"]
+                    }
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 690,
+                        "y": 380
+                    }
+                ]
+            },
+            {
+                "name": "Digitamamon Hint",
+                "sections": [
+                    {
+                        "name": "Defeat Digitamamon Hint",
+                        "visibility_rules": ["digitamamon_hint"]
+                    }
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 750,
+                        "y": 380
+                    }
+                ]
+            },
+            {
+                "name": "Prosperity Point Hints",
+                "sections": [
+                    {
+                        "name": "1 Prosperity (Hint)",
+                        "visibility_rules": ["1_prosperity_hint"]
+                    },
+                    {
+                        "name": "2 Prosperity (Hint)",
+                        "visibility_rules": ["2_prosperity_hint"]
+                    },
+                    {
+                        "name": "3 Prosperity (Hint)",
+                        "visibility_rules": ["3_prosperity_hint"]
+                    },
+                    {
+                        "name": "4 Prosperity (Hint)",
+                        "visibility_rules": ["4_prosperity_hint"]
+                    },
+                    {
+                        "name": "5 Prosperity (Hint)",
+                        "visibility_rules": ["5_prosperity_hint"]
+                    },
+                    {
+                        "name": "6 Prosperity (Hint)",
+                        "visibility_rules": ["6_prosperity_hint"]
+                    },
+                    {
+                        "name": "7 Prosperity (Hint)",
+                        "visibility_rules": ["7_prosperity_hint"]
+                    },
+                    {
+                        "name": "8 Prosperity (Hint)",
+                        "visibility_rules": ["8_prosperity_hint"]
+                    },
+                    {
+                        "name": "9 Prosperity (Hint)",
+                        "visibility_rules": ["9_prosperity_hint"]
+                    },
+                    {
+                        "name": "10 Prosperity (Hint)",
+                        "visibility_rules": ["10_prosperity_hint"]
+                    },
+                    {
+                        "name": "11 Prosperity (Hint)",
+                        "visibility_rules": ["11_prosperity_hint"]
+                    },
+                    {
+                        "name": "12 Prosperity (Hint)",
+                        "visibility_rules": ["12_prosperity_hint"]
+                    },
+                    {
+                        "name": "13 Prosperity (Hint)",
+                        "visibility_rules": ["13_prosperity_hint"]
+                    },
+                    {
+                        "name": "14 Prosperity (Hint)",
+                        "visibility_rules": ["14_prosperity_hint"]
+                    },
+                    {
+                        "name": "15 Prosperity (Hint)",
+                        "visibility_rules": ["15_prosperity_hint"]
+                    },
+                    {
+                        "name": "16 Prosperity (Hint)",
+                        "visibility_rules": ["16_prosperity_hint"]
+                    },
+                    {
+                        "name": "17 Prosperity (Hint)",
+                        "visibility_rules": ["17_prosperity_hint"]
+                    },
+                    {
+                        "name": "18 Prosperity (Hint)",
+                        "visibility_rules": ["18_prosperity_hint"]
+                    },
+                    {
+                        "name": "19 Prosperity (Hint)",
+                        "visibility_rules": ["19_prosperity_hint"]
+                    },
+                    {
+                        "name": "20 Prosperity (Hint)",
+                        "visibility_rules": ["20_prosperity_hint"]
+                    },
+                    {
+                        "name": "21 Prosperity (Hint)",
+                        "visibility_rules": ["21_prosperity_hint"]
+                    },
+                    {
+                        "name": "22 Prosperity (Hint)",
+                        "visibility_rules": ["22_prosperity_hint"]
+                    },
+                    {
+                        "name": "23 Prosperity (Hint)",
+                        "visibility_rules": ["23_prosperity_hint"]
+                    },
+                    {
+                        "name": "24 Prosperity (Hint)",
+                        "visibility_rules": ["24_prosperity_hint"]
+                    },
+                    {
+                        "name": "25 Prosperity (Hint)",
+                        "visibility_rules": ["25_prosperity_hint"]
+                    },
+                    {
+                        "name": "26 Prosperity (Hint)",
+                        "visibility_rules": ["26_prosperity_hint"]
+                    },
+                    {
+                        "name": "27 Prosperity (Hint)",
+                        "visibility_rules": ["27_prosperity_hint"]
+                    },
+                    {
+                        "name": "28 Prosperity (Hint)",
+                        "visibility_rules": ["28_prosperity_hint"]
+                    },
+                    {
+                        "name": "29 Prosperity (Hint)",
+                        "visibility_rules": ["29_prosperity_hint"]
+                    },
+                    {
+                        "name": "30 Prosperity (Hint)",
+                        "visibility_rules": ["30_prosperity_hint"]
+                    },
+                    {
+                        "name": "31 Prosperity (Hint)",
+                        "visibility_rules": ["31_prosperity_hint"]
+                    },
+                    {
+                        "name": "32 Prosperity (Hint)",
+                        "visibility_rules": ["32_prosperity_hint"]
+                    },
+                    {
+                        "name": "33 Prosperity (Hint)",
+                        "visibility_rules": ["33_prosperity_hint"]
+                    },
+                    {
+                        "name": "34 Prosperity (Hint)",
+                        "visibility_rules": ["34_prosperity_hint"]
+                    },
+                    {
+                        "name": "35 Prosperity (Hint)",
+                        "visibility_rules": ["35_prosperity_hint"]
+                    },
+                    {
+                        "name": "36 Prosperity (Hint)",
+                        "visibility_rules": ["36_prosperity_hint"]
+                    },
+                    {
+                        "name": "37 Prosperity (Hint)",
+                        "visibility_rules": ["37_prosperity_hint"]
+                    },
+                    {
+                        "name": "38 Prosperity (Hint)",
+                        "visibility_rules": ["38_prosperity_hint"]
+                    },
+                    {
+                        "name": "39 Prosperity (Hint)",
+                        "visibility_rules": ["39_prosperity_hint"]
+                    },
+                    {
+                        "name": "40 Prosperity (Hint)",
+                        "visibility_rules": ["40_prosperity_hint"]
+                    },
+                    {
+                        "name": "41 Prosperity (Hint)",
+                        "visibility_rules": ["41_prosperity_hint"]
+                    },
+                    {
+                        "name": "42 Prosperity (Hint)",
+                        "visibility_rules": ["42_prosperity_hint"]
+                    },
+                    {
+                        "name": "43 Prosperity (Hint)",
+                        "visibility_rules": ["43_prosperity_hint"]
+                    },
+                    {
+                        "name": "44 Prosperity (Hint)",
+                        "visibility_rules": ["44_prosperity_hint"]
+                    },
+                    {
+                        "name": "45 Prosperity (Hint)",
+                        "visibility_rules": ["45_prosperity_hint"]
+                    },
+                    {
+                        "name": "46 Prosperity (Hint)",
+                        "visibility_rules": ["46_prosperity_hint"]
+                    },
+                    {
+                        "name": "47 Prosperity (Hint)",
+                        "visibility_rules": ["47_prosperity_hint"]
+                    },
+                    {
+                        "name": "48 Prosperity (Hint)",
+                        "visibility_rules": ["48_prosperity_hint"]
+                    },
+                    {
+                        "name": "49 Prosperity (Hint)",
+                        "visibility_rules": ["49_prosperity_hint"]
+                    },
+                    {
+                        "name": "50 Prosperity (Hint)",
+                        "visibility_rules": ["50_prosperity_hint"]
+                    },
+                    {
+                        "name": "51 Prosperity (Hint)",
+                        "visibility_rules": ["51_prosperity_hint"]
+                    },
+                    {
+                        "name": "52 Prosperity (Hint)",
+                        "visibility_rules": ["52_prosperity_hint"]
+                    },
+                    {
+                        "name": "53 Prosperity (Hint)",
+                        "visibility_rules": ["53_prosperity_hint"]
+                    },
+                    {
+                        "name": "54 Prosperity (Hint)",
+                        "visibility_rules": ["54_prosperity_hint"]
+                    },
+                    {
+                        "name": "55 Prosperity (Hint)",
+                        "visibility_rules": ["55_prosperity_hint"]
+                    },
+                    {
+                        "name": "56 Prosperity (Hint)",
+                        "visibility_rules": ["56_prosperity_hint"]
+                    },
+                    {
+                        "name": "57 Prosperity (Hint)",
+                        "visibility_rules": ["57_prosperity_hint"]
+                    },
+                    {
+                        "name": "58 Prosperity (Hint)",
+                        "visibility_rules": ["58_prosperity_hint"]
+                    },
+                    {
+                        "name": "59 Prosperity (Hint)",
+                        "visibility_rules": ["59_prosperity_hint"]
+                    },
+                    {
+                        "name": "60 Prosperity (Hint)",
+                        "visibility_rules": ["60_prosperity_hint"]
+                    },
+                    {
+                        "name": "61 Prosperity (Hint)",
+                        "visibility_rules": ["61_prosperity_hint"]
+                    },
+                    {
+                        "name": "62 Prosperity (Hint)",
+                        "visibility_rules": ["62_prosperity_hint"]
+                    },
+                    {
+                        "name": "63 Prosperity (Hint)",
+                        "visibility_rules": ["63_prosperity_hint"]
+                    },
+                    {
+                        "name": "64 Prosperity (Hint)",
+                        "visibility_rules": ["64_prosperity_hint"]
+                    },
+                    {
+                        "name": "65 Prosperity (Hint)",
+                        "visibility_rules": ["65_prosperity_hint"]
+                    },
+                    {
+                        "name": "66 Prosperity (Hint)",
+                        "visibility_rules": ["66_prosperity_hint"]
+                    },
+                    {
+                        "name": "67 Prosperity (Hint)",
+                        "visibility_rules": ["67_prosperity_hint"]
+                    },
+                    {
+                        "name": "68 Prosperity (Hint)",
+                        "visibility_rules": ["68_prosperity_hint"]
+                    },
+                    {
+                        "name": "69 Prosperity (Hint)",
+                        "visibility_rules": ["69_prosperity_hint"]
+                    },
+                    {
+                        "name": "70 Prosperity (Hint)",
+                        "visibility_rules": ["70_prosperity_hint"]
+                    },
+                    {
+                        "name": "71 Prosperity (Hint)",
+                        "visibility_rules": ["71_prosperity_hint"]
+                    },
+                    {
+                        "name": "72 Prosperity (Hint)",
+                        "visibility_rules": ["72_prosperity_hint"]
+                    },
+                    {
+                        "name": "73 Prosperity (Hint)",
+                        "visibility_rules": ["73_prosperity_hint"]
+                    },
+                    {
+                        "name": "74 Prosperity (Hint)",
+                        "visibility_rules": ["74_prosperity_hint"]
+                    },
+                    {
+                        "name": "75 Prosperity (Hint)",
+                        "visibility_rules": ["75_prosperity_hint"]
+                    },
+                    {
+                        "name": "76 Prosperity (Hint)",
+                        "visibility_rules": ["76_prosperity_hint"]
+                    },
+                    {
+                        "name": "77 Prosperity (Hint)",
+                        "visibility_rules": ["77_prosperity_hint"]
+                    },
+                    {
+                        "name": "78 Prosperity (Hint)",
+                        "visibility_rules": ["78_prosperity_hint"]
+                    },
+                    {
+                        "name": "79 Prosperity (Hint)",
+                        "visibility_rules": ["79_prosperity_hint"]
+                    },
+                    {
+                        "name": "80 Prosperity (Hint)",
+                        "visibility_rules": ["80_prosperity_hint"]
+                    },
+                    {
+                        "name": "81 Prosperity (Hint)",
+                        "visibility_rules": ["81_prosperity_hint"]
+                    },
+                    {
+                        "name": "82 Prosperity (Hint)",
+                        "visibility_rules": ["82_prosperity_hint"]
+                    },
+                    {
+                        "name": "83 Prosperity (Hint)",
+                        "visibility_rules": ["83_prosperity_hint"]
+                    },
+                    {
+                        "name": "84 Prosperity (Hint)",
+                        "visibility_rules": ["84_prosperity_hint"]
+                    },
+                    {
+                        "name": "85 Prosperity (Hint)",
+                        "visibility_rules": ["85_prosperity_hint"]
+                    },
+                    {
+                        "name": "86 Prosperity (Hint)",
+                        "visibility_rules": ["86_prosperity_hint"]
+                    },
+                    {
+                        "name": "87 Prosperity (Hint)",
+                        "visibility_rules": ["87_prosperity_hint"]
+                    },
+                    {
+                        "name": "88 Prosperity (Hint)",
+                        "visibility_rules": ["88_prosperity_hint"]
+                    },
+                    {
+                        "name": "89 Prosperity (Hint)",
+                        "visibility_rules": ["89_prosperity_hint"]
+                    },
+                    {
+                        "name": "90 Prosperity (Hint)",
+                        "visibility_rules": ["90_prosperity_hint"]
+                    },
+                    {
+                        "name": "91 Prosperity (Hint)",
+                        "visibility_rules": ["91_prosperity_hint"]
+                    },
+                    {
+                        "name": "92 Prosperity (Hint)",
+                        "visibility_rules": ["92_prosperity_hint"]
+                    },
+                    {
+                        "name": "93 Prosperity (Hint)",
+                        "visibility_rules": ["93_prosperity_hint"]
+                    },
+                    {
+                        "name": "94 Prosperity (Hint)",
+                        "visibility_rules": ["94_prosperity_hint"]
+                    },
+                    {
+                        "name": "95 Prosperity (Hint)",
+                        "visibility_rules": ["95_prosperity_hint"]
+                    },
+                    {
+                        "name": "96 Prosperity (Hint)",
+                        "visibility_rules": ["96_prosperity_hint"]
+                    },
+                    {
+                        "name": "97 Prosperity (Hint)",
+                        "visibility_rules": ["97_prosperity_hint"]
+                    },
+                    {
+                        "name": "98 Prosperity (Hint)",
+                        "visibility_rules": ["98_prosperity_hint"]
+                    },
+                    {
+                        "name": "99 Prosperity (Hint)",
+                        "visibility_rules": ["99_prosperity_hint"]
+                    },
+                    {
+                        "name": "100 Prosperity (Hint)",
+                        "visibility_rules": ["100_prosperity_hint"]
+                    }
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 130,
+                        "y": 80
+                    }
+                ]
+            },
+            {
+                "name": "Card Location Hints",
+                "sections": [
+                    {
+                        "name": "Player Card (Hint)",
+                        "visibility_rules": ["player_card_hint"]
+                    },
+                    {
+                        "name": "Phoenix Card (Hint)",
+                        "visibility_rules": ["phoenix_card_hint"]
+                    },
+                    {
+                        "name": "H-Kabuterimon Card (Hint)",
+                        "visibility_rules": ["h_kabuterimon_hint"]
+                    },
+                    {
+                        "name": "MegaSeadramon Card (Hint)",
+                        "visibility_rules": ["megaseadramon_card_hint"]
+                    },
+                    {
+                        "name": "ShogunGeckomon Card (Hint)",
+                        "visibility_rules": ["shogungeckomon_card_hint"]
+                    },
+                    {
+                        "name": "Myotismon Card (Hint)",
+                        "visibility_rules": ["myotismon_card_hint"]
+                    },
+                    {
+                        "name": "Metalgreymon Card (Hint)",
+                        "visibility_rules": ["metalgreymon_card_hint"]
+                    },
+                    {
+                        "name": "Mamemon Card (Hint)",
+                        "visibility_rules": ["mamemon_card_hint"]
+                    },
+                    {
+                        "name": "Monzaemon Card (Hint)",
+                        "visibility_rules": ["monzaemon_card_hint"]
+                    },
+                    {
+                        "name": "SkullGreymon Card (Hint)",
+                        "visibility_rules": ["skullgreymon_card_hint"]
+                    },
+                    {
+                        "name": "MetalMamemon Card (Hint)",
+                        "visibility_rules": ["metalmamemon_card_hint"]
+                    },
+                    {
+                        "name": "Vademon Card (Hint)",
+                        "visibility_rules": ["vademon_card_hint"]
+                    },
+                    {
+                        "name": "Andromon Card (Hint)",
+                        "visibility_rules": ["andromon_card_hint"]
+                    },
+                    {
+                        "name": "Giromon Card (Hint)",
+                        "visibility_rules": ["giromon_card_hint"]
+                    },
+                    {
+                        "name": "Etemon Card (Hint)",
+                        "visibility_rules": ["etemon_card_hint"]
+                    },
+                    {
+                        "name": "Megadramon Card (Hint)",
+                        "visibility_rules": ["megadramon_card_hint"]
+                    },
+                    {
+                        "name": "Piximon Card (Hint)",
+                        "visibility_rules": ["piximon_card_hint"]
+                    },
+                    {
+                        "name": "Digitamamon Card (Hint)",
+                        "visibility_rules": ["digitamamon_card_hint"]
+                    },
+                    {
+                        "name": "Geckomon Card (Hint)",
+                        "visibility_rules": ["geckomon_card_hint"]
+                    },
+                    {
+                        "name": "Warumonzaemon Card (Hint)",
+                        "visibility_rules": ["warumonzaemon_card_hint"]
+                    },
+                    {
+                        "name": "Jijimon Card (Hint)",
+                        "visibility_rules": ["jijimon_card_hint"]
+                    },
+                    {
+                        "name": "King of Sukamon Card (Hint)",
+                        "visibility_rules": ["king_of_sukamon_card_hint"]
+                    },
+                    {
+                        "name": "Cherrymon Card (Hint)",
+                        "visibility_rules": ["cherrymon_card_hint"]
+                    },
+                    {
+                        "name": "Guardromon Card (Hint)",
+                        "visibility_rules": ["guardromon_card_hint"]
+                    },
+                    {
+                        "name": "Hagurumon Card (Hint)",
+                        "visibility_rules": ["hagurumon_card_hint"]
+                    },
+                    {
+                        "name": "Brachiomon Card (Hint)",
+                        "visibility_rules": ["brachiomon_card_hint"]
+                    },
+                    {
+                        "name": "Greymon Card (Hint)",
+                        "visibility_rules": ["greymon_card_hint"]
+                    },
+                    {
+                        "name": "Devimon Card (Hint)",
+                        "visibility_rules": ["devimon_card_hint"]
+                    },
+                    {
+                        "name": "Airdramon Card (Hint)",
+                        "visibility_rules": ["airdramon_card_hint"]
+                    },
+                    {
+                        "name": "Tyrannomon Card (Hint)",
+                        "visibility_rules": ["tyrannomon_card_hint"]
+                    },
+                    {
+                        "name": "Meramon Card (Hint)",
+                        "visibility_rules": ["meramon_card_hint"]
+                    },
+                    {
+                        "name": "Seadramon Card (Hint)",
+                        "visibility_rules": ["seadramon_card_hint"]
+                    },
+                    {
+                        "name": "Kabuterimon Card (Hint)",
+                        "visibility_rules": ["kabuterimon_card_hint"]
+                    },
+                    {
+                        "name": "Angemon Card (Hint)",
+                        "visibility_rules": ["angemon_card_hint"]
+                    },
+                    {
+                        "name": "Birdramon Card (Hint)",
+                        "visibility_rules": ["birdramon_card_hint"]
+                    },
+                    {
+                        "name": "Garurumon Card (Hint)",
+                        "visibility_rules": ["garurumon_card_hint"]
+                    },
+                    {
+                        "name": "Frigimon Card (Hint)",
+                        "visibility_rules": ["frigimon_card_hint"]
+                    },
+                    {
+                        "name": "Whamon Card (Hint)",
+                        "visibility_rules": ["whamon_card_hint"]
+                    },
+                    {
+                        "name": "Unimon Card (Hint)",
+                        "visibility_rules": ["unimon_card_hint"]
+                    },
+                    {
+                        "name": "Ogremon Card (Hint)",
+                        "visibility_rules": ["ogremon_card_hint"]
+                    },
+                    {
+                        "name": "Shellmon Card (Hint)",
+                        "visibility_rules": ["shellmon_card_hint"]
+                    },
+                    {
+                        "name": "Centarumon Card (Hint)",
+                        "visibility_rules": ["centarumon_card_hint"]
+                    },
+                    {
+                        "name": "Bakemon Card (Hint)",
+                        "visibility_rules": ["bakemon_card_hint"]
+                    },
+                    {
+                        "name": "Drimogemon Card (Hint)",
+                        "visibility_rules": ["drimogemon_card_hint"]
+                    },
+                    {
+                        "name": "Monochromon Card (Hint)",
+                        "visibility_rules": ["monochromon_card_hint"]
+                    },
+                    {
+                        "name": "Leomon Card (Hint)",
+                        "visibility_rules": ["leomon_card_hint"]
+                    },
+                    {
+                        "name": "Coelamon Card (Hint)",
+                        "visibility_rules": ["coelamon_card_hint"]
+                    },
+                    {
+                        "name": "Kokatorimon Card (Hint)",
+                        "visibility_rules": ["kokatorimon_card_hint"]
+                    },
+                    {
+                        "name": "Kuwagamon Card (Hint)",
+                        "visibility_rules": ["kuwagamon_card_hint"]
+                    },
+                    {
+                        "name": "Mojyamon Card (Hint)",
+                        "visibility_rules": ["mojyamon_card_hint"]
+                    },
+                    {
+                        "name": "Ninjamon Card (Hint)",
+                        "visibility_rules": ["ninjamon_card_hint"]
+                    },
+                    {
+                        "name": "Penguinmon Card (Hint)",
+                        "visibility_rules": ["penguinmon_card_hint"]
+                    },
+                    {
+                        "name": "Otamamon Card (Hint)",
+                        "visibility_rules": ["otamamon_card_hint"]
+                    },
+                    {
+                        "name": "Tentomon Card (Hint)",
+                        "visibility_rules": ["tentomon_card_hint"]
+                    },
+                    {
+                        "name": "Yanmamon Card (Hint)",
+                        "visibility_rules": ["yanmamon_card_hint"]
+                    },
+                    {
+                        "name": "Gotsumon Card (Hint)",
+                        "visibility_rules": ["gotsumon_card_hint"]
+                    },
+                    {
+                        "name": "Darkrizamon Card (Hint)",
+                        "visibility_rules": ["darkrizamon_card_hint"]
+                    },
+                    {
+                        "name": "Demimeramon Card (Hint)",
+                        "visibility_rules": ["demimeramon_card_hint"]
+                    },
+                    {
+                        "name": "ToyAgumon Card (Hint)",
+                        "visibility_rules": ["toyagumon_card_hint"]
+                    },
+                    {
+                        "name": "Tankmon Card (Hint)",
+                        "visibility_rules": ["tankmon_card_hint"]
+                    },
+                    {
+                        "name": "Goburimon Card (Hint)",
+                        "visibility_rules": ["goburimon_card_hint"]
+                    },
+                    {
+                        "name": "Numemon Card (Hint)",
+                        "visibility_rules": ["numemon_card_hint"]
+                    },
+                    {
+                        "name": "Vegiemon Card (Hint)",
+                        "visibility_rules": ["vegiemon_card_hint"]
+                    },
+                    {
+                        "name": "Sukamon Card (Hint)",
+                        "visibility_rules": ["sukamon_card_hint"]
+                    },
+                    {
+                        "name": "Nanimon Card (Hint)",
+                        "visibility_rules": ["nanimon_card_hint"]
+                    },
+                    {
+                        "name": "Machinedramon Card (Hint)",
+                        "visibility_rules": ["machinedramon_card_hint"]
+                    }
+                ],
+                "map_locations": [
+                    {
+                        "map": "file_island",
+                        "x": 230,
+                        "y": 80
+                    }
+                ]
+            }
+        ]
+    }    
+]

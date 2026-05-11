@@ -1,0 +1,452 @@
+﻿[
+  {
+    "name": "Agumon",
+    "type": "toggle",
+    "loop": "true",
+    "img": "images/digimon/agumon-icon.png",
+    "img_mods": "@disabled",
+    "disabled_img_mods": "none",
+    "codes": "agumon_hosted"
+  },    
+  {
+    "name": "Gabumon",
+    "type": "toggle",
+    "loop": "true",
+    "img": "images/digimon/gabumon-icon.png",
+    "img_mods": "@disabled",
+    "disabled_img_mods": "none",
+    "codes": "gabumon_hosted"
+  },
+  {
+    "name": "Patamon",
+    "type": "toggle",
+    "loop": "true",
+    "img": "images/digimon/patamon-icon.png",
+    "img_mods": "@disabled",
+    "disabled_img_mods": "none",
+    "codes": "patamon_hosted"
+  },
+  {
+    "name": "Biyomon",
+    "type": "toggle",
+    "loop": "true",
+    "img": "images/digimon/biyomon-icon.png",
+    "img_mods": "@disabled",
+    "disabled_img_mods": "none",
+    "codes": "biyomon_hosted"
+  },
+  {
+    "name": "Elecmon",
+    "type": "toggle",
+    "loop": "true",
+    "img": "images/digimon/elecmon-icon.png",
+    "img_mods": "@disabled",
+    "disabled_img_mods": "none",
+    "codes": "elecmon_hosted"
+  },
+  {
+    "name": "Kunemon",
+    "type": "toggle",
+    "loop": "true",
+    "img": "images/digimon/kunemon-icon.png",
+    "img_mods": "@disabled",
+    "disabled_img_mods": "none",
+    "codes": "kunemon_hosted"
+  },
+  {
+    "name": "Palmon",
+    "type": "toggle",
+    "loop": "true",
+    "img": "images/digimon/palmon-icon.png",
+    "img_mods": "@disabled",
+    "disabled_img_mods": "none",
+      "codes": "palmon_hosted"
+  },
+  {
+    "name": "Betamon",
+    "type": "toggle",
+    "loop": "true",
+    "img": "images/digimon/betamon-icon.png",
+    "img_mods": "@disabled",
+    "disabled_img_mods": "none",
+    "codes": "betamon_hosted"
+  },
+  {
+    "name": "Penguinmon",
+    "type": "toggle",
+    "loop": "true",
+    "img": "images/digimon/penguinmon-icon.png",
+    "img_mods": "@disabled",
+    "disabled_img_mods": "none",
+    "codes": "penguinmon_hosted"
+  },
+  {
+    "name": "Greymon",
+    "type": "toggle",
+    "loop": "true",
+    "img": "images/digimon/greymon-icon.png",
+    "img_mods": "@disabled",
+    "disabled_img_mods": "none",
+    "codes": "greymon_hosted"
+  },
+  {
+    "name": "Monochromon",
+    "type": "toggle",
+    "loop": "true",
+    "img": "images/digimon/monochromon-icon.png",
+    "img_mods": "@disabled",
+    "disabled_img_mods": "none",
+    "codes": "monochromon_hosted"
+  },
+  {
+    "name": "Ogremon",
+    "type": "toggle",
+    "loop": "true",
+    "img": "images/digimon/ogremon-icon.png",
+    "img_mods": "@disabled",
+    "disabled_img_mods": "none",
+    "codes": "ogremon_hosted"
+  },
+  {
+    "name": "Airdramon",
+    "type": "toggle",
+    "loop": "true",
+    "img": "images/digimon/airdramon-icon.png",
+    "img_mods": "@disabled",
+    "disabled_img_mods": "none",
+    "codes": "airdramon_hosted"
+  },
+  {
+    "name": "Kuwagamon",
+    "type": "toggle",
+    "loop": "true",
+    "img": "images/digimon/kuwagamon-icon.png",
+    "img_mods": "@disabled",
+    "disabled_img_mods": "none",
+    "codes": "kuwagamon_hosted"
+  },
+  {
+    "name": "Whamon",
+    "type": "toggle",
+    "loop": "true",
+    "img": "images/digimon/whamon-icon.png",
+    "img_mods": "@disabled",
+    "disabled_img_mods": "none",
+    "codes": "whamon_hosted"
+  },
+  {
+    "name": "Frigimon",
+    "type": "toggle",
+    "loop": "true",
+    "img": "images/digimon/frigimon-icon.png",
+    "img_mods": "@disabled",
+    "disabled_img_mods": "none",
+    "codes": "frigimon_hosted"
+  },
+  {
+    "name": "Nanimon",
+    "type": "toggle",
+    "loop": "true",
+    "img": "images/digimon/nanimon-icon.png",
+    "img_mods": "@disabled",
+    "disabled_img_mods": "none",
+    "codes": "nanimon_hosted"
+  },
+  {
+    "name": "Meramon",
+    "type": "toggle",
+    "loop": "true",
+    "img": "images/digimon/meramon-icon.png",
+    "img_mods": "@disabled",
+    "disabled_img_mods": "none",
+    "codes": "meramon_hosted"
+  },
+  {
+    "name": "Drimogemon",
+    "type": "toggle",
+    "loop": "true",
+    "img": "images/digimon/drimogemon-icon.png",
+    "img_mods": "@disabled",
+    "disabled_img_mods": "none",
+    "codes": "drimogemon_hosted"
+  },
+  {
+    "name": "Leomon",
+    "type": "toggle",
+    "loop": "true",
+    "img": "images/digimon/leomon-icon.png",
+    "img_mods": "@disabled",
+    "disabled_img_mods": "none",
+    "codes": "leomon_hosted"
+  },
+  {
+    "name": "Kokatorimon",
+    "type": "toggle",
+    "loop": "true",
+    "img": "images/digimon/kokatorimon-icon.png",
+    "img_mods": "@disabled",
+    "disabled_img_mods": "none",
+    "codes": "kokatorimon_hosted"
+  },
+  {
+    "name": "Vegiemon",
+    "type": "toggle",
+    "loop": "true",
+    "img": "images/digimon/vegiemon-icon.png",
+    "img_mods": "@disabled",
+    "disabled_img_mods": "none",
+    "codes": "vegiemon_hosted"
+  },
+  {
+    "name": "Shellmon",
+    "type": "toggle",
+    "loop": "true",
+    "img": "images/digimon/shellmon-icon.png",
+    "img_mods": "@disabled",
+    "disabled_img_mods": "none",
+    "codes": "shellmon_hosted"
+  },
+  {
+    "name": "Mojyamon",
+    "type": "toggle",
+    "loop": "true",
+    "img": "images/digimon/mojyamon-icon.png",
+    "img_mods": "@disabled",
+    "disabled_img_mods": "none",
+    "codes": "mojyamon_hosted"
+  },
+  {
+    "name": "Birdramon",
+    "type": "toggle",
+    "loop": "true",
+    "img": "images/digimon/birdramon-icon.png",
+    "img_mods": "@disabled",
+    "disabled_img_mods": "none",
+    "codes": "birdramon_hosted"
+  },
+  {
+    "name": "Tyrannomon",
+    "type": "toggle",
+    "loop": "true",
+    "img": "images/digimon/tyrannomon-icon.png",
+    "img_mods": "@disabled",
+    "disabled_img_mods": "none",
+    "codes": "tyrannomon_hosted"
+  },
+  {
+    "name": "Angemon",
+    "type": "toggle",
+    "loop": "true",
+    "img": "images/digimon/angemon-icon.png",
+    "img_mods": "@disabled",
+    "disabled_img_mods": "none",
+    "codes": "angemon_hosted"
+  },
+  {
+    "name": "Unimon",
+    "type": "toggle",
+    "loop": "true",
+    "img": "images/digimon/unimon-icon.png",
+    "img_mods": "@disabled",
+    "disabled_img_mods": "none",
+    "codes": "unimon_hosted"
+  },
+  {
+    "name": "Ninjamon",
+    "type": "toggle",
+    "loop": "true",
+    "img": "images/digimon/ninjamon-icon.png",
+    "img_mods": "@disabled",
+    "disabled_img_mods": "none",
+    "codes": "ninjamon_hosted"
+  },
+  {
+    "name": "Coelamon",
+    "type": "toggle",
+    "loop": "true",
+    "img": "images/digimon/coelamon-icon.png",
+    "img_mods": "@disabled",
+    "disabled_img_mods": "none",
+    "codes": "coelamon_hosted"
+  },
+  {
+    "name": "Numemon",
+    "type": "toggle",
+    "loop": "true",
+    "img": "images/digimon/numemon-icon.png",
+    "img_mods": "@disabled",
+    "disabled_img_mods": "none",
+    "codes": "numemon_hosted"
+  },
+  {
+    "name": "Centarumon",
+    "type": "toggle",
+    "loop": "true",
+    "img": "images/digimon/centarumon-icon.png",
+    "img_mods": "@disabled",
+    "disabled_img_mods": "none",
+    "codes": "centarumon_hosted"
+  },
+  {
+    "name": "Devimon",
+    "type": "toggle",
+    "loop": "true",
+    "img": "images/digimon/devimon-icon.png",
+    "img_mods": "@disabled",
+    "disabled_img_mods": "none",
+    "codes": "devimon_hosted"
+  },
+  {
+    "name": "Bakemon",
+    "type": "toggle",
+    "loop": "true",
+    "img": "images/digimon/bakemon-icon.png",
+    "img_mods": "@disabled",
+    "disabled_img_mods": "none",
+    "codes": "bakemon_hosted"
+  },
+  {
+    "name": "Kabuterimon",
+    "type": "toggle",
+    "loop": "true",
+    "img": "images/digimon/kabuterimon-icon.png",
+    "img_mods": "@disabled",
+    "disabled_img_mods": "none",
+    "codes": "kabuterimon_hosted"
+  },
+  {
+    "name": "Seadramon",
+    "type": "toggle",
+    "loop": "true",
+    "img": "images/digimon/seadramon-icon.png",
+    "img_mods": "@disabled",
+    "disabled_img_mods": "none",
+    "codes": "seadramon_hosted"
+  },
+  {
+    "name": "Garurumon",
+    "type": "toggle",
+    "loop": "true",
+    "img": "images/digimon/garurumon-icon.png",
+    "img_mods": "@disabled",
+    "disabled_img_mods": "none",
+    "codes": "garurumon_hosted"
+  },
+  {
+    "name": "Sukamon",
+    "type": "toggle",
+    "loop": "true",
+    "img": "images/digimon/sukamon-icon.png",
+    "img_mods": "@disabled",
+    "disabled_img_mods": "none",
+    "codes": "sukamon_hosted"
+  },
+  {
+    "name": "MetalGreymon",
+    "type": "toggle",
+    "loop": "true",
+    "img": "images/digimon/metalgreymon-icon.png",
+    "img_mods": "@disabled",
+    "disabled_img_mods": "none",
+    "codes": "metalgreymon_hosted"
+  },
+  {
+    "name": "SkullGreymon",
+    "type": "toggle",
+    "loop": "true",
+    "img": "images/digimon/skullgreymon-icon.png",
+    "img_mods": "@disabled",
+    "disabled_img_mods": "none",
+    "codes": "skullgreymon_hosted"
+  },
+  {
+    "name": "Giromon",
+    "type": "toggle",
+    "loop": "true",
+    "img": "images/digimon/giromon-icon.png",
+    "img_mods": "@disabled",
+    "disabled_img_mods": "none",
+    "codes": "giromon_hosted"
+  },
+  {
+    "name": "Mamemon",
+    "type": "toggle",
+    "loop": "true",
+    "img": "images/digimon/mamemon-icon.png",
+    "img_mods": "@disabled",
+    "disabled_img_mods": "none",
+    "codes": "mamemon_hosted"
+  },
+  {
+    "name": "Monzaemon",
+    "type": "toggle",
+    "loop": "true",
+    "img": "images/digimon/monzaemon-icon.png",
+    "img_mods": "@disabled",
+    "disabled_img_mods": "none",
+    "codes": "monzaemon_hosted"
+  },
+  {
+    "name": "Digitamamon",
+    "type": "toggle",
+    "loop": "true",
+    "img": "images/digimon/digitamamon-icon.png",
+    "img_mods": "@disabled",
+    "disabled_img_mods": "none",
+    "codes": "digitamamon_hosted"
+  },
+  {
+    "name": "Andromon",
+    "type": "toggle",
+    "loop": "true",
+    "img": "images/digimon/andromon-icon.png",
+    "img_mods": "@disabled",
+    "disabled_img_mods": "none",
+    "codes": "andromon_hosted"
+  },
+  {
+    "name": "Megadramon",
+    "type": "toggle",
+    "loop": "true",
+    "img": "images/digimon/megadramon-icon.png",
+    "img_mods": "@disabled",
+    "disabled_img_mods": "none",
+    "codes": "megadramon_hosted"
+  },
+  {
+    "name": "Piximon",
+    "type": "toggle",
+    "loop": "true",
+    "img": "images/digimon/piximon-icon.png",
+    "img_mods": "@disabled",
+    "disabled_img_mods": "none",
+    "codes": "piximon_hosted"
+  },
+  {
+    "name": "MetalMamemon",
+    "type": "toggle",
+    "loop": "true",
+    "img": "images/digimon/metalmamemon-icon.png",
+    "img_mods": "@disabled",
+    "disabled_img_mods": "none",
+    "codes": "metalmamemon_hosted"
+  },
+  {
+    "name": "Vademon",
+    "type": "toggle",
+    "loop": "true",
+    "img": "images/digimon/vademon-icon.png",
+    "img_mods": "@disabled",
+    "disabled_img_mods": "none",
+    "codes": "vademon_hosted"
+  },
+  {
+    "name": "Etemon",
+    "type": "toggle",
+    "loop": "true",
+    "img": "images/digimon/etemon-icon.png",
+    "img_mods": "@disabled",
+    "disabled_img_mods": "none",
+    "codes": "etemon_hosted"
+  }
+] 

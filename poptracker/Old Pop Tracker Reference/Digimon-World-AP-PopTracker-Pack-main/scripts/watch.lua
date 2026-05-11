@@ -1,0 +1,60 @@
+HOSTED_ITEMS =
+{
+  "agumon",
+  "betamon",
+  "greymon",
+  "devimon",
+  "airdramon",
+  "tyrannomon",
+  "meramon",
+  "seadramon",
+  "numemon",
+  "metalgreymon",
+  "mamemon",
+  "monzaemon",
+  "gabumon",
+  "elecmon",
+  "kabuterimon",
+  "angemon",
+  "birdramon",
+  "garurumon",
+  "frigimon",
+  "whamon",
+  "vegiemon",
+  "skullgreymon",
+  "metalmamemon",
+  "vademon",
+  "patamon",
+  "kunemon",
+  "unimon",
+  "ogremon",
+  "shellmon",
+  "centarumon",
+  "bakemon",
+  "drimogemon",
+  "sukamon",
+  "andromon",
+  "giromon",
+  "etemon",
+  "biyomon",
+  "palmon",
+  "monochromon",
+  "leomon",
+  "coelamon",
+  "kokatorimon",
+  "kuwagamon",
+  "mojyamon",
+  "nanimon",
+  "megadramon",
+  "piximon",
+  "digitamamon",
+  "penguinmon",
+  "ninjamon"
+}
+
+function initialize_watch_items()
+  for _, code in pairs(HOSTED_ITEMS) do
+    ScriptHost:AddWatchForCode(code, code, toggle_item)
+    ScriptHost:AddWatchForCode(code.."_hosted", code.."_hosted", toggle_hosted_item)
+  end
+end

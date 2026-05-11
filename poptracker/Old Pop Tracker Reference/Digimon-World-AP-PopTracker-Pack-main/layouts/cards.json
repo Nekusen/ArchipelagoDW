@@ -1,0 +1,46 @@
+{
+    "card_grid": {
+        "type": "array",
+        "orientation": "vertical",
+        "margin": "0,0",
+        "content": [
+            {
+                "type": "array",
+                "orientation": "horizontal",
+                "margin": "0,0",
+                "content": [
+					{
+						"title": "Cards",
+						"type": "itemgrid",
+                        "item_size": "60",
+						"item_margin": "0, 14",
+						"h_alignment": "center",
+						"rows": [
+							[
+								"player_card","phoenixmon_card","h_kabuterimon_card","megaseadramon_card","shogungeckomon_card","myotismon_card","metalgreymon_card","mamemon_card","monzaemon_card","skullgreymon_card"
+							],
+							[
+								"metalmamemon_card","vademon_card","andromon_card","giromon_card","etemon_card","megadramon_card","piximon_card","digitamamon_card","geckomon_card","warumonzaemon_card"
+							],
+							[
+								"jijimon_card","king_of_sukamon_card","cherrymon_card","guardromon_card","hagurumon_card","brachiomon_card","greymon_card","devimon_card","airdramon_card","tyrannomon_card"
+							],
+							[
+								"meramon_card","seadramon_card","kabuterimon_card","angemon_card","birdramon_card","garurumon_card","frigimon_card","whamon_card","unimon_card","ogremon_card"
+							],
+							[
+								"shellmon_card","centarumon_card","bakemon_card","drimogemon_card","monochromon_card","leomon_card","coelamon_card","kokatorimon_card","kuwagamon_card","mojyamon_card"
+							],
+							[
+								"ninjamon_card","penguinmon_card","otamamon_card","tentomon_card","yanmamon_card","gotsumon_card","darkrizamon_card","demimeramon_card","toyagumon_card","tankmon_card"
+							],
+							[
+								"goburimon_card","numemon_card","vegiemon_card","sukamon_card","nanimon_card","machinedramon_card"
+							]
+						]
+					}
+				]
+            }
+        ]
+    }
+}

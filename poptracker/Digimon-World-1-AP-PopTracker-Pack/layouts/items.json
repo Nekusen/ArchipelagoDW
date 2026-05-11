@@ -1,0 +1,48 @@
+{
+    "keyitem_grid": {
+        "type": "itemgrid",
+        "item_margin": "4,4",
+        "h_alignment": "left",
+        "rows": [
+            ["mansion_key", "gear", "frig_key", "blue_flute"],
+            ["old_fishrod", "amazing_rod", "rain_plant", "leomonstone"],
+            ["lava_cave_access", "tropical_jungle_bridge", "great_canyon_bridge"]
+        ]
+    },
+    "flight_grid": {
+        "type": "itemgrid",
+        "item_margin": "4,4",
+        "h_alignment": "left",
+        "rows": [
+            ["flight_gear_savanna", "flight_ancient_dino_region", "flight_freezeland", "flight_misty_trees", "flight_beetle_land"]
+        ]
+    },
+    "recruit_grid": {
+        "type": "itemgrid",
+        "item_margin": "4,4",
+        "h_alignment": "left",
+        "rows": [
+            ["recruit_whamon", "recruit_birdramon", "recruit_palmon", "recruit_shellmon", "recruit_centarumon"],
+            ["recruit_vegiemon", "recruit_kunemon", "recruit_etemon", "recruit_angemon", "recruit_ninjamon"],
+            ["recruit_bakemon", "recruit_sukamon", "recruit_leomon", "recruit_andromon", "recruit_kokatorimon"],
+            ["recruit_monzaemon", "recruit_elecmon", "recruit_ogremon"]
+        ]
+    },
+    "progressive_grid": {
+        "type": "itemgrid",
+        "item_margin": "4,4",
+        "h_alignment": "left",
+        "rows": [
+            ["prog_item_shop", "prog_secret_shop", "prog_restaurant"],
+            ["prog_arena", "prog_green_gym", "prog_treasure_hunt"]
+        ]
+    },
+    "prosperity_grid": {
+        "type": "itemgrid",
+        "item_margin": "4,4",
+        "h_alignment": "left",
+        "rows": [
+            ["prosperity_point"]
+        ]
+    }
+}

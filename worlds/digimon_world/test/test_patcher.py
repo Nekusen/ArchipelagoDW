@@ -863,58 +863,6 @@ class TestGearNeuterPatcher(DigimonWorldTestBase):
         )
 
 
-class TestSteakSpawnNeuterPatcher(DigimonWorldTestBase):
-    """Steak spawn neuter: always-on. The 6-byte ``spawnItem 122 48 32``
-    in Script 35 Section_254 (Overdell map's entry boilerplate) gets
-    rewritten as ``jumpTo 150`` + 2 bytes of unreachable filler,
-    bypassing the vanilla Steak spawn. Trigger 348 (set by the fridge
-    cutscene itself) is the AP location signal, untouched by this
-    patch."""
-
-    options: ClassVar[dict[str, Any]] = {}
-
-    def test_neuter_tokens_present(self) -> None:
-        from ..data.addresses import (
-            ROM_STEAK_SPAWN_NEUTER_OFFSETS,
-            ROM_STEAK_SPAWN_NEUTER_VALUE,
-            VENDING_OPCODE_JUMPTO,
-        )
-
-        observed = _capture_tokens(self.world)
-        # 6-byte rewrite at each of the two ROM-copy sites.
-        self.assertEqual(len(ROM_STEAK_SPAWN_NEUTER_OFFSETS), 2)
-        self.assertEqual(len(ROM_STEAK_SPAWN_NEUTER_VALUE), 6)
-        # Sanity: first 4 bytes are jumpTo 150 (= 0x0096 LE).
-        self.assertEqual(
-            ROM_STEAK_SPAWN_NEUTER_VALUE[:4],
-            bytes((VENDING_OPCODE_JUMPTO, 0x00, 0x96, 0x00)),
-        )
-        # Trailing 2 bytes are filler (unreachable because the jumpTo
-        # lands on offset 150 = the next instruction's endSection).
-        self.assertEqual(ROM_STEAK_SPAWN_NEUTER_VALUE[4:], bytes((0x00, 0x00)))
-        for offset in ROM_STEAK_SPAWN_NEUTER_OFFSETS:
-            self.assertIn(
-                (offset, ROM_STEAK_SPAWN_NEUTER_VALUE), observed,
-                f"missing Steak spawn neuter at {offset:#x}",
-            )
-
-    def test_location_bit_matches_trigger_formula(self) -> None:
-        """Sanity: ``STEAK_LOCATION_BIT`` is the canonical RAM bit for
-        trigger 348 derived from
-        ``mem[0x001BDFCD + N/8] |= 1 << (N % 8)``."""
-        from ..data.addresses import (
-            AP_TRIGGER_ARRAY_BASE,
-            STEAK_LOCATION_BIT,
-            STEAK_LOCATION_TRIGGER_ID,
-        )
-
-        n = STEAK_LOCATION_TRIGGER_ID
-        self.assertEqual(
-            STEAK_LOCATION_BIT,
-            (AP_TRIGGER_ARRAY_BASE + n // 8, n % 8),
-        )
-
-
 class TestFrigKeyNeuterPatcher(DigimonWorldTestBase):
     """Frig Key giveItem neuter: always-on. Both ``giveItem 123 1`` calls
     in Script 63 Section_5 (Myotismon Frig-Key dialog) get rewritten

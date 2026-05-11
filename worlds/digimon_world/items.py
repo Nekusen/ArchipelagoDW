@@ -39,7 +39,12 @@ from typing import TYPE_CHECKING, Final, NamedTuple
 
 from BaseClasses import Item, ItemClassification
 
-from .data.addresses import AP_RECRUIT_ITEM_DIGIMON, RECRUIT_RAM_BITS
+from .data.addresses import (
+    AP_RECRUIT_ITEM_DIGIMON,
+    RECRUIT_RAM_BITS,
+    TECH_MASTERY_SLOTS,
+    TECH_NAMES_BY_SLOT,
+)
 
 if TYPE_CHECKING:
     from .world import DigimonWorldWorld
@@ -69,22 +74,21 @@ class ItemEntry(NamedTuple):
 #     Mansion Key  — enter Grey Lord's Mansion
 #     Gear         — Monzaemon / Toy Town questline
 #     Rain Plant   — Vegimon recruit quest
-#     Steak        — Grey Lord's Mansion / SkullGreymon questline
 #     Frig Key     — Grey Lord's Mansion / refrigerator
 #
 # **AS Decoder is NOT a key item.** It exists in DW1 but does nothing
 # in-game and gates nothing — removed from the item pool 2026-05-08.
 #
-# All 9 canonical key items are AP-tracked progression items below.
-# Leomonstone and Steak were added 2026-05-08 to gate Leomon's recruit
-# (Stone Tablet path) and SkullGreymon's recruit (Grey Lord's Mansion /
-# Steak feeding) respectively. See ``rules.py`` for the per-recruit
-# extras.
+# All 8 AP-tracked key items are progression items below. Leomonstone
+# was added 2026-05-08 to gate Leomon's recruit (Stone Tablet path).
+# Steak was originally added on the same date for SkullGreymon's
+# recruit but its randomization was reverted: vanilla DW1 spawns Steak
+# from the Overdell fridge when Frig Key is used, so the Frig Key item
+# alone approximates the SkullGreymon recruit gate.
 #
-# Note: Steak is also a regular consumable available from shops/vending
-# in vanilla DW1, so the ``Has("Steak")`` gate is currently bypassable
-# by buying Steak in-game; same for Leomonstone (vanilla pickup at the
-# Stone Tablet site in Ancestor's Cave). Both bypasses will close when
+# Note: Leomonstone has a vanilla pickup at the Stone Tablet site in
+# Ancestor's Cave, so the ``Has("Leomonstone")`` gate is currently
+# bypassable by reaching that site in-game. The bypass will close when
 # the v2 "key item spawn randomization" lands (PLAN.md Phase 7).
 #
 # DV codes mirror DWAP where the item exists there.
@@ -98,7 +102,6 @@ _KEY_ITEMS: Final[dict[str, ItemEntry]] = {
     "Amazing rod": ItemEntry(2117, ItemClassification.progression | ItemClassification.useful),
     "Rain Plant":  ItemEntry(2121, ItemClassification.progression),
     "Leomonstone": ItemEntry(2118, ItemClassification.progression),
-    "Steak":       ItemEntry(2122, ItemClassification.progression),
     # Virtual access item (no real DW1 inventory entry). Delivered as a
     # trigger-array bit-flip via KEYITEM_DELIVERY_RAM_BITS; the patched
     # boulder script in Drill Tunnel reads that bit. dw_code 5000 is
@@ -539,6 +542,73 @@ assert len(_BIRDRAMON_FLIGHT_ITEMS) == 5, len(_BIRDRAMON_FLIGHT_ITEMS)
 
 
 # =============================================================================
+# Technique mastery items
+# =============================================================================
+#
+# One ``"Tech: <name>"`` item per player-masterable technique (56 entries
+# total; slot 48 is the duplicate DW1 itself skips — see
+# :data:`worlds.digimon_world.data.addresses.TECH_MASTERY_DUPLICATE_SLOT`).
+# dw_code = 7000 + slot, in a previously-free range (1000 recruits, 2000
+# bank, 3000 bits/PP, 4000 flights, 5000 virtual keys, 6000 progressives).
+#
+# All entries are always *defined* in the table so AP IDs stay stable
+# across seeds. Only a per-seed subset of 20-30 actually enters the
+# pool via :func:`choose_technique_pool` — see :func:`create_all_items`.
+#
+# Classification: ``useful``. Mastery is meaningful in combat (the bit
+# adds the tech to the partner's active moveset, verified live
+# 2026-05-11), but no AP-side logic gates on these items — they don't
+# need to be ``progression``.
+
+TECHNIQUE_ITEM_PREFIX: Final = "Tech: "
+TECHNIQUE_ITEM_DW_CODE_BASE: Final = 7000
+
+
+def _technique_item_name(slot: int) -> str:
+    return TECHNIQUE_ITEM_PREFIX + TECH_NAMES_BY_SLOT[slot]
+
+
+_TECHNIQUE_ITEMS: Final[dict[str, ItemEntry]] = {
+    _technique_item_name(slot): ItemEntry(
+        TECHNIQUE_ITEM_DW_CODE_BASE + slot,
+        ItemClassification.useful,
+    )
+    for slot in TECH_MASTERY_SLOTS
+}
+assert len(_TECHNIQUE_ITEMS) == 56, len(_TECHNIQUE_ITEMS)
+
+
+def technique_slot_for_item(item_name: str) -> int | None:
+    """Return the tech slot id for a ``"Tech: <name>"`` item, or ``None``.
+
+    Used by the client's deliverer factory and reconcile loop to map an
+    AP-received item back to the mastery bit it should set.
+    """
+
+    entry = _TECHNIQUE_ITEMS.get(item_name)
+    if entry is None:
+        return None
+    return entry.dw_code - TECHNIQUE_ITEM_DW_CODE_BASE
+
+
+def choose_technique_pool(rng) -> list[str]:
+    """Pick the per-seed subset of technique item names to ship.
+
+    Sized as ``rng.randint(20, 30)`` and sampled uniformly from
+    :data:`_TECHNIQUE_ITEMS` so each seed gets a different mix even
+    with the same ``technique_rewards`` setting. Returns names in
+    ``TECH_MASTERY_SLOTS`` order (ascending slot id) for deterministic
+    iteration; callers that need a shuffled order should shuffle
+    themselves.
+    """
+
+    count = rng.randint(20, 30)
+    chosen_slots = rng.sample(list(TECH_MASTERY_SLOTS), count)
+    chosen_slots.sort()
+    return [_technique_item_name(s) for s in chosen_slots]
+
+
+# =============================================================================
 # Final assembled item table
 # =============================================================================
 
@@ -550,6 +620,7 @@ _ITEM_TABLE: Final[dict[str, ItemEntry]] = {
     **_RECRUIT_ITEMS,
     **_BIRDRAMON_FLIGHT_ITEMS,
     **_PROGRESSIVE_ITEMS,
+    **_TECHNIQUE_ITEMS,
 }
 # Sanity: _BANK_ITEMS subsumes both _DV_ITEMS and _CONSUMABLES + _USEFUL_ITEMS,
 # so the older aliased dicts must be subsets of the assembled table.
@@ -603,6 +674,7 @@ ITEM_NAME_GROUPS: Final[dict[str, set[str]]] = {
     "Bits": set(_BITS),
     "Prosperity": set(_PROSPERITY),
     "Recruits": set(_RECRUIT_ITEMS),
+    "Techniques": set(_TECHNIQUE_ITEMS),
 }
 
 
@@ -821,6 +893,17 @@ def create_all_items(world: DigimonWorldWorld) -> None:
         if len(pool) >= locations_count:
             break
         pool.append(world.create_item(name))
+
+    # Technique items — when ``technique_rewards`` is set to
+    # ``ap_items``, ship one copy of each of the per-seed random subset
+    # picked by :func:`choose_technique_pool` (20-30 names). Like the
+    # generic useful set, treated as best-effort: if the seed is too
+    # small to fit them all, drop trailing entries.
+    if int(world.options.technique_rewards.value) == 1:  # ap_items
+        for name in choose_technique_pool(world.random):
+            if len(pool) >= locations_count:
+                break
+            pool.append(world.create_item(name))
 
     # Fill the rest with the proportional filler distribution.
     remaining = locations_count - len(pool)

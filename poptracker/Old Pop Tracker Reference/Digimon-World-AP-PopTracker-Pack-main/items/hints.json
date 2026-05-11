@@ -1,0 +1,1082 @@
+[
+    {
+        "name": "Greymon Hint",
+        "type": "toggle",
+        "codes": "greymon_hint"
+    },
+    {
+        "name": "Airdramon Hint",
+        "type": "toggle",
+        "codes": "airdramon_hint"
+    },
+    {
+        "name": "Agumon Hint",
+        "type": "toggle",
+        "codes": "agumon_hint"
+    },
+    {
+        "name": "Palmon Hint",
+        "type": "toggle",
+        "codes": "palmon_hint"
+    },
+    {
+        "name": "Kunemon Hint",
+        "type": "toggle",
+        "codes": "kunemon_hint"
+    },
+    {
+        "name": "Coelamon Hint",
+        "type": "toggle",
+        "codes": "coelamon_hint"
+    },
+    {
+        "name": "Seadramon Hint",
+        "type": "toggle",
+        "codes": "seadramon_hint"
+    },
+    {
+        "name": "Ninjamon Hint",
+        "type": "toggle",
+        "codes": "ninjamon_hint"
+    },
+    {
+        "name": "Etemon Hint",
+        "type": "toggle",
+        "codes": "etemon_hint"
+    },
+    {
+        "name": "Betamon Hint",
+        "type": "toggle",
+        "codes": "betamon_hint"
+    },
+    {
+        "name": "Vegiemon Hint",
+        "type": "toggle",
+        "codes": "vegiemon_hint"
+    },
+    {
+        "name": "Centarumon Hint",
+        "type": "toggle",
+        "codes": "centarumon_hint"
+    },
+    {
+        "name": "Piximon Hint",
+        "type": "toggle",
+        "codes": "piximon_hint"
+    },
+    {
+        "name": "Tyrannomon Hint",
+        "type": "toggle",
+        "codes": "tyrannomon_hint"
+    },
+    {
+        "name": "Nanimon Hint",
+        "type": "toggle",
+        "codes": "nanimon_hint"
+    },
+    {
+        "name": "Bakemon Hint",
+        "type": "toggle",
+        "codes": "bakemon_hint"
+    },
+    {
+        "name": "SkullGreymon Hint",
+        "type": "toggle",
+        "codes": "skullgreymon_hint"
+    },
+    {
+        "name": "Monochromon Hint",
+        "type": "toggle",
+        "codes": "monochromon_hint"
+    },
+    {
+        "name": "Birdramon Hint",
+        "type": "toggle",
+        "codes": "birdramon_hint"
+    },
+    {
+        "name": "Shellmon Hint",
+        "type": "toggle",
+        "codes": "shellmon_hint"
+    },
+    {
+        "name": "Penguinmon Hint",
+        "type": "toggle",
+        "codes": "penguinmon_hint"
+    },
+    {
+        "name": "Mojyamon Hint",
+        "type": "toggle",
+        "codes": "mojyamon_hint"
+    },
+    {
+        "name": "Frigimon Hint",
+        "type": "toggle",
+        "codes": "frigimon_hint"
+    },
+    {
+        "name": "Garurumon Hint",
+        "type": "toggle",
+        "codes": "garurumon_hint"
+    },
+    {
+        "name": "Angemon Hint",
+        "type": "toggle",
+        "codes": "angemon_hint"
+    },
+    {
+        "name": "Whamon Hint",
+        "type": "toggle",
+        "codes": "whamon_hint"
+    },
+    {
+        "name": "Meramon Hint",
+        "type": "toggle",
+        "codes": "meramon_hint"
+    },
+    {
+        "name": "Drimogemon Hint",
+        "type": "toggle",
+        "codes": "drimogemon_hint"
+    },
+    {
+        "name": "Ogremon Hint",
+        "type": "toggle",
+        "codes": "ogremon_hint"
+    },
+    {
+        "name": "Unimon Hint",
+        "type": "toggle",
+        "codes": "unimon_hint"
+    },
+    {
+        "name": "Mamemon Hint",
+        "type": "toggle",
+        "codes": "mamemon_hint"
+    },
+    {
+        "name": "Vademon Hint",
+        "type": "toggle",
+        "codes": "vademon_hint"
+    },
+    {
+        "name": "Elecmon Hint",
+        "type": "toggle",
+        "codes": "elecmon_hint"
+    },
+    {
+        "name": "Patamon Hint",
+        "type": "toggle",
+        "codes": "patamon_hint"
+    },
+    {
+        "name": "Biyomon Hint",
+        "type": "toggle",
+        "codes": "biyomon_hint"
+    },
+    {
+        "name": "Leomon Hint",
+        "type": "toggle",
+        "codes": "leomon_hint"
+    },
+    {
+        "name": "Sukamon Hint",
+        "type": "toggle",
+        "codes": "sukamon_hint"
+    },
+    {
+        "name": "Gabumon Hint",
+        "type": "toggle",
+        "codes": "gabumon_hint"
+    },
+    {
+        "name": "Kokatorimon Hint",
+        "type": "toggle",
+        "codes": "kokatorimon_hint"
+    },
+    {
+        "name": "Monzaemon Hint",
+        "type": "toggle",
+        "codes": "monzaemon_hint"
+    },
+    {
+        "name": "Andromon Hint",
+        "type": "toggle",
+        "codes": "andromon_hint"
+    },
+    {
+        "name": "Giromon Hint",
+        "type": "toggle",
+        "codes": "giromon_hint"
+    },
+    {
+        "name": "MetalMamemon Hint",
+        "type": "toggle",
+        "codes": "metalmamemon_hint"
+    },
+    {
+        "name": "Numemon Hint",
+        "type": "toggle",
+        "codes": "numemon_hint"
+    },
+    {
+        "name": "Kabuterimon Hint",
+        "type": "toggle",
+        "codes": "kabuterimon_hint"
+    },
+    {
+        "name": "Kuwagamon Hint",
+        "type": "toggle",
+        "codes": "kuwagamon_hint"
+    },
+    {
+        "name": "Devimon Hint",
+        "type": "toggle",
+        "codes": "devimon_hint"
+    },
+    {
+        "name": "MetalGreymon Hint",
+        "type": "toggle",
+        "codes": "metalgreymon_hint"
+    },
+    {
+        "name": "Megadramon Hint",
+        "type": "toggle",
+        "codes": "megadramon_hint"
+    },
+    {
+        "name": "Digitamamon Hint",
+        "type": "toggle",
+        "codes": "digitamamon_hint"
+    },
+    {
+        "name": "1 Prosperity Hint",
+        "type": "toggle",
+        "codes": "1_prosperity_hint"
+    },
+    {
+        "name": "2 Prosperity Hint",
+        "type": "toggle",
+        "codes": "2_prosperity_hint"
+    },
+    {
+        "name": "3 Prosperity Hint",
+        "type": "toggle",
+        "codes": "3_prosperity_hint"
+    },
+    {
+        "name": "4 Prosperity Hint",
+        "type": "toggle",
+        "codes": "4_prosperity_hint"
+    },
+    {
+        "name": "5 Prosperity Hint",
+        "type": "toggle",
+        "codes": "5_prosperity_hint"
+    },
+    {
+        "name": "6 Prosperity Hint",
+        "type": "toggle",
+        "codes": "6_prosperity_hint"
+    },
+    {
+        "name": "7 Prosperity Hint",
+        "type": "toggle",
+        "codes": "7_prosperity_hint"
+    },
+    {
+        "name": "8 Prosperity Hint",
+        "type": "toggle",
+        "codes": "8_prosperity_hint"
+    },
+    {
+        "name": "9 Prosperity Hint",
+        "type": "toggle",
+        "codes": "9_prosperity_hint"
+    },
+    {
+        "name": "10 Prosperity Hint",
+        "type": "toggle",
+        "codes": "10_prosperity_hint"
+    },
+    {
+        "name": "11 Prosperity Hint",
+        "type": "toggle",
+        "codes": "11_prosperity_hint"
+    },
+    {
+        "name": "12 Prosperity Hint",
+        "type": "toggle",
+        "codes": "12_prosperity_hint"
+    },
+    {
+        "name": "13 Prosperity Hint",
+        "type": "toggle",
+        "codes": "13_prosperity_hint"
+    },
+    {
+        "name": "14 Prosperity Hint",
+        "type": "toggle",
+        "codes": "14_prosperity_hint"
+    },
+    {
+        "name": "15 Prosperity Hint",
+        "type": "toggle",
+        "codes": "15_prosperity_hint"
+    },
+    {
+        "name": "16 Prosperity Hint",
+        "type": "toggle",
+        "codes": "16_prosperity_hint"
+    },
+    {
+        "name": "17 Prosperity Hint",
+        "type": "toggle",
+        "codes": "17_prosperity_hint"
+    },
+    {
+        "name": "18 Prosperity Hint",
+        "type": "toggle",
+        "codes": "18_prosperity_hint"
+    },
+    {
+        "name": "19 Prosperity Hint",
+        "type": "toggle",
+        "codes": "19_prosperity_hint"
+    },
+    {
+        "name": "20 Prosperity Hint",
+        "type": "toggle",
+        "codes": "20_prosperity_hint"
+    },
+    {
+        "name": "21 Prosperity Hint",
+        "type": "toggle",
+        "codes": "21_prosperity_hint"
+    },
+    {
+        "name": "22 Prosperity Hint",
+        "type": "toggle",
+        "codes": "22_prosperity_hint"
+    },
+    {
+        "name": "23 Prosperity Hint",
+        "type": "toggle",
+        "codes": "23_prosperity_hint"
+    },
+    {
+        "name": "24 Prosperity Hint",
+        "type": "toggle",
+        "codes": "24_prosperity_hint"
+    },
+    {
+        "name": "25 Prosperity Hint",
+        "type": "toggle",
+        "codes": "25_prosperity_hint"
+    },
+    {
+        "name": "26 Prosperity Hint",
+        "type": "toggle",
+        "codes": "26_prosperity_hint"
+    },
+    {
+        "name": "27 Prosperity Hint",
+        "type": "toggle",
+        "codes": "27_prosperity_hint"
+    },
+    {
+        "name": "28 Prosperity Hint",
+        "type": "toggle",
+        "codes": "28_prosperity_hint"
+    },
+    {
+        "name": "29 Prosperity Hint",
+        "type": "toggle",
+        "codes": "29_prosperity_hint"
+    },
+    {
+        "name": "30 Prosperity Hint",
+        "type": "toggle",
+        "codes": "30_prosperity_hint"
+    },
+    {
+        "name": "31 Prosperity Hint",
+        "type": "toggle",
+        "codes": "31_prosperity_hint"
+    },
+    {
+        "name": "32 Prosperity Hint",
+        "type": "toggle",
+        "codes": "32_prosperity_hint"
+    },
+    {
+        "name": "33 Prosperity Hint",
+        "type": "toggle",
+        "codes": "33_prosperity_hint"
+    },
+    {
+        "name": "34 Prosperity Hint",
+        "type": "toggle",
+        "codes": "34_prosperity_hint"
+    },
+    {
+        "name": "35 Prosperity Hint",
+        "type": "toggle",
+        "codes": "35_prosperity_hint"
+    },
+    {
+        "name": "36 Prosperity Hint",
+        "type": "toggle",
+        "codes": "36_prosperity_hint"
+    },
+    {
+        "name": "37 Prosperity Hint",
+        "type": "toggle",
+        "codes": "37_prosperity_hint"
+    },
+    {
+        "name": "38 Prosperity Hint",
+        "type": "toggle",
+        "codes": "38_prosperity_hint"
+    },
+    {
+        "name": "39 Prosperity Hint",
+        "type": "toggle",
+        "codes": "39_prosperity_hint"
+    },
+    {
+        "name": "40 Prosperity Hint",
+        "type": "toggle",
+        "codes": "40_prosperity_hint"
+    },
+    {
+        "name": "41 Prosperity Hint",
+        "type": "toggle",
+        "codes": "41_prosperity_hint"
+    },
+    {
+        "name": "42 Prosperity Hint",
+        "type": "toggle",
+        "codes": "42_prosperity_hint"
+    },
+    {
+        "name": "43 Prosperity Hint",
+        "type": "toggle",
+        "codes": "43_prosperity_hint"
+    },
+    {
+        "name": "44 Prosperity Hint",
+        "type": "toggle",
+        "codes": "44_prosperity_hint"
+    },
+    {
+        "name": "45 Prosperity Hint",
+        "type": "toggle",
+        "codes": "45_prosperity_hint"
+    },
+    {
+        "name": "46 Prosperity Hint",
+        "type": "toggle",
+        "codes": "46_prosperity_hint"
+    },
+    {
+        "name": "47 Prosperity Hint",
+        "type": "toggle",
+        "codes": "47_prosperity_hint"
+    },
+    {
+        "name": "48 Prosperity Hint",
+        "type": "toggle",
+        "codes": "48_prosperity_hint"
+    },
+    {
+        "name": "49 Prosperity Hint",
+        "type": "toggle",
+        "codes": "49_prosperity_hint"
+    },
+    {
+        "name": "50 Prosperity Hint",
+        "type": "toggle",
+        "codes": "50_prosperity_hint"
+    },
+    {
+        "name": "51 Prosperity Hint",
+        "type": "toggle",
+        "codes": "51_prosperity_hint"
+    },
+    {
+        "name": "52 Prosperity Hint",
+        "type": "toggle",
+        "codes": "52_prosperity_hint"
+    },
+    {
+        "name": "53 Prosperity Hint",
+        "type": "toggle",
+        "codes": "53_prosperity_hint"
+    },
+    {
+        "name": "54 Prosperity Hint",
+        "type": "toggle",
+        "codes": "54_prosperity_hint"
+    },
+    {
+        "name": "55 Prosperity Hint",
+        "type": "toggle",
+        "codes": "55_prosperity_hint"
+    },
+    {
+        "name": "56 Prosperity Hint",
+        "type": "toggle",
+        "codes": "56_prosperity_hint"
+    },
+    {
+        "name": "57 Prosperity Hint",
+        "type": "toggle",
+        "codes": "57_prosperity_hint"
+    },
+    {
+        "name": "58 Prosperity Hint",
+        "type": "toggle",
+        "codes": "58_prosperity_hint"
+    },
+    {
+        "name": "59 Prosperity Hint",
+        "type": "toggle",
+        "codes": "59_prosperity_hint"
+    },
+    {
+        "name": "60 Prosperity Hint",
+        "type": "toggle",
+        "codes": "60_prosperity_hint"
+    },
+    {
+        "name": "61 Prosperity Hint",
+        "type": "toggle",
+        "codes": "61_prosperity_hint"
+    },
+    {
+        "name": "62 Prosperity Hint",
+        "type": "toggle",
+        "codes": "62_prosperity_hint"
+    },
+    {
+        "name": "63 Prosperity Hint",
+        "type": "toggle",
+        "codes": "63_prosperity_hint"
+    },
+    {
+        "name": "64 Prosperity Hint",
+        "type": "toggle",
+        "codes": "64_prosperity_hint"
+    },
+    {
+        "name": "65 Prosperity Hint",
+        "type": "toggle",
+        "codes": "65_prosperity_hint"
+    },
+    {
+        "name": "66 Prosperity Hint",
+        "type": "toggle",
+        "codes": "66_prosperity_hint"
+    },
+    {
+        "name": "67 Prosperity Hint",
+        "type": "toggle",
+        "codes": "67_prosperity_hint"
+    },
+    {
+        "name": "68 Prosperity Hint",
+        "type": "toggle",
+        "codes": "68_prosperity_hint"
+    },
+    {
+        "name": "69 Prosperity Hint",
+        "type": "toggle",
+        "codes": "69_prosperity_hint"
+    },
+    {
+        "name": "70 Prosperity Hint",
+        "type": "toggle",
+        "codes": "70_prosperity_hint"
+    },
+    {
+        "name": "71 Prosperity Hint",
+        "type": "toggle",
+        "codes": "71_prosperity_hint"
+    },
+    {
+        "name": "72 Prosperity Hint",
+        "type": "toggle",
+        "codes": "72_prosperity_hint"
+    },
+    {
+        "name": "73 Prosperity Hint",
+        "type": "toggle",
+        "codes": "73_prosperity_hint"
+    },
+    {
+        "name": "74 Prosperity Hint",
+        "type": "toggle",
+        "codes": "74_prosperity_hint"
+    },
+    {
+        "name": "75 Prosperity Hint",
+        "type": "toggle",
+        "codes": "75_prosperity_hint"
+    },
+    {
+        "name": "76 Prosperity Hint",
+        "type": "toggle",
+        "codes": "76_prosperity_hint"
+    },
+    {
+        "name": "77 Prosperity Hint",
+        "type": "toggle",
+        "codes": "77_prosperity_hint"
+    },
+    {
+        "name": "78 Prosperity Hint",
+        "type": "toggle",
+        "codes": "78_prosperity_hint"
+    },
+    {
+        "name": "79 Prosperity Hint",
+        "type": "toggle",
+        "codes": "79_prosperity_hint"
+    },
+    {
+        "name": "80 Prosperity Hint",
+        "type": "toggle",
+        "codes": "80_prosperity_hint"
+    },
+    {
+        "name": "81 Prosperity Hint",
+        "type": "toggle",
+        "codes": "81_prosperity_hint"
+    },
+    {
+        "name": "82 Prosperity Hint",
+        "type": "toggle",
+        "codes": "82_prosperity_hint"
+    },
+    {
+        "name": "83 Prosperity Hint",
+        "type": "toggle",
+        "codes": "83_prosperity_hint"
+    },
+    {
+        "name": "84 Prosperity Hint",
+        "type": "toggle",
+        "codes": "84_prosperity_hint"
+    },
+    {
+        "name": "85 Prosperity Hint",
+        "type": "toggle",
+        "codes": "85_prosperity_hint"
+    },
+    {
+        "name": "86 Prosperity Hint",
+        "type": "toggle",
+        "codes": "86_prosperity_hint"
+    },
+    {
+        "name": "87 Prosperity Hint",
+        "type": "toggle",
+        "codes": "87_prosperity_hint"
+    },
+    {
+        "name": "88 Prosperity Hint",
+        "type": "toggle",
+        "codes": "88_prosperity_hint"
+    },
+    {
+        "name": "89 Prosperity Hint",
+        "type": "toggle",
+        "codes": "89_prosperity_hint"
+    },
+    {
+        "name": "90 Prosperity Hint",
+        "type": "toggle",
+        "codes": "90_prosperity_hint"
+    },    
+    {
+        "name": "91 Prosperity Hint",
+        "type": "toggle",
+        "codes": "91_prosperity_hint"
+    },
+    {
+        "name": "92 Prosperity Hint",
+        "type": "toggle",
+        "codes": "92_prosperity_hint"
+    },
+    {
+        "name": "93 Prosperity Hint",
+        "type": "toggle",
+        "codes": "93_prosperity_hint"
+    },
+    {
+        "name": "94 Prosperity Hint",
+        "type": "toggle",
+        "codes": "94_prosperity_hint"
+    },
+    {
+        "name": "95 Prosperity Hint",
+        "type": "toggle",
+        "codes": "95_prosperity_hint"
+    },
+    {
+        "name": "96 Prosperity Hint",
+        "type": "toggle",
+        "codes": "96_prosperity_hint"
+    },
+    {
+        "name": "97 Prosperity Hint",
+        "type": "toggle",
+        "codes": "97_prosperity_hint"
+    },
+    {
+        "name": "98 Prosperity Hint",
+        "type": "toggle",
+        "codes": "98_prosperity_hint"
+    },
+    {
+        "name": "99 Prosperity Hint",
+        "type": "toggle",
+        "codes": "99_prosperity_hint"
+    },
+    {
+        "name": "100 Prosperity Hint",
+        "type": "toggle",
+        "codes": "100_prosperity_hint"
+    },
+    {
+        "name": "Player Card Hint",
+        "type": "toggle",
+        "codes": "player_card_hint"
+    },
+    {
+        "name": "Phoenixmon Card Hint",
+        "type": "toggle",
+        "codes": "phoenixmon_card_hint"
+    },
+    {
+        "name": "H-Kabuterimon Card Hint",
+        "type": "toggle",
+        "codes": "h_kabuterimon_card_hint"
+    },
+    {
+        "name": "Megaseadramon Card Hint",
+        "type": "toggle",
+        "codes": "megaseadramon_card_hint"
+    },
+    {
+        "name": "ShogunGeckomon Card Hint",
+        "type": "toggle",
+        "codes": "shogungeckomon_card_hint"
+    },
+    {
+        "name": "Myotismon Card Hint",
+        "type": "toggle",
+        "codes": "myotismon_card_hint"
+    },
+    {
+        "name": "MetalGreymon Card Hint",
+        "type": "toggle",
+        "codes": "metalgreymon_card_hint"
+    },
+    {
+        "name": "Mamemon Card Hint",
+        "type": "toggle",
+        "codes": "mamemon_card_hint"
+    },
+    {
+        "name": "Monzaemon Card Hint",
+        "type": "toggle",
+        "codes": "monzaemon_card_hint"
+    },
+    {
+        "name": "SkullGreymon Card Hint",
+        "type": "toggle",
+        "codes": "skullgreymon_card_hint"
+    },
+    {
+        "name": "MetalMamemon Card Hint",
+        "type": "toggle",
+        "codes": "metalmamemon_card_hint"
+    },
+    {
+        "name": "Vademon Card Hint",
+        "type": "toggle",
+        "codes": "vademon_card_hint"
+    },
+    {
+        "name": "Andromon Card Hint",
+        "type": "toggle",
+        "codes": "andromon_card_hint"
+    },
+    {
+        "name": "Giromon Card Hint",
+        "type": "toggle",
+        "codes": "giromon_card_hint"
+    },
+    {
+        "name": "Etemon Card Hint",
+        "type": "toggle",
+        "codes": "etemon_card_hint"
+    },
+    {
+        "name": "Megadramon Card Hint",
+        "type": "toggle",
+        "codes": "megadramon_card_hint"
+    },
+    {
+        "name": "Piximon Card Hint",
+        "type": "toggle",
+        "codes": "piximon_card_hint"
+    },
+    {
+        "name": "Digitamamon Card Hint",
+        "type": "toggle",
+        "codes": "digitamamon_card_hint"
+    },
+    {
+        "name": "Geckomon Card Hint",
+        "type": "toggle",
+        "codes": "geckomon_card_hint"
+    },
+    {
+        "name": "WaruMonzaemon Card Hint",
+        "type": "toggle",
+        "codes": "warumonzaemon_card_hint"
+    },
+    {
+        "name": "Jijimon Card Hint",
+        "type": "toggle",
+        "codes": "jijimon_card_hint"
+    },
+    {
+        "name": "King of Sukamon Card Hint",
+        "type": "toggle",
+        "codes": "king_of_sukamon_card_hint"
+    },
+    {
+        "name": "Cherrymon Card Hint",
+        "type": "toggle",
+        "codes": "cherrymon_card_hint"
+    },
+    {
+        "name": "Guardromon Card Hint",
+        "type": "toggle",
+        "codes": "guardromon_card_hint"
+    },
+    {
+        "name": "Hagurumon Card Hint",
+        "type": "toggle",
+        "codes": "hagurumon_card_hint"
+    },
+    {
+        "name": "Brachiomon Card Hint",
+        "type": "toggle",
+        "codes": "brachiomon_card_hint"
+    },
+    {
+        "name": "Greymon Card Hint",
+        "type": "toggle",
+        "codes": "greymon_card_hint"
+    },
+    {
+        "name": "Devimon Card Hint",
+        "type": "toggle",
+        "codes": "devimon_card_hint"
+    },
+    {
+        "name": "Airdramon Card Hint",
+        "type": "toggle",
+        "codes": "airdramon_card_hint"
+    },
+    {
+        "name": "Tyrannomon Card Hint",
+        "type": "toggle",
+        "codes": "tyrannomon_card_hint"
+    },
+    {
+        "name": "Meramon Card Hint",
+        "type": "toggle",
+        "codes": "meramon_card_hint"
+    },
+    {
+        "name": "Seadramon Card Hint",
+        "type": "toggle",
+        "codes": "seadramon_card_hint"
+    },
+    {
+        "name": "Kabuterimon Card Hint",
+        "type": "toggle",
+        "codes": "kabuterimon_card_hint"
+    },
+    {
+        "name": "Angemon Card Hint",
+        "type": "toggle",
+        "codes": "angemon_card_hint"
+    },
+    {
+        "name": "Birdramon Card Hint",
+        "type": "toggle",
+        "codes": "birdramon_card_hint"
+    },
+    {
+        "name": "Garurumon Card Hint",
+        "type": "toggle",
+        "codes": "garurumon_card_hint"
+    },
+    {
+        "name": "Frigimon Card Hint",
+        "type": "toggle",
+        "codes": "frigimon_card_hint"
+    },
+    {
+        "name": "Whamon Card Hint",
+        "type": "toggle",
+        "codes": "whamon_card_hint"
+    },
+    {
+        "name": "Unimon Card Hint",
+        "type": "toggle",
+        "codes": "unimon_card_hint"
+    },
+    {
+        "name": "Ogremon Card Hint",
+        "type": "toggle",
+        "codes": "ogremon_card_hint"
+    },
+    {
+        "name": "Shellmon Card Hint",
+        "type": "toggle",
+        "codes": "shellmon_card_hint"
+    },
+    {
+        "name": "Centarumon Card Hint",
+        "type": "toggle",
+        "codes": "centarumon_card_hint"
+    },
+    {
+        "name": "Bakemon Card Hint",
+        "type": "toggle",
+        "codes": "bakemon_card_hint"
+    },
+    {
+        "name": "Drimogemon Card Hint",
+        "type": "toggle",
+        "codes": "drimogemon_card_hint"
+    },
+    {
+        "name": "Monochromon Card Hint",
+        "type": "toggle",
+        "codes": "monochromon_card_hint"
+    },
+    {
+        "name": "Leomon Card Hint",
+        "type": "toggle",
+        "codes": "leomon_card_hint"
+    },
+    {
+        "name": "Coelamon Card Hint",
+        "type": "toggle",
+        "codes": "coelamon_card_hint"
+    },
+    {
+        "name": "Kokatorimon Card Hint",
+        "type": "toggle",
+        "codes": "kokatorimon_card_hint"
+    },
+    {
+        "name": "Kuwagamon Card Hint",
+        "type": "toggle",
+        "codes": "kuwagamon_card_hint"
+    },
+    {
+        "name": "Mojyamon Card Hint",
+        "type": "toggle",
+        "codes": "mojyamon_card_hint"
+    },
+    {
+        "name": "Ninjamon Card Hint",
+        "type": "toggle",
+        "codes": "ninjamon_card_hint"
+    },
+    {
+        "name": "Penguinmon Card Hint",
+        "type": "toggle",
+        "codes": "penguinmon_card_hint"
+    },
+    {
+        "name": "Otamamon Card Hint",
+        "type": "toggle",
+        "codes": "otamamon_card_hint"
+    },
+    {
+        "name": "Tentomon Card Hint",
+        "type": "toggle",
+        "codes": "tentomon_card_hint"
+    },
+    {
+        "name": "Yanmamon Card Hint",
+        "type": "toggle",
+        "codes": "yanmamon_card_hint"
+    },
+    {
+        "name": "Gotsumon Card Hint",
+        "type": "toggle",
+        "codes": "gotsumon_card_hint"
+    },
+    {
+        "name": "Darkrizamon Card Hint",
+        "type": "toggle",
+        "codes": "darkrizamon_card_hint"
+    },
+    {
+        "name": "Demimeramon Card Hint",
+        "type": "toggle",
+        "codes": "demimeramon_card_hint"
+    },
+    {
+        "name": "Toyagumon Card Hint",
+        "type": "toggle",
+        "codes": "toyagumon_card_hint"
+    },
+    {
+        "name": "Tankmon Card Hint",
+        "type": "toggle",
+        "codes": "tankmon_card_hint"
+    },
+    {
+        "name": "Goburimon Card Hint",
+        "type": "toggle",
+        "codes": "goburimon_card_hint"
+    },
+    {
+        "name": "Numemon Card Hint",
+        "type": "toggle",
+        "codes": "numemon_card_hint"
+    },
+    {
+        "name": "Vegiemon Card Hint",
+        "type": "toggle",
+        "codes": "vegiemon_card_hint"
+    },
+    {
+        "name": "Sukamon Card Hint",
+        "type": "toggle",
+        "codes": "sukamon_card_hint"
+    },
+    {
+        "name": "Nanimon Card Hint",
+        "type": "toggle",
+        "codes": "nanimon_card_hint"
+    },
+    {
+        "name": "Machinedramon Card Hint",
+        "type": "toggle",
+        "codes": "machinedramon_card_hint"
+    }
+]
