@@ -11,6 +11,131 @@ the same.
 
 ---
 
+## STATUS — recycle shop implementation (2026-05-11) ✅ shipped, see also corrections
+
+The recycle shop is **functional and shipped** behind the
+`recycle_shop_locations` toggle (default off). Sections 1-7 below
+are the **original plan**; the actual implementation deviates in
+several places. Read **both** before extending.
+
+### ✅ What's working
+
+- 7 AP locations `Recycle Shop #1..#7` (IDs `69_056_000..006`),
+  attached to Gear Savanna region, opt-in via
+  `RecycleShopLocations` toggle.
+- Slot data ships `recycle_shop_locations` so the client knows
+  whether to run its reconciler.
+- Trigger range **904..910** (NOT the plan-doc's original
+  951..957 — those collide with `RAM_MERAMON_TUNNEL_STATE` at
+  `0x001BE043`). All 7 land in byte `0x001BE03E`, leaving bit 7
+  free for trigger 911.
+- Extended ITEM_PARA slots 128..134 hold per-slot AP entries
+  (name = multiworld-resolved AP item name truncated to 14
+  chars; price = vanilla recycle slot price; meritValue = 0).
+- AP description strings ("From `<player>'s World"`) live in
+  Cave6 starting at RAM `0x80095D80`, 64-byte slots, 7 entries.
+  ITEM_DESC_PTR[128..134] points into this region.
+- Three vanilla `lui+addiu` callsites that load the original
+  ITEM_DESC_PTR base (`0x801279DC`) are patched to load the
+  relocated table base instead. All three use `$r2`; verified
+  against `references/DW1-Code/SLUS.asm`.
+- `setItemTexture` at vanilla RAM `0x800E5DFC` is wrapped to
+  clamp `id >= 128` to slot 83 (already blanked by the existing
+  merit-shop patcher) — fixes garbage icons for extended slots.
+- Wrapper at the recycle shop's giveItem callsite (RAM
+  `0x800FB410`) hijacks `jal 0x800C5240` and dispatches:
+  `id in [128, 134]` → `setTrigger(904 + (id - 128))` and skip
+  vanilla giveItem (no item enters inventory; AP delivers via
+  the normal path); else → tail-call vanilla giveItem.
+- Wrapper at `build_shop_runtime_list` epilogue (RAM
+  `0x800FAA60`) overwrites the runtime [id, flag] * 7 array at
+  RAM `0x80088828` with `[128,1, 129,1, ..., 134,1]`
+  synchronously inside the engine's call chain — eliminates the
+  UI name-flicker that the client-side reconciler couldn't fix.
+- Client-side reconciler (`_reconcile_recycle_shop_array` in
+  `client.py`) writes the same [128..134, flag=1] array each
+  game-watcher tick as a defensive backstop. Trigger polling
+  for 904..910 is folded into `LOCATION_RAM_BITS`.
+
+### ⚠ What's NOT working (and was reverted)
+
+- **Hide-bought-from-list feature**: an extended wrapper that
+  filtered out bought entries (gated each per-slot emit on its
+  trigger bit) and decremented `entry_count` to match. Crashed
+  the game with full framebuffer corruption regardless of
+  bought state. Reverted in `b5b16796`. Static review of the
+  wrapper bytecode found no encoding bug; the failure mode is
+  unknown without runtime instrumentation. See git history of
+  `bd02848d` for the wrapper code that was tried. The
+  original 92-byte wrapper (no filter) still ships and works.
+- Bought entries currently stay visible in the shop list;
+  their trigger bit is set so AP doesn't re-fire on re-buy
+  (and the player wastes money but nothing breaks).
+
+### ⚠ Wrong-guess corrections from the original plan
+
+- **Cave1 is NOT free RAM in vanilla DW1.** The plan-doc claimed
+  `0x800A0A50..0x800AFD78` was 61 KB free. SydPatches treats
+  this as "Cave1" because they ship a complete C++ rewrite
+  replacing every function in the range; vanilla DW1 still
+  calls into `0x000A0E58`, `0x000A0E60`, `0x000A0E68`, etc.
+  from many sites (e.g. `0x000B61F0`, `0x000D9764`,
+  `0x000E3624`, `0x000F1534`). Writing data there crashes the
+  game on first call. **The relocated ITEM_DESC_PTR table now
+  lives in Cave6 at RAM `0x80095980`** (verified safe — same
+  region as the chest wrapper, merit shop wrapper, combat
+  trampolines, and recycle shop wrapper).
+- **The recycle shop's runtime array is built by
+  `build_shop_runtime_list` at RAM `0x800FA834`**, not by any
+  function that hardcodes the shop_obj base address
+  `0x80088804`. The original "construction not fully traced"
+  note is now stale — see
+  `~/.claude/.../memory/dw1_recycle_shop_constructor.md` for
+  the full RE notes and the don't-repeat-the-wrong-guess
+  warning. An earlier attempt patched `init_shop_obj` at RAM
+  `0x800A32F4` (the only function that loads `0x80088804`
+  directly via `lui+ori`); that patch had no effect on the UI
+  because `init_shop_obj` populates the shop_obj structure
+  but doesn't fill the items array.
+- **The trigger byte `0x001BE03E` holds all 7 recycle shop
+  bought-bits** (904..910 → bits 0..6 of one byte).
+
+### Files that hold the working implementation
+
+| File | Sections / symbols |
+|------|--------------------|
+| `data/addresses.py` | "Recycle Shop (GIAS06B) — AP randomization (Phase 10)" block at the bottom (~470 lines). Constants: `RAM_RECYCLE_SHOP_*`, `RECYCLE_SHOP_*`, `RELOC_ITEM_DESC_PTR_*`, `AP_DESC_*`, `ROM_RECYCLE_SHOP_*`, `ROM_ICON_CLAMP_*`, plus the wrapper-builder `_build_recycle_shop_init_wrapper_bytes()`. |
+| `rom.py` | `_write_recycle_shop_tokens` writes 9 token sets when option on; `relocate_item_desc_ptr` is a procedure extension run after `apply_tokens`. |
+| `client.py` | `_reconcile_recycle_shop_array` runtime patcher; `LOCATION_RAM_BITS` includes `RECYCLE_SHOP_LOCATION_RAM_BITS`. |
+| `locations.py` | `_RECYCLE_SHOP_LOCATIONS` (7 entries in `69_056_xxx`); skip-listed in `create_all_locations` when option off. |
+| `options.py` | `RecycleShopLocations` toggle in the "Locations" group. |
+| `world.py` | `recycle_shop_locations` shipped in `fill_slot_data`. |
+| `test/test_recycle_shop.py` | 53 tests covering locations, triggers, wrapper bytecode, patcher tokens (on + off). |
+
+### Cave6 layout after recycle shop ships
+
+```
+RAM 0x800957C0..0x800957DC  chest wrapper                28 B  (always-on)
+RAM 0x800957DC..0x800957FC  setTrigger wrapper           32 B  (RESERVED, NOT installed)
+RAM 0x800957FC..0x80095800  4-byte gap
+RAM 0x80095800..0x800958B4  merit shop wrapper          180 B  for N=1 dispatch entry, +28 B per extra entry
+RAM 0x800958B4..0x800958CD  AP_ITEM_DESC_STRING          25 B  ("Item from the multiworld\0")
+RAM 0x800958CD..0x80095900  ~51-byte gap
+RAM 0x80095900..0x8009593C  combat trampolines tr1/2/3   60 B  (option-gated)
+RAM 0x80095940..0x8009597C  recycle shop giveItem wrap   60 B  (recycle option only)
+RAM 0x80095980..0x80095D80  RELOC_ITEM_DESC_PTR        1024 B  (recycle option only)
+RAM 0x80095D80..0x80095F40  AP_DESC_STRINGS             448 B  (recycle option only) — 7 × 64 B
+RAM 0x80095F40..0x80095F5C  setItemTexture clamp wrap    28 B  (recycle option only)
+RAM 0x80095F5C..0x80095FB8  shop array prebuild wrap     92 B  (recycle option only)
+RAM 0x80095FB8..0x80096BCC  ~3 KB free for future expansion
+```
+
+Cave6 ends at RAM `0x80096BCC` (verified: vanilla function starts
+right after, called from `0x000B40D4` etc.). A hard assertion in
+addresses.py fires at module-load if anything overflows.
+
+---
+
 ## 1. What we know about the Recycle Shop
 
 ### 1a. Identity

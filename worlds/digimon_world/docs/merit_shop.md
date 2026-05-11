@@ -8,6 +8,56 @@ Read this first before touching shop-related code in a future session.
 
 ---
 
+## STATUS — extended-ITEM_PARA now exists (2026-05-11)
+
+**Section 6 of this doc (the "scaling beyond ~12" analysis) is now
+mostly outdated.** The recycle shop work shipped 2026-05-11 built
+out the **Option 1 — Extend ITEM_PARA** infrastructure from §6a.
+The pieces relevant to merit shop scaling that already exist:
+
+- ITEM_DESC_PTR has been **relocated** to RAM `0x80095980` (in
+  Cave6). Vanilla slots 0..127 are copied verbatim from the
+  source ROM by the `relocate_item_desc_ptr` procedure
+  extension; AP slots 128+ have their own pointers populated at
+  gen time.
+- Three vanilla `lui+addiu` callsites that loaded the original
+  ITEM_DESC_PTR base are patched (verified in
+  `references/DW1-Code/SLUS.asm`: all three use `$r2`). Listed
+  in `addresses.py:RELOC_ITEM_DESC_PTR_PATCH_SITES`.
+- Extended ITEM_PARA slot writes work — slots 128..134 are
+  populated with AP item names and prices for the recycle shop.
+  Same mechanism extends to slots 135+ (currently unused).
+- `setItemTexture` at vanilla RAM `0x800E5DFC` is wrapped to
+  clamp `id >= 128 → slot 83` (already-blanked icon). So any
+  extended slot displays as the blank "AP Item" icon.
+- AP description strings ("From `<player>'s World`") live in
+  Cave6 at RAM `0x80095D80+`, 64-byte slots — extending to more
+  AP shop entries is just allocating more 64-byte slots (Cave6
+  has ~3 KB free after the recycle shop's 1.5 KB usage).
+
+**Net effect**: the **only remaining work for full merit shop AP
+randomization** is the merit-shop-specific bits — extending
+`MERIT_SHOP_DISPATCH` to cover all ~12 vanilla items, allocating
+trigger IDs, possibly patching the merit shop's scan-loop bound at
+RAM `0x00107430` (`sltiu $r1, $r5, 0x0080`) to scan beyond 128 if
+we use extended slots, and the per-AP-item ITEM_PARA writes (with
+non-zero `meritValue` so the scan picks them up).
+
+The "merit-shop wrapper" referenced throughout this doc is at
+RAM `0x80095800` (Cave6) and is `_build_merit_shop_wrapper_bytes()`
+in `addresses.py`. Its size scales as `(38 + 7N) × 4 = 28N + 152`
+bytes for N dispatch entries; for N=12 that's 320 bytes,
+comfortably inside Cave6's free space.
+
+See [recycle_shop_implementation_plan.md](recycle_shop_implementation_plan.md)
+top-of-file STATUS section for the working extended-ITEM_PARA
+constants block in `addresses.py` and the wrong-guess corrections
+to avoid (Cave1 is NOT free RAM; init_shop_obj at `0x800A32F4`
+is NOT the recycle array writer; the actual writer is at
+`0x800FA834`).
+
+---
+
 ## 1. The merit shop's runtime architecture
 
 ### 1a. There is no hardcoded item list
