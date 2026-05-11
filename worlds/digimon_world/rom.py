@@ -178,6 +178,11 @@ from .data.addresses import (
     ROM_ICON_CLAMP_PATCH_VALUE,
     ROM_ICON_CLAMP_WRAPPER_BYTES,
     ROM_ICON_CLAMP_WRAPPER_OFFSET,
+    ROM_RECYCLE_SHOP_INIT_PATCH_FORMAT,
+    ROM_RECYCLE_SHOP_INIT_PATCH_OFFSET,
+    ROM_RECYCLE_SHOP_INIT_PATCH_VALUE,
+    ROM_RECYCLE_SHOP_INIT_WRAPPER_BYTES,
+    ROM_RECYCLE_SHOP_INIT_WRAPPER_OFFSET,
     ROM_RECYCLE_SHOP_PATCH_FORMAT,
     ROM_RECYCLE_SHOP_PATCH_OFFSET,
     ROM_RECYCLE_SHOP_PATCH_VALUE,
@@ -1622,6 +1627,31 @@ def _write_recycle_shop_tokens(
         APTokenTypes.WRITE,
         ROM_ICON_CLAMP_PATCH_OFFSET,
         struct.pack(ROM_ICON_CLAMP_PATCH_FORMAT, *ROM_ICON_CLAMP_PATCH_VALUE),
+    )
+
+    # 8. Recycle-shop init epilogue wrapper — fixes the name flicker
+    #    where rows show vanilla item names on first open and only
+    #    refresh to AP names after scrolling. The shop UI captures
+    #    each row's name at row-init time; our client-side runtime
+    #    reconciler runs ~6 frames too late. This wrapper hijacks the
+    #    shop_obj initializer's epilogue (RAM 0x800A3408) and writes
+    #    our AP IDs into the array synchronously inside the engine's
+    #    call chain — before the UI initializes any rows.
+    patch.write_token(
+        APTokenTypes.WRITE,
+        ROM_RECYCLE_SHOP_INIT_WRAPPER_OFFSET,
+        ROM_RECYCLE_SHOP_INIT_WRAPPER_BYTES,
+    )
+    # 9. Patch site for the init wrapper: rewrite the function's last
+    #    8 bytes as ``j wrapper; nop``. The wrapper reproduces the
+    #    displaced ``jr $ra; addiu $sp, +0x48`` epilogue inline.
+    patch.write_token(
+        APTokenTypes.WRITE,
+        ROM_RECYCLE_SHOP_INIT_PATCH_OFFSET,
+        struct.pack(
+            ROM_RECYCLE_SHOP_INIT_PATCH_FORMAT,
+            *ROM_RECYCLE_SHOP_INIT_PATCH_VALUE,
+        ),
     )
 
 

@@ -6827,3 +6827,174 @@ ROM_ICON_CLAMP_PATCH_VALUE: Final = (
     0x00000000,                                                      # nop
 )
 
+
+# --- Recycle-shop array prebuild wrapper (fix UI name flicker) ------------
+# The recycle shop's runtime [id, flag] * 7 array at RAM 0x80088828 is
+# constructed by the engine when the player picks "I want a recycled
+# item" from Tinmon's dialog. The shop UI then captures each row's name
+# string from ITEM_PARA[array[i].id] at the moment each row first
+# becomes visible — and caches it. Our client-side runtime reconciler
+# (DigimonWorldClient._reconcile_recycle_shop_array) writes our AP IDs
+# into the array each game-watcher tick (~100 ms cadence), but the
+# engine builds the array within ~1 frame of the shop opening, so the
+# UI captures vanilla names before our reconciler can intervene. The
+# user has to scroll once to refresh each row, which then re-reads
+# ITEM_PARA[id] using the freshly-patched array contents and finally
+# shows the AP names.
+#
+# Static RE 2026-05-11 located the construction site:
+#
+#   Function ``init_recycle_shop_obj`` at vanilla RAM 0x800A32F4. Its
+#   epilogue at 0x800A3408..0x800A340F runs after the entire shop_obj
+#   has been initialized (a memcpy at 0x800A3330 to ``0x80088804``
+#   plus post-memcpy field shuffling). Two callers across the SLUS
+#   (RAM 0x800E0FE8 and RAM 0x801043CC) — likely the "regular item"
+#   and "recycled item" branches of the dialog. Both populate the same
+#   shop_obj at 0x80088804.
+#
+# Fix: hijack the function's epilogue to ``j wrapper; nop``. The
+# wrapper:
+#   1. Reads entry_count from shop_obj+8 (= RAM 0x8008880C). If it's
+#      not 7, this isn't the recycle shop branch — skip to the original
+#      epilogue (don't break the regular sub-shop or any other future
+#      caller).
+#   2. If entry_count == 7, overwrites the 14-byte array at
+#      RAM 0x80088828 with [128,1, 129,1, ..., 134,1] — our AP IDs.
+#      Done synchronously inside the engine's call chain, so the shop
+#      UI captures AP names from the very first frame.
+#   3. Reproduces the original epilogue (jr $ra; addiu $sp, +0x48).
+#
+# The client-side reconciler stays as a defensive backstop in case the
+# function is bypassed by some unforeseen code path.
+
+ROM_RECYCLE_SHOP_INIT_RAM: Final = 0x800A32F4               # function entry
+ROM_RECYCLE_SHOP_INIT_EPILOGUE_RAM: Final = 0x800A3408      # jr $r31 instr
+# Hardcoded sp delta from the function's prologue:
+# ``0x800A32F4 addiu $r29, $r29, 0xffb8`` -> sp -= 0x48.
+_RECYCLE_SHOP_INIT_SP_DELTA: Final = 0x48
+# entry_count lives at shop_obj + 8 = 0x8008880C. addiu sign-extends
+# 0x880C as -0x77F4, so ``lui 0x8009; addiu 0x880C`` resolves to
+# 0x80090000 - 0x77F4 = 0x8008880C. Same trick as the merit shop
+# wrapper's ITEM_PARA addressing (low half negative, high half +1).
+_RECYCLE_SHOP_OBJ_ENTRY_COUNT_HI: Final = 0x8009
+_RECYCLE_SHOP_OBJ_ENTRY_COUNT_LO: Final = 0x880C
+_RECYCLE_SHOP_OBJ_ARRAY_OFFSET_FROM_ENTRY_COUNT: Final = 0x1C  # 0x80088828 - 0x8008880C
+
+ROM_RECYCLE_SHOP_INIT_WRAPPER_RAM: Final = (
+    ROM_ICON_CLAMP_WRAPPER_RAM + len(ROM_ICON_CLAMP_WRAPPER_BYTES)           # 0x80095F5C
+)
+# Round up to 4-byte alignment (the icon clamp wrapper ends at a
+# multiple of 4 already, but document the constraint).
+assert ROM_RECYCLE_SHOP_INIT_WRAPPER_RAM % 4 == 0, (
+    f"ROM_RECYCLE_SHOP_INIT_WRAPPER_RAM 0x{ROM_RECYCLE_SHOP_INIT_WRAPPER_RAM:08X} "
+    f"is not 4-byte aligned"
+)
+ROM_RECYCLE_SHOP_INIT_WRAPPER_OFFSET: Final = _slus_ram_to_bin_offset(
+    ROM_RECYCLE_SHOP_INIT_WRAPPER_RAM,
+)
+
+
+def _build_recycle_shop_init_wrapper_bytes() -> bytes:
+    """Build the recycle-shop init epilogue wrapper.
+
+    23 instructions / 92 bytes. See section above for the dispatch
+    semantics.
+
+    Layout::
+
+        # Check entry_count at 0x8008880C
+        lui   $t0, 0x8009
+        addiu $t0, $t0, 0x880C            ; t0 = 0x8008880C
+        lbu   $t1, 0($t0)                 ; t1 = entry_count
+        addiu $t2, $0, 7
+        bne   $t1, $t2, .skip             ; not recycle shop -> skip
+        nop                                ; bne delay slot
+
+        # entry_count == 7. Overwrite the 14-byte array at 0x80088828
+        # with [128,1, 129,1, ..., 134,1]. Each entry encodes as a
+        # little-endian halfword: low byte = id, high byte = flag = 1.
+        addiu $t0, $t0, 0x1C              ; t0 = 0x80088828 (array)
+        addiu $t1, $0, 0x0180              ; entry 0 (id=128, flag=1)
+        sh    $t1, 0($t0)
+        addiu $t1, $0, 0x0181
+        sh    $t1, 2($t0)
+        ...
+        addiu $t1, $0, 0x0186              ; entry 6 (id=134, flag=1)
+        sh    $t1, 12($t0)
+
+        .skip:
+        # Reproduce the displaced epilogue (was at RAM 0x800A3408)
+        jr    $ra
+        addiu $sp, $sp, 0x48               ; jr delay slot
+    """
+
+    import struct as _struct
+
+    BASE_ID = RECYCLE_SHOP_AP_ITEM_ID_BASE
+    COUNT = RECYCLE_SHOP_AP_ITEM_ID_COUNT
+    SP_DELTA = _RECYCLE_SHOP_INIT_SP_DELTA
+
+    # Branch target = .skip = jr $ra at index 21 (counting from 0).
+    # The bne is at index 4. MIPS offset = (target - branch - 1) = 16.
+    BNE_TO_SKIP = 0x15400000 | (16 & 0xFFFF)  # bne $t2, $0, +16 — see below
+
+    # We compare $t1 (entry_count) to $t2 (=7). bne $t1, $t2, +16:
+    # rs=$t1=9, rt=$t2=10. opcode 5. = 0x14 << 26 | 9<<21 | 10<<16 | 16.
+    BNE_NEQ_SEVEN = (0x05 << 26) | (9 << 21) | (10 << 16) | 16
+
+    instructions: list[int] = [
+        # entry_count check
+        0x3C088009,                                        # lui $t0, 0x8009
+        0x25080000 | (_RECYCLE_SHOP_OBJ_ENTRY_COUNT_LO    # addiu $t0, $t0, 0x880C
+                      & 0xFFFF),
+        0x91090000,                                        # lbu $t1, 0($t0)
+        0x240A0000 | (RECYCLE_SHOP_ENTRY_COUNT & 0xFFFF),  # addiu $t2, $0, 7
+        BNE_NEQ_SEVEN,                                     # bne $t1, $t2, +16
+        0x00000000,                                        # nop (bne delay)
+        # Slide t0 from entry_count addr to array addr (+0x1C)
+        0x25080000 | (_RECYCLE_SHOP_OBJ_ARRAY_OFFSET_FROM_ENTRY_COUNT
+                      & 0xFFFF),                           # addiu $t0, $t0, 0x1C
+    ]
+    # 7 entries: addiu $t1, $0, 0x01<id>; sh $t1, 2*i($t0)
+    for i in range(COUNT):
+        id_byte = (BASE_ID + i) & 0xFF
+        # Little-endian halfword: low byte = id, high byte = flag (1).
+        halfword_value = (0x01 << 8) | id_byte
+        instructions.append(0x24090000 | halfword_value)   # addiu $t1, $0, halfword
+        instructions.append(0xA5090000 | (i * 2))          # sh $t1, (2*i)($t0)
+
+    # .skip: jr $ra; addiu $sp, $sp, 0x48
+    instructions.append(0x03E00008)                        # jr $r31
+    instructions.append(0x27BD0000 | (SP_DELTA & 0xFFFF))  # addiu $r29, $r29, 0x48
+
+    return b"".join(_struct.pack("<I", v) for v in instructions)
+
+
+ROM_RECYCLE_SHOP_INIT_WRAPPER_BYTES: Final = (
+    _build_recycle_shop_init_wrapper_bytes()
+)
+# 6 setup + 1 slide + 14 writes + 2 epilogue = 23 instructions = 92 bytes.
+assert len(ROM_RECYCLE_SHOP_INIT_WRAPPER_BYTES) == 92, (
+    len(ROM_RECYCLE_SHOP_INIT_WRAPPER_BYTES)
+)
+
+# Cave6 bounds — wrapper extends past the icon clamp wrapper.
+assert (ROM_RECYCLE_SHOP_INIT_WRAPPER_RAM
+        + len(ROM_RECYCLE_SHOP_INIT_WRAPPER_BYTES) <= _CAVE6_END_RAM), (
+    f"Recycle shop init wrapper end "
+    f"0x{ROM_RECYCLE_SHOP_INIT_WRAPPER_RAM + len(ROM_RECYCLE_SHOP_INIT_WRAPPER_BYTES):08X} "
+    f"overflows Cave6 end 0x{_CAVE6_END_RAM:08X}"
+)
+
+# Patch site: rewrite the function's last 8 bytes (jr $r31; addiu $sp, +0x48)
+# as ``j wrapper; nop``. The wrapper reproduces the displaced bytes
+# inline before returning.
+ROM_RECYCLE_SHOP_INIT_PATCH_OFFSET: Final = _slus_ram_to_bin_offset(
+    ROM_RECYCLE_SHOP_INIT_EPILOGUE_RAM,
+)
+ROM_RECYCLE_SHOP_INIT_PATCH_FORMAT: Final = "<II"
+ROM_RECYCLE_SHOP_INIT_PATCH_VALUE: Final = (
+    0x08000000 | ((ROM_RECYCLE_SHOP_INIT_WRAPPER_RAM >> 2) & 0x03FFFFFF),
+    0x00000000,
+)
+
