@@ -176,6 +176,10 @@ from .data.addresses import (
     ROM_MERIT_NAME_PATCH_BYTES,
     ROM_MERIT_NAME_TELEPORT_WRAPPER_BYTES,
     CAVE6_MERIT_NAME_TELEPORT_WRAPPER_OFFSET,
+    ROM_MERIT_ROW_PATCH_OFFSET,
+    ROM_MERIT_ROW_PATCH_BYTES,
+    ROM_MERIT_ROW_TELEPORT_WRAPPER_BYTES,
+    CAVE6_MERIT_ROW_TELEPORT_WRAPPER_OFFSET,
     MERIT_AP_DESC_STRINGS_BIN_OFFSET,
     MERIT_SHOP_AP_ITEM_ID_BASE,
     MERIT_SHOP_AP_ITEM_ID_COUNT,
@@ -1876,6 +1880,29 @@ def _write_merit_shop_locations_tokens(
         APTokenTypes.WRITE,
         ROM_MERIT_NAME_PATCH_OFFSET,
         ROM_MERIT_NAME_PATCH_BYTES,
+    )
+
+    # 11. Merit-row teleport wrapper bytes in Cave6. This is the actual
+    #     merit-shop per-row display function that reads name + value +
+    #     meritValue all sharing r17 = slot*32. By patching only the
+    #     entry-point pointer setup, we redirect r17 to the Cave6 ext
+    #     offset for slot >= 144, and all three sibling reads downstream
+    #     automatically land in Cave6.
+    patch.write_token(
+        APTokenTypes.WRITE,
+        CAVE6_MERIT_ROW_TELEPORT_WRAPPER_OFFSET,
+        ROM_MERIT_ROW_TELEPORT_WRAPPER_BYTES,
+    )
+
+    # 12. Inline row-display patch — replaces 4 instructions at
+    #     PC 0x800FE7F4..0x000FE800 (lui/addiu/addu/addu) with
+    #     ``j row_teleport_wrapper; nop; nop; nop``. The preceding
+    #     ``sll r3, r2, 5`` at 0x000FE7F0 stays in place so the wrapper
+    #     enters with r2 = slot_id and r3 = slot*32 ready to use.
+    patch.write_token(
+        APTokenTypes.WRITE,
+        ROM_MERIT_ROW_PATCH_OFFSET,
+        ROM_MERIT_ROW_PATCH_BYTES,
     )
 
 

@@ -155,7 +155,20 @@ RAM_TECHNIQUE_ENTRY_STRIDE: Final = 12 + 2 * 2
 # Meat (dw_code 2038) at 0x1BDF52, Digimushrm (dw_code 2044) at
 # 0x1BDF58. Three independent depositions, all match the formula.
 
-RAM_INVENTORY_SIZE: Final = 0x000DD4CE         # current item count (TBD: u8 vs u16)
+RAM_INVENTORY_SIZE: Final = 0x0013D4CE         # u8, current inventory capacity
+# ^^^ Verified by adjacency: the inventory data block at
+# RAM_INVENTORY_ITEM_IDS_BASE (0x0013D474) and RAM_INVENTORY_QUANTITIES_BASE
+# (0x0013D492) was live-verified 2026-04-28, and the size byte sits at the
+# end of the same 0x0013D4xx block. DWAP's 0x000DD4CE was a transcription
+# error inherited prior to verification (a previous TBD comment flagged it).
+# The vanilla script-engine `setInventorySize` opcode writes here (game
+# default = 10, after first keychain = 20, after fourth Nanimon visit = 30).
+# AP's client reconciles this byte to 10 + 10*min(Progressive Keychain
+# received count, 2), clamped to [10, 30].
+RAM_INVENTORY_MAX_SIZE: Final = 30             # vanilla structural cap
+RAM_INVENTORY_DEFAULT_SIZE: Final = 10         # vanilla starting capacity
+KEYCHAIN_INVENTORY_PER_ITEM: Final = 10        # each Progressive Keychain bumps by 10
+KEYCHAIN_MAX_COPIES: Final = 2                 # vanilla questline gives 2 keychains total
 
 # Player on-hand inventory: 10 fixed slots. Item ID byte at +i, quantity
 # byte at +i+0x1E (0x1E = 30 between IDs and quantities — verified live
@@ -476,6 +489,73 @@ LEOMONSTONE_LOCATION_TRIGGER_ID: Final = 135
 # sub-vendor slots, which never became AP locations).
 AMAZING_ROD_LOCATION_BIT: Final[tuple[int, int]] = (0x001BE03D, 7)
 AMAZING_ROD_LOCATION_TRIGGER_ID: Final = 903
+
+# =============================================================================
+# Nanimon Quest (keychain) per-site location bits
+# =============================================================================
+#
+# Vanilla DW1's "Nanimon questline" places Nanimon at 5 fixed sites
+# across the world. Visiting each one runs a short cutscene that
+# advances `pstat(21)` and sets a per-site trigger bit; on the 1st
+# visit the cutscene additionally sets trigger 47 (umbrella "got first
+# keychain") and writes `setInventorySize 20`, and on the 4th visit
+# it sets trigger 48 and writes `setInventorySize 30`. We poll the
+# **per-site** bits as AP location signals — one location per Nanimon
+# visit. The keychain inventory growth itself is owned by the AP
+# client (each Progressive Keychain delivered bumps INVENTORY_SIZE by
+# 10), so vanilla's setInventorySize writes get overwritten on the
+# next watcher tick.
+#
+# Sites and triggers, mapped from Scripts 48 / 82 / 109 / 145 / 180 in
+# `references/digimon_world_randomizer/script/DW1Script.txt`:
+#
+#   Script 48  — Ogre Fortress (elevator to Great Canyon)   → trig 334
+#   Script 82  — Ancient Dino Region (Meteormon site)       → trig 335
+#   Script 109 — Drill Tunnel (Leomon's Stone Tablet, 45PP) → trig 333
+#   Script 145 — Toy Town (WaruMonzaemon big/small box)     → trig 337
+#   Script 180 — Factorial Town (sick Digimon / sewer)      → trig 336
+#
+# All 5 bits land in just two bytes — 0x001BDFF6 and 0x001BDFF7 —
+# (formula `0x001BDFCD + N/8, bit N%8`). Verified empirically
+# 2026-05-13 against a live BizHawk session: visiting the Ancient
+# Dino Region Nanimon set 0x001BDFF6 bit 7 (mask 0x80 = trigger 335).
+NANIMON_QUEST_OGRE_FORTRESS_BIT: Final[tuple[int, int]] = (0x001BDFF6, 6)
+NANIMON_QUEST_OGRE_FORTRESS_TRIGGER_ID: Final = 334
+
+NANIMON_QUEST_ANCIENT_DINO_BIT: Final[tuple[int, int]] = (0x001BDFF6, 7)
+NANIMON_QUEST_ANCIENT_DINO_TRIGGER_ID: Final = 335
+
+NANIMON_QUEST_DRILL_TUNNEL_BIT: Final[tuple[int, int]] = (0x001BDFF6, 5)
+NANIMON_QUEST_DRILL_TUNNEL_TRIGGER_ID: Final = 333
+
+NANIMON_QUEST_TOY_TOWN_BIT: Final[tuple[int, int]] = (0x001BDFF7, 1)
+NANIMON_QUEST_TOY_TOWN_TRIGGER_ID: Final = 337
+
+NANIMON_QUEST_FACTORIAL_TOWN_BIT: Final[tuple[int, int]] = (0x001BDFF7, 0)
+NANIMON_QUEST_FACTORIAL_TOWN_TRIGGER_ID: Final = 336
+
+NANIMON_QUEST_LOCATION_RAM_BITS: Final[dict[str, tuple[int, int]]] = {
+    "Nanimon Quest: Ogre Fortress":        NANIMON_QUEST_OGRE_FORTRESS_BIT,
+    "Nanimon Quest: Ancient Dino Region":  NANIMON_QUEST_ANCIENT_DINO_BIT,
+    "Nanimon Quest: Drill Tunnel":         NANIMON_QUEST_DRILL_TUNNEL_BIT,
+    "Nanimon Quest: Toy Town":             NANIMON_QUEST_TOY_TOWN_BIT,
+    "Nanimon Quest: Factorial Town":       NANIMON_QUEST_FACTORIAL_TOWN_BIT,
+}
+# Sanity: every per-site trigger must derive to its declared byte/bit
+# via the setTrigger formula `(0x001BDFCD + N/8, N%8)`.
+for _trigger_id, _expected_bit in (
+    (NANIMON_QUEST_OGRE_FORTRESS_TRIGGER_ID,   NANIMON_QUEST_OGRE_FORTRESS_BIT),
+    (NANIMON_QUEST_ANCIENT_DINO_TRIGGER_ID,    NANIMON_QUEST_ANCIENT_DINO_BIT),
+    (NANIMON_QUEST_DRILL_TUNNEL_TRIGGER_ID,    NANIMON_QUEST_DRILL_TUNNEL_BIT),
+    (NANIMON_QUEST_TOY_TOWN_TRIGGER_ID,        NANIMON_QUEST_TOY_TOWN_BIT),
+    (NANIMON_QUEST_FACTORIAL_TOWN_TRIGGER_ID,  NANIMON_QUEST_FACTORIAL_TOWN_BIT),
+):
+    _byte = 0x001BDFCD + _trigger_id // 8
+    _bit = _trigger_id % 8
+    assert (_byte, _bit) == _expected_bit, (
+        f"trigger {_trigger_id} derives to ({_byte:#x}, {_bit}) "
+        f"but constant says {_expected_bit}"
+    )
 
 # **LAVA_CAVE_ACCESS_FLAG** — trigger 145, AP-controlled. Set when the AP
 # delivers the ``Lava Cave Access`` item; read by the patched boulder
@@ -7941,6 +8021,197 @@ def _build_merit_name_patch_bytes() -> bytes:
 
 ROM_MERIT_NAME_PATCH_BYTES: Final = _build_merit_name_patch_bytes()
 assert len(ROM_MERIT_NAME_PATCH_BYTES) == 12
+
+
+# =============================================================================
+# Merit-shop ROW-DISPLAY function teleport wrapper (Cave6, conditional)
+# =============================================================================
+#
+# The merit shop's per-row display function (entered at SLUS PC
+# 0x000FE704) reads ITEM_PARA[slot] THREE times per row via a shared
+# offset register r17:
+#
+#   0x000FE7F0  sll  r3, r2, 5         r3 = slot * 32 (r2 = slot_id arg)
+#   0x000FE7F4  lui  r2, 0x8012        \\
+#   0x000FE7F8  addiu r2, r2, 0x69DC    > r2 = vanilla ITEM_PARA;
+#   0x000FE7FC  addu r5, r2, r3         / r5 = name addr (= base + r3)
+#   0x000FE800  addu r17, r3, r0       r17 = slot * 32 (saved for siblings)
+#   ...
+#   0x000FE874  lui r2, 0x8012; addiu r2, r2, 0x69F0; addu r2, r2, r17
+#                                      r2 = vanilla.value (= money field)
+#   ...
+#   0x000FE8FC  lui r2, 0x8012; addiu r2, r2, 0x69F4; addu r2, r2, r17
+#                                      r2 = vanilla.meritValue
+#
+# For slot_id >= 144, every one of these reads lands in the per-item
+# color table at RAM 0x80127BDC and the displayed name + value + merit
+# price are all garbage (triangles + nonsense numbers — bug reported
+# 2026-05-13 against the Cave6 multi-segment release; the earlier
+# 0x101A4C name-teleport didn't fix it because the merit shop uses
+# THIS function, not the one at 0x101A4C).
+#
+# **The r17-offset trick**: instead of patching all three reader
+# callsites, patch ONLY the first one (0x000FE7F4) with a wrapper that
+# for slot >= 144 sets r17 = (slot - 144)*32 + (CAVE6 - vanilla). Then
+# the downstream sibling reads — which do ``r2 = vanilla_base + field;
+# addu r2, r2, r17`` — automatically land in Cave6:
+#
+#   r2 + r17 = (vanilla_base + field) + ((slot - 144)*32 + (cave6 - vanilla))
+#            = cave6 + (slot - 144)*32 + field
+#
+# One wrapper fixes name + value + merit reads in a single shot. The
+# vanilla path leaves r17 = slot*32 unchanged, so slot < 144 rows
+# render exactly as before.
+
+CAVE6_MERIT_ROW_TELEPORT_WRAPPER_RAM: Final = (
+    CAVE6_MERIT_NAME_TELEPORT_WRAPPER_RAM
+    + len(ROM_MERIT_NAME_TELEPORT_WRAPPER_BYTES)
+)
+assert CAVE6_MERIT_ROW_TELEPORT_WRAPPER_RAM % 4 == 0, hex(
+    CAVE6_MERIT_ROW_TELEPORT_WRAPPER_RAM
+)
+CAVE6_MERIT_ROW_TELEPORT_WRAPPER_OFFSET: Final = _slus_ram_to_bin_offset(
+    CAVE6_MERIT_ROW_TELEPORT_WRAPPER_RAM,
+)
+
+# Patch site = 4 instructions at PC 0x000FE7F4 (lui through addu r17),
+# keeping the preceding ``sll r3, r2, 5`` at 0x000FE7F0 intact.
+ROM_MERIT_ROW_PATCH_RAM: Final = 0x800FE7F4
+ROM_MERIT_ROW_PATCH_OFFSET: Final = _slus_ram_to_bin_offset(
+    ROM_MERIT_ROW_PATCH_RAM,
+)
+ROM_MERIT_ROW_RETURN_RAM: Final = 0x800FE804
+
+
+def _build_merit_row_teleport_wrapper_bytes() -> bytes:
+    """Build the unified row-display teleport wrapper.
+
+    Layout (17 instructions, 68 B):
+
+      offset 0x00  sltiu r1, r2, 0x90
+      offset 0x04  beq   r1, r0, +7         (target = ext_path at 0x24)
+      offset 0x08  nop                      (branch delay)
+      offset 0x0C  addu  r17, r3, r0        ; vanilla: r17 = slot*32
+      offset 0x10  lui   r2, 0x8012
+      offset 0x14  addiu r2, r2, 0x69DC
+      offset 0x18  addu  r5, r2, r17        ; r5 = vanilla + slot*32
+      offset 0x1C  j     ROW_RETURN
+      offset 0x20  nop                      ; j delay
+      offset 0x24  lui   $at, 0xFFF7        ; ext: $at = -0x913DC
+      offset 0x28  addiu $at, $at, 0xEC24   ;     (= cave6 - vanilla - 144*32)
+      offset 0x2C  addu  r17, r3, $at       ; r17 = slot*32 - 0x913DC
+                                            ;     = (slot-144)*32 + (cave6-vanilla)
+      offset 0x30  lui   r2, 0x8012
+      offset 0x34  addiu r2, r2, 0x69DC
+      offset 0x38  addu  r5, r2, r17        ; r5 = cave6 + (slot-144)*32
+      offset 0x3C  j     ROW_RETURN
+      offset 0x40  nop                      ; j delay
+    """
+
+    import struct as _struct
+
+    # Constant for the ext path: cave6_base - vanilla_base - 144*32
+    # = 0x80096800 - 0x801269DC - 0x1200 = -0x913DC = 0xFFF6EC24 (u32).
+    # Encoded as ``lui $at, 0xFFF7; addiu $at, $at, 0xEC24`` because the
+    # low half 0xEC24 sign-extends to -0x13DC; (0xFFF7 << 16) - 0x13DC
+    # = 0xFFF70000 - 0x13DC = 0xFFF6EC24. ✓
+    ext_hi = 0xFFF7
+    ext_lo = 0xEC24
+
+    j_return = 0x08000000 | (
+        (ROM_MERIT_ROW_RETURN_RAM >> 2) & 0x03FFFFFF
+    )
+    threshold = CAVE6_ITEM_PARA_EXT_SLOT_BASE                                  # 144
+
+    out = bytearray()
+
+    # 0x00 sltiu r1, r2, 0x90
+    out += _struct.pack("<I", (0x0B << 26) | (2 << 21) | (1 << 16) | threshold)
+    # 0x04 beq r1, r0, +7 (-> ext_path at offset 0x24)
+    out += _struct.pack("<I", (0x04 << 26) | (1 << 21) | (0 << 16) | 7)
+    # 0x08 nop (branch delay)
+    out += _struct.pack("<I", 0x00000000)
+
+    # Vanilla path (0x0C..0x20)
+    # 0x0C addu r17, r3, r0       (rs=3, rt=0, rd=17, funct=0x21)
+    out += _struct.pack("<I", (0 << 26) | (3 << 21) | (0 << 16) | (17 << 11) | (0 << 6) | 0x21)
+    # 0x10 lui r2, 0x8012
+    out += _struct.pack("<I", 0x3C028012)
+    # 0x14 addiu r2, r2, 0x69DC
+    out += _struct.pack("<I", 0x244269DC)
+    # 0x18 addu r5, r2, r17        (rs=2, rt=17, rd=5, funct=0x21)
+    out += _struct.pack("<I", (0 << 26) | (2 << 21) | (17 << 16) | (5 << 11) | (0 << 6) | 0x21)
+    # 0x1C j ROW_RETURN
+    out += _struct.pack("<I", j_return)
+    # 0x20 nop (j delay)
+    out += _struct.pack("<I", 0x00000000)
+
+    # Ext path (0x24..0x40)
+    # 0x24 lui $at, ext_hi
+    out += _struct.pack("<I", (0x0F << 26) | (0 << 21) | (1 << 16) | ext_hi)
+    # 0x28 addiu $at, $at, ext_lo
+    out += _struct.pack("<I", (0x09 << 26) | (1 << 21) | (1 << 16) | ext_lo)
+    # 0x2C addu r17, r3, $at        (rs=3, rt=1, rd=17, funct=0x21)
+    out += _struct.pack("<I", (0 << 26) | (3 << 21) | (1 << 16) | (17 << 11) | (0 << 6) | 0x21)
+    # 0x30 lui r2, 0x8012
+    out += _struct.pack("<I", 0x3C028012)
+    # 0x34 addiu r2, r2, 0x69DC
+    out += _struct.pack("<I", 0x244269DC)
+    # 0x38 addu r5, r2, r17
+    out += _struct.pack("<I", (0 << 26) | (2 << 21) | (17 << 16) | (5 << 11) | (0 << 6) | 0x21)
+    # 0x3C j ROW_RETURN
+    out += _struct.pack("<I", j_return)
+    # 0x40 nop (j delay)
+    out += _struct.pack("<I", 0x00000000)
+
+    return bytes(out)
+
+
+ROM_MERIT_ROW_TELEPORT_WRAPPER_BYTES: Final = _build_merit_row_teleport_wrapper_bytes()
+assert len(ROM_MERIT_ROW_TELEPORT_WRAPPER_BYTES) == 68, (
+    len(ROM_MERIT_ROW_TELEPORT_WRAPPER_BYTES)
+)
+
+# Cave6 layout: row teleport wrapper must stay inside sector 148350.
+assert (CAVE6_MERIT_ROW_TELEPORT_WRAPPER_RAM
+        + len(ROM_MERIT_ROW_TELEPORT_WRAPPER_BYTES)
+        <= 0x80096800), (
+    f"merit-row teleport wrapper "
+    f"0x{CAVE6_MERIT_ROW_TELEPORT_WRAPPER_RAM:08X}.."
+    f"0x{CAVE6_MERIT_ROW_TELEPORT_WRAPPER_RAM + len(ROM_MERIT_ROW_TELEPORT_WRAPPER_BYTES):08X} "
+    f"crosses Cave6 sector 148350 boundary at 0x80096800"
+)
+
+
+def _build_merit_row_patch_bytes() -> bytes:
+    """3-instruction patch at ROM_MERIT_ROW_PATCH_RAM:
+    ``j wrapper; nop; nop``. Only 3 words = 12 bytes (not 4) because:
+
+    * Word 4 of the original sequence (``addu r17, r3, r0`` at PC
+      0x000FE800) is SKIPPED by the wrapper's ``j 0x000FE804`` return,
+      so it doesn't need to be neutralised — leaving it intact has no
+      effect at runtime.
+    * Writing a 4th word here would spill into sector 148558's EDC
+      region (sector user-data ends at .bin 0x14D394B8 = patch start
+      + 12). ``apply_tokens`` writes flatly and crossing the user-data
+      boundary loses the 4th word, which is exactly the bug observed
+      on 2026-05-13. Keeping the patch at 12 bytes stays inside
+      sector 148558's user-data window.
+    """
+
+    import struct as _struct
+    j_wrapper = 0x08000000 | (
+        (CAVE6_MERIT_ROW_TELEPORT_WRAPPER_RAM >> 2) & 0x03FFFFFF
+    )
+    return (
+        _struct.pack("<I", j_wrapper)
+        + _struct.pack("<I", 0x00000000)
+        + _struct.pack("<I", 0x00000000)
+    )
+
+
+ROM_MERIT_ROW_PATCH_BYTES: Final = _build_merit_row_patch_bytes()
+assert len(ROM_MERIT_ROW_PATCH_BYTES) == 12
 
 
 # =============================================================================
