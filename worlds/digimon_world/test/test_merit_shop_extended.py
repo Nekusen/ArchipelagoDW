@@ -879,6 +879,73 @@ class TestCave6MultiSegment(unittest.TestCase):
         self.assertEqual(nop1, 0)
         self.assertEqual(nop2, 0)
 
+    def test_deduct_teleport_wrapper_size_and_placement(self) -> None:
+        from ..data.addresses import (
+            CAVE6_MERIT_DEDUCT_TELEPORT_WRAPPER_RAM,
+            CAVE6_MERIT_ROW_TELEPORT_WRAPPER_RAM,
+            ROM_MERIT_DEDUCT_TELEPORT_WRAPPER_BYTES,
+            ROM_MERIT_ROW_TELEPORT_WRAPPER_BYTES,
+        )
+        self.assertEqual(len(ROM_MERIT_DEDUCT_TELEPORT_WRAPPER_BYTES), 68)
+        # Sits directly after the row teleport wrapper in Cave6.
+        self.assertEqual(
+            CAVE6_MERIT_DEDUCT_TELEPORT_WRAPPER_RAM,
+            CAVE6_MERIT_ROW_TELEPORT_WRAPPER_RAM
+            + len(ROM_MERIT_ROW_TELEPORT_WRAPPER_BYTES),
+        )
+        # Stays inside sector 148350 (ends at 0x80096800).
+        self.assertLessEqual(
+            CAVE6_MERIT_DEDUCT_TELEPORT_WRAPPER_RAM
+            + len(ROM_MERIT_DEDUCT_TELEPORT_WRAPPER_BYTES),
+            0x80096800,
+        )
+
+    def test_deduct_teleport_returns_to_lhu(self) -> None:
+        # The wrapper returns to PC 0x800FB028 — the original ``lhu``
+        # immediately after the 4 patched instructions.
+        from ..data.addresses import (
+            CAVE6_ITEM_PARA_EXT_RAM,
+            ROM_MERIT_DEDUCT_RETURN_RAM,
+            ROM_MERIT_DEDUCT_TELEPORT_WRAPPER_BYTES,
+        )
+        self.assertEqual(ROM_MERIT_DEDUCT_RETURN_RAM, 0x800FB028)
+        words = struct.unpack(
+            "<17I", ROM_MERIT_DEDUCT_TELEPORT_WRAPPER_BYTES,
+        )
+        for j_word_idx in (7, 15):
+            jw = words[j_word_idx]
+            self.assertEqual((jw >> 26) & 0x3F, 0x02)
+            self.assertEqual(
+                (jw & 0x03FFFFFF) << 2,
+                ROM_MERIT_DEDUCT_RETURN_RAM & 0x0FFFFFFC,
+            )
+        # Delay slots must be nops.
+        self.assertEqual(words[8], 0)
+        self.assertEqual(words[16], 0)
+        # Words 11/12 = lui/addiu of CAVE6_ITEM_PARA_EXT_RAM.
+        self.assertEqual(words[11] & 0xFFFF, (CAVE6_ITEM_PARA_EXT_RAM >> 16) & 0xFFFF)
+        self.assertEqual(words[12] & 0xFFFF, CAVE6_ITEM_PARA_EXT_RAM & 0xFFFF)
+
+    def test_deduct_patch_jumps_to_deduct_teleport_wrapper(self) -> None:
+        from ..data.addresses import (
+            CAVE6_MERIT_DEDUCT_TELEPORT_WRAPPER_RAM,
+            ROM_MERIT_DEDUCT_PATCH_BYTES,
+            ROM_MERIT_DEDUCT_PATCH_RAM,
+        )
+        self.assertEqual(ROM_MERIT_DEDUCT_PATCH_RAM, 0x800FB018)
+        self.assertEqual(len(ROM_MERIT_DEDUCT_PATCH_BYTES), 16)
+        j_word, nop1, nop2, nop3 = struct.unpack(
+            "<4I", ROM_MERIT_DEDUCT_PATCH_BYTES,
+        )
+        self.assertEqual((j_word >> 26) & 0x3F, 0x02)
+        self.assertEqual(
+            (j_word & 0x03FFFFFF) << 2,
+            CAVE6_MERIT_DEDUCT_TELEPORT_WRAPPER_RAM & 0x0FFFFFFC,
+        )
+        self.assertEqual(nop1, 0)
+        self.assertEqual(nop2, 0)
+        self.assertEqual(nop3, 0)
+
 
 class TestCave6MultiSegmentPatcherOn(DigimonWorldTestBase):
     """Patcher emits the Cave6 multi-segment token writes."""
@@ -964,6 +1031,30 @@ class TestCave6MultiSegmentPatcherOn(DigimonWorldTestBase):
             ROM_MERIT_ROW_PATCH_BYTES,
         )
 
+    def test_deduct_teleport_wrapper_bytes_written(self) -> None:
+        from ..data.addresses import (
+            CAVE6_MERIT_DEDUCT_TELEPORT_WRAPPER_OFFSET,
+            ROM_MERIT_DEDUCT_TELEPORT_WRAPPER_BYTES,
+        )
+        self.assertIn(
+            CAVE6_MERIT_DEDUCT_TELEPORT_WRAPPER_OFFSET, self.observed_last,
+        )
+        self.assertEqual(
+            self.observed_last[CAVE6_MERIT_DEDUCT_TELEPORT_WRAPPER_OFFSET],
+            ROM_MERIT_DEDUCT_TELEPORT_WRAPPER_BYTES,
+        )
+
+    def test_deduct_patch_bytes_written(self) -> None:
+        from ..data.addresses import (
+            ROM_MERIT_DEDUCT_PATCH_BYTES,
+            ROM_MERIT_DEDUCT_PATCH_OFFSET,
+        )
+        self.assertIn(ROM_MERIT_DEDUCT_PATCH_OFFSET, self.observed_last)
+        self.assertEqual(
+            self.observed_last[ROM_MERIT_DEDUCT_PATCH_OFFSET],
+            ROM_MERIT_DEDUCT_PATCH_BYTES,
+        )
+
     def test_cave6_ext_slots_144_to_148_written(self) -> None:
         """All 5 Cave6-segment merit slots get ITEM_PARA entries."""
         for slot in range(144, 149):
@@ -1019,6 +1110,18 @@ class TestCave6MultiSegmentPatcherOff(DigimonWorldTestBase):
         from ..data.addresses import ROM_MERIT_ROW_PATCH_OFFSET
         self.assertNotIn(
             ROM_MERIT_ROW_PATCH_OFFSET, self.observed_offsets,
+        )
+
+    def test_deduct_teleport_wrapper_not_written(self) -> None:
+        from ..data.addresses import CAVE6_MERIT_DEDUCT_TELEPORT_WRAPPER_OFFSET
+        self.assertNotIn(
+            CAVE6_MERIT_DEDUCT_TELEPORT_WRAPPER_OFFSET, self.observed_offsets,
+        )
+
+    def test_deduct_patch_not_written(self) -> None:
+        from ..data.addresses import ROM_MERIT_DEDUCT_PATCH_OFFSET
+        self.assertNotIn(
+            ROM_MERIT_DEDUCT_PATCH_OFFSET, self.observed_offsets,
         )
 
     def test_cave6_ext_slots_not_written(self) -> None:

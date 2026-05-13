@@ -6364,6 +6364,19 @@ ROM_SKIP_INTRO_FORMAT: Final = "<BxH"             # opcode 0x16 + pad + dest
 ROM_SKIP_INTRO_OPCODE: Final = 0x16               # vanilla DW1 ``jumpTo`` opcode
 
 
+# ----- Item Stat Gain (ROM-side; mirrors standalone) ------------------------
+#
+# Source: ``references/digimon_world_randomizer/digimon/handler.py:2429-2438``
+# and ``digimon/data.py:197-200``. A single-byte write at BIN offset
+# ``0x14CF5AFC`` (value ``0x00``) causes digivolution-item digivolutions
+# to grant stat gains and lifetime increases the same way training
+# digivolutions do. Vanilla DW1 skips both for item-driven digivolutions.
+
+ROM_EVO_ITEM_STAT_GAIN_OFFSET: Final = 0x14CF5AFC
+ROM_EVO_ITEM_STAT_GAIN_VALUE: Final = 0x00
+ROM_EVO_ITEM_STAT_GAIN_FORMAT: Final = "<B"
+
+
 # ----- Type-Lock Unlocks (ROM-side; mirrors standalone) ----------------------
 #
 # Source: ``references/digimon_world_randomizer/digimon/handler.py:2629-2652``
@@ -8212,6 +8225,157 @@ def _build_merit_row_patch_bytes() -> bytes:
 
 ROM_MERIT_ROW_PATCH_BYTES: Final = _build_merit_row_patch_bytes()
 assert len(ROM_MERIT_ROW_PATCH_BYTES) == 12
+
+
+# =============================================================================
+# Merit-shop PURCHASE-DEDUCT teleport wrapper (Cave6, conditional)
+# =============================================================================
+#
+# The merit shop's purchase pipeline reads the slot's ``meritValue``
+# AGAIN — separate from the scan loop and the row-display function —
+# in the function around PC 0x000FAFB0..0x000FB068. At 0x000FB018 it
+# computes ``r2 = ITEM_PARA + slot*32 + 0x18`` via vanilla addressing,
+# then ``lhu`` reads the meritValue and stores it to ``-0x6B20(r28)``,
+# which the state-machine later subtracts from the player's merit
+# counter (the deduct itself happens at PC 0x0010BF18).
+#
+# For slot >= 144 this read lands in the per-item color table at
+# RAM 0x80127BDC and returns whatever palette byte happens to be at
+# ``0x80127BDC + (slot-128)*32 + 0x18``. In testing on 2026-05-13 the
+# user reported deducted values in the 3000..6000 range for Cave6
+# ext slots (matching color-table reads of 3588 / 1036 / 5900 / 5892
+# / 5910 for slots 144..148), with merit going negative and the UI
+# corrupting after purchase.
+#
+# Fix: teleport the same way the scan / row-display readers do.
+# Replace the 4 instructions at 0x000FB018..0x000FB024 with
+# ``j wrapper; nop; nop; nop``. Wrapper computes
+# ``r2 = ITEM_PARA[slot].meritValue address`` (vanilla base for
+# slot < 144, Cave6 ext base for slot >= 144), then ``j 0x800FB028``
+# returns to the original ``lhu`` instruction.
+
+CAVE6_MERIT_DEDUCT_TELEPORT_WRAPPER_RAM: Final = (
+    CAVE6_MERIT_ROW_TELEPORT_WRAPPER_RAM
+    + len(ROM_MERIT_ROW_TELEPORT_WRAPPER_BYTES)
+)
+assert CAVE6_MERIT_DEDUCT_TELEPORT_WRAPPER_RAM % 4 == 0, hex(
+    CAVE6_MERIT_DEDUCT_TELEPORT_WRAPPER_RAM
+)
+CAVE6_MERIT_DEDUCT_TELEPORT_WRAPPER_OFFSET: Final = _slus_ram_to_bin_offset(
+    CAVE6_MERIT_DEDUCT_TELEPORT_WRAPPER_RAM,
+)
+
+ROM_MERIT_DEDUCT_PATCH_RAM: Final = 0x800FB018
+ROM_MERIT_DEDUCT_PATCH_OFFSET: Final = _slus_ram_to_bin_offset(
+    ROM_MERIT_DEDUCT_PATCH_RAM,
+)
+# Return target = the ``lhu r2, 0x0000(r2)`` immediately after the
+# four patched instructions.
+ROM_MERIT_DEDUCT_RETURN_RAM: Final = 0x800FB028
+
+
+def _build_merit_deduct_teleport_wrapper_bytes() -> bytes:
+    """Build the 17-instruction (68 B) deduct-path teleport wrapper.
+
+    Input: r5 = slot_id.
+    Output: r2 = address of ITEM_PARA[slot].meritValue (correctly
+    routed to vanilla base for slot < 144 or Cave6 ext base for
+    slot >= 144). r3 is also written but the caller doesn't depend
+    on its post-wrapper value.
+
+    Clobbers r1, r2, r3.
+    """
+
+    import struct as _struct
+
+    j_return = 0x08000000 | (
+        (ROM_MERIT_DEDUCT_RETURN_RAM >> 2) & 0x03FFFFFF
+    )
+    cave6_hi = (CAVE6_ITEM_PARA_EXT_RAM >> 16) & 0xFFFF                       # 0x8009
+    cave6_lo = CAVE6_ITEM_PARA_EXT_RAM & 0xFFFF                               # 0x6800
+    threshold = CAVE6_ITEM_PARA_EXT_SLOT_BASE                                  # 144
+
+    out = bytearray()
+
+    # 0x00 sltiu r1, r5, 0x90
+    out += _struct.pack("<I", (0x0B << 26) | (5 << 21) | (1 << 16) | threshold)
+    # 0x04 beq r1, r0, +7  (-> ext_path at offset 0x24)
+    out += _struct.pack("<I", (0x04 << 26) | (1 << 21) | (0 << 16) | 7)
+    # 0x08 nop (branch delay)
+    out += _struct.pack("<I", 0x00000000)
+
+    # Vanilla path (0x0C..0x20): r2 = vanilla ITEM_PARA + slot*32 + 0x18
+    # 0x0C sll r3, r5, 5
+    out += _struct.pack("<I", (0 << 26) | (0 << 21) | (5 << 16) | (3 << 11) | (5 << 6))
+    # 0x10 lui r2, 0x8012
+    out += _struct.pack("<I", 0x3C028012)
+    # 0x14 addiu r2, r2, 0x69F4   (vanilla ITEM_PARA + 0x18 = meritValue base)
+    out += _struct.pack("<I", 0x244269F4)
+    # 0x18 addu r2, r2, r3
+    out += _struct.pack("<I", (0 << 26) | (2 << 21) | (3 << 16) | (2 << 11) | (0 << 6) | 0x21)
+    # 0x1C j ROM_MERIT_DEDUCT_RETURN_RAM
+    out += _struct.pack("<I", j_return)
+    # 0x20 nop (j delay)
+    out += _struct.pack("<I", 0x00000000)
+
+    # Ext path (0x24..0x40): r2 = CAVE6_EXT + (slot-144)*32 + 0x18
+    # 0x24 addi r3, r5, -144  (signed imm = 0xFF70)
+    out += _struct.pack("<I", (0x08 << 26) | (5 << 21) | (3 << 16) | 0xFF70)
+    # 0x28 sll r3, r3, 5
+    out += _struct.pack("<I", (0 << 26) | (0 << 21) | (3 << 16) | (3 << 11) | (5 << 6))
+    # 0x2C lui r2, cave6_hi
+    out += _struct.pack("<I", (0x0F << 26) | (0 << 21) | (2 << 16) | cave6_hi)
+    # 0x30 addiu r2, r2, cave6_lo
+    out += _struct.pack("<I", (0x09 << 26) | (2 << 21) | (2 << 16) | cave6_lo)
+    # 0x34 addu r2, r2, r3
+    out += _struct.pack("<I", (0 << 26) | (2 << 21) | (3 << 16) | (2 << 11) | (0 << 6) | 0x21)
+    # 0x38 addiu r2, r2, 0x18    (+ meritValue offset)
+    out += _struct.pack("<I", (0x09 << 26) | (2 << 21) | (2 << 16) | 0x18)
+    # 0x3C j ROM_MERIT_DEDUCT_RETURN_RAM
+    out += _struct.pack("<I", j_return)
+    # 0x40 nop (j delay)
+    out += _struct.pack("<I", 0x00000000)
+
+    return bytes(out)
+
+
+ROM_MERIT_DEDUCT_TELEPORT_WRAPPER_BYTES: Final = _build_merit_deduct_teleport_wrapper_bytes()
+assert len(ROM_MERIT_DEDUCT_TELEPORT_WRAPPER_BYTES) == 68, (
+    len(ROM_MERIT_DEDUCT_TELEPORT_WRAPPER_BYTES)
+)
+
+# Cave6 layout: deduct wrapper must stay inside sector 148350.
+assert (CAVE6_MERIT_DEDUCT_TELEPORT_WRAPPER_RAM
+        + len(ROM_MERIT_DEDUCT_TELEPORT_WRAPPER_BYTES)
+        <= 0x80096800), (
+    f"merit-deduct teleport wrapper "
+    f"0x{CAVE6_MERIT_DEDUCT_TELEPORT_WRAPPER_RAM:08X}.."
+    f"0x{CAVE6_MERIT_DEDUCT_TELEPORT_WRAPPER_RAM + len(ROM_MERIT_DEDUCT_TELEPORT_WRAPPER_BYTES):08X} "
+    f"crosses Cave6 sector 148350 boundary at 0x80096800"
+)
+
+
+def _build_merit_deduct_patch_bytes() -> bytes:
+    """4-instruction patch at ROM_MERIT_DEDUCT_PATCH_RAM:
+    ``j wrapper; nop; nop; nop``. Replaces the 4 address-construction
+    instructions before the ``lhu`` so the wrapper computes the merit
+    field address with the right base for Cave6 ext slots.
+    """
+
+    import struct as _struct
+    j_wrapper = 0x08000000 | (
+        (CAVE6_MERIT_DEDUCT_TELEPORT_WRAPPER_RAM >> 2) & 0x03FFFFFF
+    )
+    return (
+        _struct.pack("<I", j_wrapper)
+        + _struct.pack("<I", 0x00000000)
+        + _struct.pack("<I", 0x00000000)
+        + _struct.pack("<I", 0x00000000)
+    )
+
+
+ROM_MERIT_DEDUCT_PATCH_BYTES: Final = _build_merit_deduct_patch_bytes()
+assert len(ROM_MERIT_DEDUCT_PATCH_BYTES) == 16
 
 
 # =============================================================================

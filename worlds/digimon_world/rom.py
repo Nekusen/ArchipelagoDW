@@ -98,6 +98,9 @@ from .data.addresses import (
     ROM_COMBAT_TR3_OFFSET,
     ROM_DIGIMON_DATA,
     ROM_DIGIMON_ID_FORMAT,
+    ROM_EVO_ITEM_STAT_GAIN_FORMAT,
+    ROM_EVO_ITEM_STAT_GAIN_OFFSET,
+    ROM_EVO_ITEM_STAT_GAIN_VALUE,
     ROM_FIELD_SPAWN_TRIGGER_FORMAT,
     ROM_FIELD_SPAWN_TRIGGER_PATCHES,
     ROM_FIX_LEO_CAVE_FORMAT,
@@ -180,6 +183,10 @@ from .data.addresses import (
     ROM_MERIT_ROW_PATCH_BYTES,
     ROM_MERIT_ROW_TELEPORT_WRAPPER_BYTES,
     CAVE6_MERIT_ROW_TELEPORT_WRAPPER_OFFSET,
+    ROM_MERIT_DEDUCT_PATCH_OFFSET,
+    ROM_MERIT_DEDUCT_PATCH_BYTES,
+    ROM_MERIT_DEDUCT_TELEPORT_WRAPPER_BYTES,
+    CAVE6_MERIT_DEDUCT_TELEPORT_WRAPPER_OFFSET,
     MERIT_AP_DESC_STRINGS_BIN_OFFSET,
     MERIT_SHOP_AP_ITEM_ID_BASE,
     MERIT_SHOP_AP_ITEM_ID_COUNT,
@@ -1360,6 +1367,23 @@ def _write_birdra_flight_table_tokens(patch: DigimonWorldProcedurePatch) -> None
         )
 
 
+def _write_item_stat_gain_token(patch: DigimonWorldProcedurePatch) -> None:
+    """Make digivolution-item digivolutions grant stat/lifetime gains.
+
+    Source: ``references/digimon_world_randomizer/digimon/handler.py:2429-2438``
+    and ``digimon/data.py:197-200``. A single-byte ``0x00`` write at
+    BIN offset ``0x14CF5AFC`` flips an item-driven-digivolution branch
+    so it follows the same stat-gain + lifetime-bump path that training
+    digivolutions take. Vanilla DW1 skips both for item digivolutions.
+    """
+
+    patch.write_token(
+        APTokenTypes.WRITE,
+        ROM_EVO_ITEM_STAT_GAIN_OFFSET,
+        struct.pack(ROM_EVO_ITEM_STAT_GAIN_FORMAT, ROM_EVO_ITEM_STAT_GAIN_VALUE),
+    )
+
+
 def _write_skip_intro_tokens(patch: DigimonWorldProcedurePatch) -> None:
     """Replace two intro-textbox sequences with ``jumpTo`` opcodes.
 
@@ -1917,6 +1941,30 @@ def _write_merit_shop_locations_tokens(
         ROM_MERIT_ROW_PATCH_BYTES,
     )
 
+    # 13. Merit-deduct teleport wrapper bytes in Cave6. Separate from
+    #     scan/name/row teleports because the purchase pipeline reads
+    #     the slot's meritValue at PC 0x000FB018 via its own lui+addiu
+    #     pair; for slot >= 144 that lands in the per-item color table
+    #     and the merit-shop charges the player whatever palette byte
+    #     happens to be there (3000..6000 range in testing, sending
+    #     merit negative).
+    patch.write_token(
+        APTokenTypes.WRITE,
+        CAVE6_MERIT_DEDUCT_TELEPORT_WRAPPER_OFFSET,
+        ROM_MERIT_DEDUCT_TELEPORT_WRAPPER_BYTES,
+    )
+
+    # 14. Inline deduct patch — replaces 4 instructions at
+    #     PC 0x800FB018..0x000FB024 (lui/sll/addiu/addu) with
+    #     ``j deduct_teleport_wrapper; nop; nop; nop``. The wrapper
+    #     returns to PC 0x800FB028 (the original ``lhu`` that reads
+    #     the meritValue into r2).
+    patch.write_token(
+        APTokenTypes.WRITE,
+        ROM_MERIT_DEDUCT_PATCH_OFFSET,
+        ROM_MERIT_DEDUCT_PATCH_BYTES,
+    )
+
 
 def _write_ground_item_params(
     patch: DigimonWorldProcedurePatch,
@@ -2092,6 +2140,8 @@ def write_patch(world: DigimonWorldWorld, output_directory: str) -> None:
     options = world.options
     if options.skip_intro:
         _write_skip_intro_tokens(patch)
+    if options.item_stat_gain:
+        _write_item_stat_gain_token(patch)
     if options.type_lock_unlocks:
         _write_type_lock_unlock_tokens(patch)
     _write_spawn_rate_boost_tokens(patch, int(options.spawn_rate_boost.value))
