@@ -320,6 +320,63 @@ class TestVendingTextEncoder(DigimonWorldTestBase):
 
 
 # =============================================================================
+# Fishing locations toggle
+# =============================================================================
+
+
+class TestFishingLocationsOff(DigimonWorldTestBase):
+    """Default config — fishing option off — no fishing AP locations."""
+
+    options: ClassVar[dict[str, Any]] = {}
+
+    def test_fishing_locations_off_by_default(self) -> None:
+        from ..data.addresses import FISHING_LOCATION_NAMES
+
+        for name in FISHING_LOCATION_NAMES:
+            with self.assertRaises(KeyError):
+                self.multiworld.get_location(name, self.player)
+
+
+class TestFishingLocationsOn(DigimonWorldTestBase):
+    """Fishing option on — 6 fish AP locations in Greatlake, gated by rod."""
+
+    options: ClassVar[dict[str, Any]] = {
+        "fishing_locations": True,
+    }
+
+    def test_fishing_locations_present_in_greatlake(self) -> None:
+        from .. import locations as loc_module
+        from ..data.addresses import FISHING_LOCATION_NAMES
+
+        self.assertEqual(len(FISHING_LOCATION_NAMES), 6)
+        for i, name in enumerate(FISHING_LOCATION_NAMES):
+            loc = self.multiworld.get_location(name, self.player)
+            self.assertIsNotNone(loc.address, f"{name} should be id-bearing")
+            self.assertEqual(
+                loc_module.LOCATION_NAME_TO_ID[name], 69_058_000 + i,
+            )
+            self.assertEqual(loc.parent_region.name, "Greatlake")
+
+    def test_fishing_locations_require_rod(self) -> None:
+        """Each fishing location must be access-dependent on at least one rod."""
+
+        from ..data.addresses import FISHING_LOCATION_NAMES
+
+        self.assertAccessDependency(
+            list(FISHING_LOCATION_NAMES),
+            [["Old Fishrod"], ["Amazing rod"]],
+            only_check_listed=True,
+        )
+
+    def test_fishing_pool_size_balanced(self) -> None:
+        non_event_locations = [
+            loc for loc in self.multiworld.get_locations(self.player)
+            if loc.address is not None
+        ]
+        self.assertEqual(len(self.multiworld.itempool), len(non_event_locations))
+
+
+# =============================================================================
 # Chest randomization toggle
 # =============================================================================
 
@@ -608,3 +665,186 @@ class TestProsperityGoalHigh(DigimonWorldTestBase):
         # 80 PP threshold → ceil(27 * 1.2) = 33 items.
         self.assertEqual(len(pp_items), prosperity_point_count(80))
         self.assertGreater(len(pp_items), prosperity_point_count(50))
+
+
+# =============================================================================
+# Nanimon Quest + Progressive Keychain (Phase 11)
+# =============================================================================
+
+class TestNanimonQuest(DigimonWorldTestBase):
+    """5 Nanimon Quest AP locations + 2 Progressive Keychain items.
+
+    Default options (prosperity_goal = 50 ≥ 45) — all 5 locations are
+    in logic; Drill Tunnel site carries the 45-PP gate.
+    """
+
+    options: ClassVar[dict[str, Any]] = {}
+
+    _SITE_NAMES: ClassVar[tuple[str, ...]] = (
+        "Nanimon Quest: Ogre Fortress",
+        "Nanimon Quest: Ancient Dino Region",
+        "Nanimon Quest: Drill Tunnel",
+        "Nanimon Quest: Toy Town",
+        "Nanimon Quest: Factorial Town",
+    )
+
+    def test_five_locations_exist(self) -> None:
+        """All 5 sites are id-bearing AP locations."""
+
+        from .. import locations as loc_module
+
+        for name in self._SITE_NAMES:
+            self.assertIn(name, loc_module.LOCATION_NAME_TO_ID)
+            loc = self.multiworld.get_location(name, self.player)
+            self.assertIsNotNone(loc.address)
+
+    def test_location_ids_are_in_dedicated_block(self) -> None:
+        """Location IDs land in 69_059_xxx, separated from neighboring
+        groups (fishing 69_058_xxx)."""
+
+        from ..locations import LOCATION_NAME_TO_ID
+
+        for name in self._SITE_NAMES:
+            ap_id = LOCATION_NAME_TO_ID[name]
+            self.assertGreaterEqual(ap_id, 69_059_000)
+            self.assertLess(ap_id, 69_060_000)
+
+    def test_keychain_in_pool_twice(self) -> None:
+        """Exactly 2 Progressive Keychain copies ship; classification useful."""
+
+        from BaseClasses import ItemClassification
+
+        from ..items import KEYCHAIN_COPIES_IN_POOL, KEYCHAIN_ITEM_NAME
+
+        kc_items = [
+            item for item in self.multiworld.itempool
+            if item.name == KEYCHAIN_ITEM_NAME
+        ]
+        self.assertEqual(len(kc_items), KEYCHAIN_COPIES_IN_POOL)
+        self.assertEqual(KEYCHAIN_COPIES_IN_POOL, 2)
+        for item in kc_items:
+            self.assertEqual(item.classification, ItemClassification.useful)
+
+    def test_keychain_ram_bits_match_setTrigger_formula(self) -> None:
+        """Each per-site trigger N derives to byte 0x001BDFCD + N//8,
+        bit N%8 — this is the canonical setTrigger formula."""
+
+        from ..data.addresses import (
+            NANIMON_QUEST_ANCIENT_DINO_BIT,
+            NANIMON_QUEST_ANCIENT_DINO_TRIGGER_ID,
+            NANIMON_QUEST_DRILL_TUNNEL_BIT,
+            NANIMON_QUEST_DRILL_TUNNEL_TRIGGER_ID,
+            NANIMON_QUEST_FACTORIAL_TOWN_BIT,
+            NANIMON_QUEST_FACTORIAL_TOWN_TRIGGER_ID,
+            NANIMON_QUEST_LOCATION_RAM_BITS,
+            NANIMON_QUEST_OGRE_FORTRESS_BIT,
+            NANIMON_QUEST_OGRE_FORTRESS_TRIGGER_ID,
+            NANIMON_QUEST_TOY_TOWN_BIT,
+            NANIMON_QUEST_TOY_TOWN_TRIGGER_ID,
+        )
+
+        pairs = (
+            (NANIMON_QUEST_OGRE_FORTRESS_TRIGGER_ID,   NANIMON_QUEST_OGRE_FORTRESS_BIT),
+            (NANIMON_QUEST_ANCIENT_DINO_TRIGGER_ID,    NANIMON_QUEST_ANCIENT_DINO_BIT),
+            (NANIMON_QUEST_DRILL_TUNNEL_TRIGGER_ID,    NANIMON_QUEST_DRILL_TUNNEL_BIT),
+            (NANIMON_QUEST_TOY_TOWN_TRIGGER_ID,        NANIMON_QUEST_TOY_TOWN_BIT),
+            (NANIMON_QUEST_FACTORIAL_TOWN_TRIGGER_ID,  NANIMON_QUEST_FACTORIAL_TOWN_BIT),
+        )
+        for trigger_id, (expected_byte, expected_bit) in pairs:
+            self.assertEqual(0x001BDFCD + trigger_id // 8, expected_byte)
+            self.assertEqual(trigger_id % 8, expected_bit)
+
+        # All 5 names route to the same dict.
+        self.assertEqual(set(NANIMON_QUEST_LOCATION_RAM_BITS), set(self._SITE_NAMES))
+
+    def test_inventory_size_address_is_main_ram_offset(self) -> None:
+        """``RAM_INVENTORY_SIZE`` lives in the same 0x0013Dxxx block as
+        the empirically-verified inventory IDs/qtys (DWAP's 0x000DD4CE
+        was a transcription error)."""
+
+        from ..data.addresses import (
+            RAM_INVENTORY_ITEM_IDS_BASE,
+            RAM_INVENTORY_QUANTITIES_BASE,
+            RAM_INVENTORY_SIZE,
+        )
+
+        self.assertEqual(RAM_INVENTORY_SIZE, 0x0013D4CE)
+        # Sits after the IDs and quantities blocks (adjacency check).
+        self.assertGreater(RAM_INVENTORY_SIZE, RAM_INVENTORY_QUANTITIES_BASE)
+        self.assertGreater(RAM_INVENTORY_QUANTITIES_BASE, RAM_INVENTORY_ITEM_IDS_BASE)
+
+
+class TestNanimonQuestAccessDependencies(DigimonWorldTestBase):
+    """Per-site precondition rules added 2026-05-13 after live
+    playthrough feedback. Each Nanimon site fires only after its area's
+    host questline has advanced; AP encodes that as access rules."""
+
+    options: ClassVar[dict[str, Any]] = {}
+
+    def test_toy_town_requires_gear(self) -> None:
+        """Toy Town Nanimon (Script 145 Section_6) only fires after the
+        WaruMonzaemon cutscene granted Gear (trigger 270)."""
+
+        self.assertAccessDependency(
+            ["Nanimon Quest: Toy Town"],
+            [["Gear"]],
+            only_check_listed=True,
+        )
+
+    def test_factorial_town_in_logic_at_all_state(self) -> None:
+        """Factorial Town site needs Andromon's recruit chain
+        (Tropical Jungle + 15 PP). With ``get_all_state`` all
+        dependencies are satisfied; verify it's reachable at full
+        state — sanity that the rule isn't permanently unsatisfiable."""
+
+        all_state = self.multiworld.get_all_state(False)
+        loc = self.multiworld.get_location(
+            "Nanimon Quest: Factorial Town", self.player,
+        )
+        self.assertTrue(loc.can_reach(all_state))
+
+    def test_drill_tunnel_requires_leomonstone(self) -> None:
+        """Drill Tunnel Nanimon needs Leomonstone (the Stone Tablet,
+        matches Leomon's recruit gate) on top of the 45 PP cave
+        entrance. At default ``prosperity_goal=50`` the PP gate is
+        satisfiable; Leomonstone is the AP-side ADD."""
+
+        self.assertAccessDependency(
+            ["Nanimon Quest: Drill Tunnel"],
+            [["Leomonstone"]],
+            only_check_listed=True,
+        )
+
+
+class TestNanimonQuestLowProsperity(DigimonWorldTestBase):
+    """With ``prosperity_goal < 45``, the Drill Tunnel Nanimon site is
+    inside the unreachable Leomon Ancestral Cave — must be EXCLUDED so
+    AP fill doesn't place progression there. The other 4 sites stay
+    in logic."""
+
+    options: ClassVar[dict[str, Any]] = {
+        "prosperity_goal": 30,
+    }
+
+    def test_drill_tunnel_site_excluded_below_45_pp(self) -> None:
+        from BaseClasses import LocationProgressType
+
+        loc = self.multiworld.get_location(
+            "Nanimon Quest: Drill Tunnel", self.player,
+        )
+        self.assertEqual(loc.progress_type, LocationProgressType.EXCLUDED)
+
+    def test_other_sites_not_excluded(self) -> None:
+        from BaseClasses import LocationProgressType
+
+        for site in (
+            "Nanimon Quest: Ogre Fortress",
+            "Nanimon Quest: Ancient Dino Region",
+            "Nanimon Quest: Toy Town",
+            "Nanimon Quest: Factorial Town",
+        ):
+            loc = self.multiworld.get_location(site, self.player)
+            self.assertNotEqual(
+                loc.progress_type, LocationProgressType.EXCLUDED,
+                f"{site} should not be EXCLUDED at threshold=30",
+            )

@@ -337,6 +337,37 @@ _PROSPERITY: Final[dict[str, ItemEntry]] = {
 
 
 # =============================================================================
+# Progressive Keychain — Nanimon-questline inventory expansion
+# =============================================================================
+# In vanilla DW1, completing the Nanimon questline grants two
+# "Dimensional Key Chains" that bump the player's inventory size from
+# 10 → 20 → 30 slots. AP turns this into a shuffled item: each
+# Progressive Keychain received bumps the in-game inventory capacity
+# by ``KEYCHAIN_INVENTORY_PER_ITEM`` (= 10), clamped at the vanilla
+# structural max ``RAM_INVENTORY_MAX_SIZE`` (= 30). Two copies ship in
+# the AP pool, classification ``useful`` — more inventory is a
+# meaningful convenience but doesn't gate any AP logic.
+#
+# Client-side: :meth:`DigimonWorldClient._reconcile_keychain_inventory`
+# pins :data:`RAM_INVENTORY_SIZE` to ``10 + 10 * min(received_count, 2)``
+# every watcher tick. Vanilla's ``setInventorySize 20/30`` opcodes that
+# fire during Nanimon site visits are clobbered on the next tick (brief
+# 1-tick flicker, no UX issue — no item-pickup window during the
+# cutscene).
+#
+# AP-side: 5 Nanimon Quest locations (one per Nanimon site) are checked
+# via per-site setTrigger bits (333-337). Keychain items in the pool
+# (2) < locations added (5), so the questline produces +3 net checks.
+
+KEYCHAIN_ITEM_NAME: Final = "Progressive Keychain"
+KEYCHAIN_COPIES_IN_POOL: Final = 2
+
+_KEYCHAIN_ITEMS: Final[dict[str, ItemEntry]] = {
+    KEYCHAIN_ITEM_NAME: ItemEntry(8000, ItemClassification.useful),
+}
+
+
+# =============================================================================
 # Recruit items — individual + Progressive-bundled
 # =============================================================================
 #
@@ -617,6 +648,7 @@ _ITEM_TABLE: Final[dict[str, ItemEntry]] = {
     **_BANK_ITEMS,
     **_BITS,
     **_PROSPERITY,
+    **_KEYCHAIN_ITEMS,
     **_RECRUIT_ITEMS,
     **_BIRDRAMON_FLIGHT_ITEMS,
     **_PROGRESSIVE_ITEMS,
@@ -673,6 +705,7 @@ ITEM_NAME_GROUPS: Final[dict[str, set[str]]] = {
     "Useful": set(_USEFUL_ITEMS),
     "Bits": set(_BITS),
     "Prosperity": set(_PROSPERITY),
+    "Keychains": set(_KEYCHAIN_ITEMS),
     "Recruits": set(_RECRUIT_ITEMS),
     "Techniques": set(_TECHNIQUE_ITEMS),
 }
@@ -877,6 +910,15 @@ def create_all_items(world: DigimonWorldWorld) -> None:
     # tier ``count`` (handled by ``_reconcile_recruits`` in the client).
     for name, copies in PROGRESSIVE_COUNTS.items():
         pool.extend(world.create_item(name) for _ in range(copies))
+
+    # Progressive Keychain — 2 fixed copies, useful. Each delivery
+    # bumps the in-game inventory cap by 10 (client reconciles
+    # RAM_INVENTORY_SIZE each tick from the received count). The
+    # questline contributes 5 AP locations against these 2 items.
+    pool.extend(
+        world.create_item(KEYCHAIN_ITEM_NAME)
+        for _ in range(KEYCHAIN_COPIES_IN_POOL)
+    )
 
     if len(pool) > locations_count:
         raise ValueError(

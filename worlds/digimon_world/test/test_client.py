@@ -151,10 +151,11 @@ class TestChestDispatch(DigimonWorldTestBase):
         # Mansion Key Pickup, Frig Key Pickup, Gear Pickup, Rain Plant
         # Pickup, Blue Flute Pickup, Leomonstone Pickup, Amazing Rod
         # Pickup) + 10 vending machines + 7 recycle shop slots +
-        # 9 merit shop slots.
+        # 14 merit shop slots + 5 Nanimon Quest sites.
         # Per-seed availability of the option-gated entries (the 10
-        # vending, the 7 recycle shop, the 9 merit shop) is filtered
+        # vending, the 7 recycle shop, the 14 merit shop) is filtered
         # on the AP server side; the dispatch dict is unconditional.
+        # The 5 Nanimon Quest sites are always-on (not option-gated).
         # Airdramon, Seadramon, Nanimon, and Giromon stay in
         # RECRUIT_RAM_BITS but are filtered out of LOCATION_RAM_BITS via
         # ``_DROPPED_RECRUITS_BLACKLIST``.
@@ -167,7 +168,9 @@ class TestChestDispatch(DigimonWorldTestBase):
         # ITEM_DESC_PTR region (contiguous with vanilla ITEM_PARA);
         # slots 144..148 live in the Cave6 ext segment via the
         # merit-scan teleport wrapper.
-        self.assertEqual(len(LOCATION_RAM_BITS), 46 + 65 + 8 + 10 + 7 + 14)
+        self.assertEqual(
+            len(LOCATION_RAM_BITS), 46 + 65 + 8 + 10 + 7 + 14 + 5,
+        )
 
 
 # =============================================================================

@@ -11,6 +11,7 @@ the same way:
 * ``69_055_xxx`` — vending machines (12, opt-in via :class:`worlds.digimon_world.options.VendingLocations`)
 * ``69_056_xxx`` — recycle shop slots (7, opt-in via :class:`worlds.digimon_world.options.RecycleShopLocations`)
 * ``69_057_xxx`` — merit shop slots (14, opt-in via :class:`worlds.digimon_world.options.MeritShopLocations`)
+* ``69_058_xxx`` — fishing fish catches (6, opt-in via :class:`worlds.digimon_world.options.FishingLocations`)
 
 Locked v1 MVP scope: chests + recruits + starter. NPC-gift "K Prosperity"
 locations are gone — prosperity is now a real AP item shipped in the
@@ -36,7 +37,9 @@ from BaseClasses import ItemClassification, Location, LocationProgressType
 
 from .data.addresses import (
     CARD_LOCATION_NIBBLES,
+    FISHING_LOCATION_NAMES,
     MERIT_SHOP_LOCATION_NAMES,
+    NANIMON_QUEST_LOCATION_RAM_BITS,
     RECYCLE_SHOP_LOCATION_NAMES,
     VENDING_LOCATION_NAMES,
     VENDING_LOCATION_REGIONS,
@@ -510,6 +513,73 @@ assert len(_MERIT_SHOP_LOCATIONS) == 14, len(_MERIT_SHOP_LOCATIONS)
 
 
 # =============================================================================
+# Fishing locations (6, opt-in)
+# =============================================================================
+# Each of DW1's 6 catchable fish (Digianchovy / Digisnapper / DigiTrout /
+# Black trout / Digicatfish / Digiseabass) is an AP location when
+# :class:`worlds.digimon_world.options.FishingLocations` is on. Region is
+# ``Greatlake`` — both fishing screens (MAYO06 / MAYO10 per
+# :data:`worlds.digimon_world.data.addresses.SCREEN_FILENAMES`) belong to
+# the Dragon Eye Lake cluster, which the AP region graph models as
+# Greatlake. The region's entrance rule already gates on Native Forest
+# access; per-location rod requirements are layered on top in
+# :mod:`.rules`.
+#
+# IDs land in the previously-reserved ``69_058_xxx`` block.
+
+_FISHING_LOCATIONS: Final[dict[str, LocationEntry]] = {
+    name: LocationEntry(69_058_000 + i, "Greatlake")
+    for i, name in enumerate(FISHING_LOCATION_NAMES)
+}
+assert len(_FISHING_LOCATIONS) == 6, len(_FISHING_LOCATIONS)
+
+
+# =============================================================================
+# Nanimon Quest locations (5, always on)
+# =============================================================================
+# Vanilla DW1 places "Nanimon" at 5 fixed sites across the world; each
+# visit fires a short cutscene that increments ``pstat(21)`` and sets a
+# per-site trigger bit (333-337). The 1st visit additionally writes
+# ``setInventorySize 20`` and the 4th writes ``setInventorySize 30``,
+# but in AP the keychain progression is owned by the
+# ``Progressive Keychain`` item (the client reconciles
+# :data:`worlds.digimon_world.data.addresses.RAM_INVENTORY_SIZE` to
+# ``10 + 10 * received_keychains``). Each per-site trigger becomes its
+# own AP location check.
+#
+# Region assignment mirrors the in-game site location (cross-checked
+# 2026-05-13 against vanilla script content):
+#
+#   Ogre Fortress       — elevator screen leading to Great Canyon
+#   Ancient Dino Region — Meteormon meteorite site
+#   Drill Tunnel        — Leomon Ancestor Cave (gated on 45 PP)
+#   Toy Town            — WaruMonzaemon big/small box room
+#   Factorial Town      — sick Digimon / sewer scene
+#
+# RAM-bit mapping lives in
+# :data:`addresses.NANIMON_QUEST_LOCATION_RAM_BITS`; the names below
+# must match exactly so the client's `_check_locations` can resolve
+# location_name → id.
+
+_NANIMON_QUEST_REGIONS: Final[dict[str, str]] = {
+    "Nanimon Quest: Ogre Fortress":        "Great Canyon",
+    "Nanimon Quest: Ancient Dino Region":  "Ancient Dino Region",
+    "Nanimon Quest: Drill Tunnel":         "Drill Tunnel",
+    "Nanimon Quest: Toy Town":             "Toy Town",
+    "Nanimon Quest: Factorial Town":       "Factorial Town",
+}
+assert set(_NANIMON_QUEST_REGIONS) == set(NANIMON_QUEST_LOCATION_RAM_BITS), (
+    "Nanimon Quest region table must match the RAM-bit table"
+)
+
+_NANIMON_QUEST_LOCATIONS: Final[dict[str, LocationEntry]] = {
+    name: LocationEntry(69_059_000 + i, region)
+    for i, (name, region) in enumerate(_NANIMON_QUEST_REGIONS.items())
+}
+assert len(_NANIMON_QUEST_LOCATIONS) == 5, len(_NANIMON_QUEST_LOCATIONS)
+
+
+# =============================================================================
 # Final assembled location table
 # =============================================================================
 
@@ -522,6 +592,8 @@ _LOCATION_TABLE: Final[dict[str, LocationEntry]] = {
     **_VENDING_LOCATIONS,
     **_RECYCLE_SHOP_LOCATIONS,
     **_MERIT_SHOP_LOCATIONS,
+    **_FISHING_LOCATIONS,
+    **_NANIMON_QUEST_LOCATIONS,
 }
 
 LOCATION_NAME_TO_ID: Final[dict[str, int]] = {
@@ -536,6 +608,8 @@ LOCATION_NAME_GROUPS: Final[dict[str, set[str]]] = {
     "Vending": set(_VENDING_LOCATIONS),
     "Recycle Shop": set(_RECYCLE_SHOP_LOCATIONS),
     "Merit Shop": set(_MERIT_SHOP_LOCATIONS),
+    "Fishing": set(_FISHING_LOCATIONS),
+    "Nanimon Quest": set(_NANIMON_QUEST_LOCATIONS),
 }
 
 
@@ -567,6 +641,10 @@ def create_all_locations(world: DigimonWorldWorld) -> None:
     # merit shop AP locations are excluded from the pool.
     if not int(world.options.merit_shop_locations.value):
         skip_locations.update(_MERIT_SHOP_LOCATIONS)
+    # FishingLocations: opt-in, default off. When off, the 6 fishing
+    # AP locations are excluded from the pool.
+    if not int(world.options.fishing_locations.value):
+        skip_locations.update(_FISHING_LOCATIONS)
     # ChestRandomization: default ON. When OFF, the 65 chest AP
     # locations are excluded from the pool — chests retain vanilla
     # items and don't fire AP checks.

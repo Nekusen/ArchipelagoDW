@@ -173,6 +173,20 @@ class LavaCaveAccess(Choice):
     default = option_shuffled
 
 
+class ItemStatGain(Toggle):
+    """Grant stat gains and lifetime increases when digivolving via a
+    Digivolution Item.
+
+    Vanilla DW1 skips both for item-driven digivolutions — only training
+    digivolutions grant stats and reset lifetime. With this on, item
+    digivolutions follow the same gain path. Single-byte ROM patch
+    mirrored from the standalone DW1 randomizer's ``EvoItemStatGain``
+    flag (``references/digimon_world_randomizer/digimon/handler.py:2429``).
+    """
+
+    display_name = "Item Stat Gain"
+
+
 class TypeLockUnlocks(DefaultOnToggle):
     """Remove the Vaccine/Data/Virus/Monzaemon type gates on Greylord's
     Mansion, Ice Sanctuary, and Toy Town.
@@ -403,6 +417,30 @@ class RecycleShopLocations(Toggle):
     display_name = "Recycle Shop Locations"
 
 
+class FishingLocations(Toggle):
+    """Add the 6 catchable DW1 fish as AP locations.
+
+    DW1's fishing minigame (enabled on MAYO06 / MAYO10, the two Dragon
+    Eye Lake screens) can produce 6 different fish species: Digianchovy,
+    Digisnapper, DigiTrout, Black trout, Digicatfish, Digiseabass. With
+    this on, each fish becomes its own AP location.
+
+    Detection is client-side: the client tracks per-fish inventory counts
+    and fires the corresponding AP location the first time a fish count
+    *increases* while the player is on a fishing screen. AP-delivered
+    fish items land in the bank, not the inventory, so foreign-world
+    deliveries cannot cause a false fire. The only edge case is opening
+    the Dragon Eye Lake chest while standing on screen 6 or 8 — accepted
+    per design.
+
+    Logic gating: each fishing AP location requires a fishing rod
+    (``Old Fishrod`` or ``Amazing rod``) in addition to Greatlake region
+    access. No ROM patching required.
+    """
+
+    display_name = "Fishing Locations"
+
+
 class MeritShopLocations(Toggle):
     """Add the Merit Shop (ShogunGekomon, Volume Villa) as AP locations.
 
@@ -616,6 +654,7 @@ class DigimonWorldOptions(PerGameCommonOptions):
     fast_drimogemon: FastDrimogemon
     easy_monochromon: EasyMonochromon
     skip_intro: SkipIntro
+    item_stat_gain: ItemStatGain
     type_lock_unlocks: TypeLockUnlocks
     bridge_unlock: BridgeUnlock
     great_canyon_unlock: GreatCanyonUnlock
@@ -640,6 +679,7 @@ class DigimonWorldOptions(PerGameCommonOptions):
     vending_locations: VendingLocations
     recycle_shop_locations: RecycleShopLocations
     merit_shop_locations: MeritShopLocations
+    fishing_locations: FishingLocations
     technique_rewards: TechniqueRewards
     god_mode: GodMode
 
@@ -660,14 +700,15 @@ option_groups: list[OptionGroup] = [
     ),
     OptionGroup(
         "Locations",
-        [CardLocations, VendingLocations, RecycleShopLocations, MeritShopLocations],
+        [CardLocations, VendingLocations, RecycleShopLocations, MeritShopLocations,
+         FishingLocations],
     ),
     OptionGroup(
         "Quality of Life",
         [
-            FastDrimogemon, EasyMonochromon, SkipIntro, TypeLockUnlocks,
-            BridgeUnlock, GreatCanyonUnlock, LavaCaveAccess, SpawnRateBoost,
-            StatGainMultiplier, CombatStatMultiplier,
+            FastDrimogemon, EasyMonochromon, SkipIntro, ItemStatGain,
+            TypeLockUnlocks, BridgeUnlock, GreatCanyonUnlock, LavaCaveAccess,
+            SpawnRateBoost, StatGainMultiplier, CombatStatMultiplier,
         ],
     ),
     OptionGroup("Testing", [GodMode]),

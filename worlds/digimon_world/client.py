@@ -79,16 +79,22 @@ from .data.addresses import (
     EASY_MONOCHROMON_PROFIT_TARGET,
     FAST_DRIMOGEMON_DIGGING_STATE_TARGET,
     FAST_DRIMOGEMON_DRIMO_STATE_TARGET,
+    FISH_LOCATION_INVENTORY_IDS,
+    FISHING_LOCATION_NAMES,
+    FISHING_SCREEN_IDS,
     AP_ITEM_BOUGHT_MERIT_VALUE_BYTES,
     AP_SHOP_BOUGHT_SENTINEL_RAM,
     AP_SHOP_BOUGHT_VISIBLE_BYTES,
     AP_TRIGGER_ARRAY_BASE,
     ITEM_PARA_MERIT_VALUE_OFFSET,
     FAST_DRIMOGEMON_TUNNEL_STATE_TARGET,
+    KEYCHAIN_INVENTORY_PER_ITEM,
+    KEYCHAIN_MAX_COPIES,
     KEYITEM_DELIVERY_RAM_BITS,
     KEYITEM_LOCATION_RAM_BITS,
     MERIT_SHOP_DISPATCH,
     MERIT_SHOP_LOCATION_RAM_BITS,
+    NANIMON_QUEST_LOCATION_RAM_BITS,
     RAM_ITEM_PARA,
     RAM_RECYCLE_SHOP_GP_SLOT,
     RECYCLE_SHOP_AP_ITEM_ID_BASE,
@@ -106,9 +112,12 @@ from .data.addresses import (
     RAM_CURRENT_SPEED,
     RAM_GREAT_CANYON_BRIDGE_UNLOCKED,
     RAM_HAS_BEATEN_DRIMOGEMON,
+    RAM_INVENTORY_DEFAULT_SIZE,
     RAM_INVENTORY_EMPTY_SLOT_ID,
     RAM_INVENTORY_ITEM_IDS_BASE,
+    RAM_INVENTORY_MAX_SIZE,
     RAM_INVENTORY_QUANTITIES_BASE,
+    RAM_INVENTORY_SIZE,
     RAM_INVENTORY_SLOT_COUNT,
     RAM_ITEM_BANK_BASE,
     RAM_ITEM_BANK_SIZE,
@@ -134,6 +143,7 @@ from .data.addresses import (
 from .items import (
     ITEM_ID_BASE,
     ITEM_NAME_TO_ID,
+    KEYCHAIN_ITEM_NAME,
     PROGRESSIVE_BUNDLES,
     PROSPERITY_PER_ITEM,
     PROSPERITY_POINT_NAME,
@@ -337,6 +347,7 @@ LOCATION_RAM_BITS: dict[str, tuple[int, int]] = {
     **VENDING_LOCATION_RAM_BITS,
     **RECYCLE_SHOP_LOCATION_RAM_BITS,
     **MERIT_SHOP_LOCATION_RAM_BITS,
+    **NANIMON_QUEST_LOCATION_RAM_BITS,
 }
 
 # Threshold-based detection (e.g. NPC-gift PP gates) is unused in v7 —
@@ -607,6 +618,10 @@ def _build_item_delivery_routes() -> dict[str, ItemDeliverer]:
       them cumulatively from ``ctx.items_received``. Routing the
       delivery through here is still required so the counter
       advances on each delivery.
+    * ``Progressive Keychain`` (Phase 11) → no-op route. The actual
+      ``RAM_INVENTORY_SIZE`` write happens each tick in
+      :meth:`DigimonWorldClient._reconcile_keychain_inventory` from
+      the received-keychain count.
     * 2000-block dw_code (consumables, DV items, key items) → bank-byte
       increment.
     * 3001 → 1000-bit money deliverer.
@@ -632,6 +647,15 @@ def _build_item_delivery_routes() -> dict[str, ItemDeliverer]:
         # BEATEN-bit work happens in ``_reconcile_recruits`` each
         # watcher tick.
         if name in PROGRESSIVE_BUNDLES:
+            routes[name] = _make_progressive_bundle_deliverer()
+            continue
+        # ``Progressive Keychain`` (Phase 11) gets the same no-op
+        # treatment: the inventory-size write happens each tick in
+        # :meth:`_reconcile_keychain_inventory`, which counts received
+        # copies and pins ``RAM_INVENTORY_SIZE`` accordingly. Routing
+        # delivery through here just advances the items_received
+        # counter without doing anything else.
+        if name == KEYCHAIN_ITEM_NAME:
             routes[name] = _make_progressive_bundle_deliverer()
             continue
         # Key items live as trigger-array bits, not bank slots — must be
@@ -810,6 +834,17 @@ class DigimonWorldClient(BizHawkClient):
         # (which only happens when the option is on at gen time, so
         # this is doubly safe).
         self._recycle_shop_locations: bool | None = None
+        # Fishing locations: opt-in. When True, the watcher tracks
+        # per-fish inventory counts each tick and fires a fish AP
+        # location whenever the count increases while the player is on
+        # a fishing screen (MAYO06 / MAYO10). ``None`` = not yet
+        # received from slot_data.
+        self._fishing_locations: bool | None = None
+        # Baseline inventory fish counts from the previous watcher tick.
+        # ``None`` on first tick after connect — we record the baseline
+        # silently, so any fish already in inventory at connect time
+        # does NOT fire the location.
+        self._last_fish_counts: dict[int, int] | None = None
     # ------------------------------------------------------------------
     # validate_rom
     # ------------------------------------------------------------------
@@ -905,6 +940,12 @@ class DigimonWorldClient(BizHawkClient):
             self._recycle_shop_locations = bool(
                 ctx.slot_data.get("recycle_shop_locations", 0),
             )
+        if self._fishing_locations is None and ctx.slot_data is not None:
+            # Default off — pre-fishing seeds get no per-tick inventory
+            # scan.
+            self._fishing_locations = bool(
+                ctx.slot_data.get("fishing_locations", 0),
+            )
 
         try:
             await self._check_locations(ctx)
@@ -923,6 +964,7 @@ class DigimonWorldClient(BizHawkClient):
             if self._stat_gain_multiplier and self._stat_gain_multiplier > 1:
                 await self._enforce_stat_gain_multiplier(ctx)
             await self._enforce_prosperity(ctx)
+            await self._reconcile_keychain_inventory(ctx)
             await self._enforce_agumon_recruited(ctx)
             if self._bridge_always_open:
                 await self._enforce_bridge_always_open(ctx)
@@ -1691,6 +1733,74 @@ class DigimonWorldClient(BizHawkClient):
             ctx.bizhawk_ctx, [(RAM_PROSPERITY_POINTS, [target], DOMAIN_MAIN_RAM)],
         )
 
+    async def _reconcile_keychain_inventory(
+        self, ctx: BizHawkClientContext,
+    ) -> None:
+        """Pin the in-game inventory size to the AP-controlled value.
+
+        AP is the single source of truth for inventory capacity: the
+        byte at :data:`RAM_INVENTORY_SIZE` must equal
+        ``RAM_INVENTORY_DEFAULT_SIZE + KEYCHAIN_INVENTORY_PER_ITEM *
+        min(received_keychain_count, KEYCHAIN_MAX_COPIES)`` (= 10, 20,
+        or 30). Any vanilla DW1 attempt to bump inventory size (the
+        ``setInventorySize 20/30`` opcodes that fire during Nanimon site
+        visits) is overwritten on the next tick.
+
+        Brief 1-tick flicker if vanilla fires a setInventorySize without
+        AP having delivered the corresponding keychain — the inventory
+        appears to grow then shrink. No item-pickup window exists during
+        the Nanimon cutscene, so items can't land in slots 11-30 during
+        the flicker. Items already present in slots beyond the
+        AP-controlled size are preserved (vanilla iterates 0..size only;
+        the underlying array is 30 slots).
+
+        On growth (target > current) we also blank the newly-revealed
+        slots: vanilla DW1's startup leaves dev/debug item IDs in slots
+        11-29 (only the first 10 are zero-initialized by the real
+        ``initializeInventory`` codepath). Without blanking them, the
+        first Keychain delivery exposes the leftover garbage in the
+        inventory menu. We write ``RAM_INVENTORY_EMPTY_SLOT_ID`` to
+        each new slot's ID byte and 0 to the quantity byte.
+
+        Cheap: one RAM read, plus 1-3 byte writes (the size + two
+        small blank blocks when growing).
+        """
+
+        kc_count = sum(
+            1
+            for item in ctx.items_received
+            if ctx.item_names.lookup_in_game(item.item, ctx.game)
+            == KEYCHAIN_ITEM_NAME
+        )
+        target = (
+            RAM_INVENTORY_DEFAULT_SIZE
+            + KEYCHAIN_INVENTORY_PER_ITEM * min(kc_count, KEYCHAIN_MAX_COPIES)
+        )
+        target = min(target, RAM_INVENTORY_MAX_SIZE)
+        current = (await bizhawk.read(
+            ctx.bizhawk_ctx, [(RAM_INVENTORY_SIZE, 1, DOMAIN_MAIN_RAM)],
+        ))[0]
+        if not current:
+            return
+        if current[0] == target:
+            return
+        writes: list[RamWrite] = [
+            (RAM_INVENTORY_SIZE, [target], DOMAIN_MAIN_RAM),
+        ]
+        if target > current[0]:
+            new_count = target - current[0]
+            writes.append((
+                RAM_INVENTORY_ITEM_IDS_BASE + current[0],
+                [RAM_INVENTORY_EMPTY_SLOT_ID] * new_count,
+                DOMAIN_MAIN_RAM,
+            ))
+            writes.append((
+                RAM_INVENTORY_QUANTITIES_BASE + current[0],
+                [0] * new_count,
+                DOMAIN_MAIN_RAM,
+            ))
+        await bizhawk.write(ctx.bizhawk_ctx, writes)
+
     async def _check_locations(self, ctx: BizHawkClientContext) -> None:
         """Poll per-location RAM signals and send LocationChecks for new ones.
 
@@ -1732,6 +1842,7 @@ class DigimonWorldClient(BizHawkClient):
                 new_checks.append(location_id)
 
         await self._check_card_locations(ctx, new_checks)
+        await self._check_fishing_locations(ctx, new_checks)
 
         if new_checks:
             checked = await ctx.check_locations(new_checks)
@@ -1779,6 +1890,93 @@ class DigimonWorldClient(BizHawkClient):
             byte_val = block[nibble.byte_addr - CARD_BLOCK_BASE]
             count = (byte_val >> 4) if nibble.is_upper else (byte_val & 0x0F)
             if count > 0:
+                new_checks.append(location_id)
+
+    async def _check_fishing_locations(
+        self, ctx: BizHawkClientContext, new_checks: list[int],
+    ) -> None:
+        """Append any newly-caught-fish AP locations to ``new_checks``.
+
+        Heuristic: each tick, compute the per-fish-ID total quantity
+        across the 10 inventory slots and compare against the previous
+        tick's baseline. If the player is on a fishing screen
+        (:data:`FISHING_SCREEN_IDS`) and any fish's count strictly
+        increased, fire the corresponding AP location.
+
+        Why count-tracking (not "fish present while on screen"):
+        the player can walk into MAYO06 / MAYO10 with a fish already in
+        inventory (Dragon Eye Lake chest pickup, prior fishing session
+        whose location was already fired, etc.). Firing on "present"
+        would re-fire on every revisit. Firing on "count increased"
+        only triggers on a genuine catch.
+
+        Why the screen gate: AP-delivered items land in the bank, not
+        the inventory, so a same-tick foreign-world ``Digiseabass``
+        cannot inflate the inventory count. But the player can grab a
+        fish out of the bank and walk into MAYO06 — that would inflate
+        the count off-screen. Gating on the screen makes the only
+        remaining false-positive path "open the Dragon Eye Lake chest
+        while standing on a fishing screen", which we accept.
+
+        Baseline handling: on the first watcher tick after connect
+        (``_last_fish_counts is None``) we record the inventory
+        silently and return — fish already in inventory at connect
+        time do NOT fire. Every subsequent tick updates the baseline
+        unconditionally, so leaving the fishing screen and coming back
+        with new fish (acquired off-screen) doesn't fire either.
+
+        Cost: one 40-byte read (10-byte ID block + 20-byte gap +
+        10-byte quantity block) plus one 1-byte screen read per tick
+        when the option is on. Skipped entirely when off.
+        """
+
+        if not self._fishing_locations:
+            return
+        assert self._location_name_to_id is not None
+
+        try:
+            blocks = await bizhawk.read(
+                ctx.bizhawk_ctx,
+                [
+                    (CURRENT_SCREEN_ADDR, 1, DOMAIN_MAIN_RAM),
+                    (RAM_INVENTORY_ITEM_IDS_BASE,
+                     RAM_INVENTORY_SLOT_COUNT, DOMAIN_MAIN_RAM),
+                    (RAM_INVENTORY_QUANTITIES_BASE,
+                     RAM_INVENTORY_SLOT_COUNT, DOMAIN_MAIN_RAM),
+                ],
+            )
+        except bizhawk.RequestFailedError:
+            return
+        if (len(blocks) != 3
+                or len(blocks[0]) != 1
+                or len(blocks[1]) != RAM_INVENTORY_SLOT_COUNT
+                or len(blocks[2]) != RAM_INVENTORY_SLOT_COUNT):
+            return
+
+        screen_id = blocks[0][0]
+        ids = blocks[1]
+        quantities = blocks[2]
+
+        current: dict[int, int] = {fish_id: 0 for _, fish_id in FISH_LOCATION_INVENTORY_IDS}
+        for slot in range(RAM_INVENTORY_SLOT_COUNT):
+            slot_id = ids[slot]
+            if slot_id in current:
+                current[slot_id] += quantities[slot]
+
+        prev = self._last_fish_counts
+        self._last_fish_counts = current
+        # First tick after connect — baseline only, no fire.
+        if prev is None:
+            return
+        # Only catches made while standing on a fishing screen count.
+        if screen_id not in FISHING_SCREEN_IDS:
+            return
+
+        for location_name, fish_id in FISH_LOCATION_INVENTORY_IDS:
+            location_id = self._location_name_to_id.get(location_name)
+            if location_id is None or location_id in ctx.locations_checked:
+                continue
+            if current[fish_id] > prev.get(fish_id, 0):
                 new_checks.append(location_id)
 
     async def _deliver_items(self, ctx: BizHawkClientContext) -> None:

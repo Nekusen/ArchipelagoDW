@@ -40,6 +40,7 @@ from typing import TYPE_CHECKING
 from BaseClasses import ItemClassification, LocationProgressType
 from rule_builder.rules import CanReachRegion, Has
 
+from .data.addresses import FISHING_LOCATION_NAMES
 from .items import PROSPERITY_PER_ITEM
 from .locations import (
     RECRUIT_PP_REQUIREMENTS,
@@ -86,6 +87,8 @@ def set_all_rules(world: DigimonWorldWorld) -> None:
     _set_entrance_rules(world)
     _set_recruit_rules(world)
     _set_keyitem_pickup_rules(world)
+    _set_fishing_rules(world)
+    _set_nanimon_quest_rules(world)
     _apply_pp_cutoffs(world)
     _set_completion_condition(world)
 
@@ -423,6 +426,19 @@ def _drimogemon_extra(world: DigimonWorldWorld):
     return None
 
 
+# Andromon's recruit requires 4 specific File City buildings, which in
+# turn require visiting the prosperity NPCs that live in Tropical Jungle
+# (right side) and at least one of Great Canyon (right side) or
+# Gear Savanna (left side). Whamon Recruit is already implied by the
+# Factorial Town region rule. The 15 PP gate is encoded in
+# ``RECRUIT_PP_REQUIREMENTS``.
+def _andromon_extra(_world: DigimonWorldWorld):
+    return (
+        CanReachRegion("Tropical Jungle")
+        & (CanReachRegion("Great Canyon") | CanReachRegion("Gear Savanna"))
+    )
+
+
 _RECRUIT_EXTRA_RULES = {
     # Seadramon dropped 2026-05-09 (recruit cutscene IS Blue Flute pickup).
     # The rod-required rule moved to ``Blue Flute Pickup`` in
@@ -448,6 +464,7 @@ _RECRUIT_EXTRA_RULES = {
     # modes (the corresponding AP item isn't in the pool).
     "Coelamon":     _coelamon_extra,
     "Drimogemon":   _drimogemon_extra,
+    "Andromon":     _andromon_extra,
 }
 
 
@@ -527,6 +544,90 @@ def _set_keyitem_pickup_rules(world: DigimonWorldWorld) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Fishing location rules
+# ---------------------------------------------------------------------------
+
+def _set_fishing_rules(world: DigimonWorldWorld) -> None:
+    """Each fish AP location requires a rod on top of Greatlake access.
+
+    DW1's fishing minigame is enabled only when ``getBestFishingRod()``
+    finds a rod (``Fishing.cpp:18``) — so without an Old Fishrod or
+    Amazing Rod the player cannot catch any fish, regardless of how
+    long they stand on MAYO06 / MAYO10. The Greatlake region access
+    rule already gates Native Forest reachability, so the rod is the
+    only extra requirement.
+    """
+
+    if not int(world.options.fishing_locations.value):
+        return
+    rod_rule = Has("Old Fishrod") | Has("Amazing rod")
+    for name in FISHING_LOCATION_NAMES:
+        world.set_rule(world.get_location(name), rod_rule)
+
+
+# ---------------------------------------------------------------------------
+# Nanimon Quest rules
+# ---------------------------------------------------------------------------
+
+def _set_nanimon_quest_rules(world: DigimonWorldWorld) -> None:
+    """Per-site access rules for the 5 Nanimon Quest AP locations.
+
+    Each Nanimon site fires only after its area's host questline has
+    been progressed (verified 2026-05-13 against the user's playthrough
+    feedback):
+
+    * **Ogre Fortress**: covered by Great Canyon region access (which
+      transitively covers Freezeland for the Ogremon/Whamon chain).
+      No extra rule.
+    * **Ancient Dino Region**: covered by region access (Centarumon
+      recruit fight is in Tropical Jungle, implicit by region reach).
+      No extra rule.
+    * **Toy Town**: Nanimon appears in Script 145 Section_6, which only
+      fires after Section_5 (the WaruMonzaemon big-box minigame) has
+      completed and set trigger 270 — i.e. the player has the Gear.
+      Rule: ``Has("Gear")``.
+    * **Factorial Town (sewers)**: vanilla precondition is Andromon's
+      recruit completed. Andromon's recruit chain (per
+      :func:`_andromon_extra`) requires Tropical Jungle + (Great Canyon
+      OR Gear Savanna) + 15 PP. Great Canyon is already implied by
+      Factorial Town's ``Has("Whamon Recruit")`` entrance rule, so we
+      only need Tropical Jungle + 15 PP on top. (The
+      ``prosperity_goal`` option's floor is 20, so the 15 PP gate is
+      always reachable.)
+    * **Drill Tunnel** (Leomon's Ancestral Cave): vanilla precondition
+      is Leomon recruited, which AP encodes as ``Has("Leomonstone")``
+      (matches :func:`_leomon_extra`). The existing 45 PP cave-entrance
+      gate stays in place. When ``prosperity_goal < 45`` the cave is
+      unreachable in-game; both rules are dropped and
+      :func:`_apply_pp_cutoffs` flags the location EXCLUDED.
+    """
+
+    mt_threshold = int(world.options.prosperity_goal.value)
+
+    # Toy Town — Section_6 only fires once Gear is obtained.
+    world.set_rule(
+        world.get_location("Nanimon Quest: Toy Town"), Has("Gear"),
+    )
+
+    # Factorial Town — Andromon's recruit chain, minus what Factorial
+    # Town's region rule already enforces (Whamon Recruit ⇒ Great
+    # Canyon access path).
+    world.set_rule(
+        world.get_location("Nanimon Quest: Factorial Town"),
+        CanReachRegion("Tropical Jungle") & _pp(15),
+    )
+
+    # Drill Tunnel — 45 PP cave entrance + Leomonstone (matches the
+    # Leomon recruit gate). Both dropped when prosperity_goal < 45;
+    # ``_apply_pp_cutoffs`` excludes the location entirely in that case.
+    if 45 <= mt_threshold:
+        world.set_rule(
+            world.get_location("Nanimon Quest: Drill Tunnel"),
+            _pp(45) & Has("Leomonstone"),
+        )
+
+
+# ---------------------------------------------------------------------------
 # PP-cutoff cleanup (Phase 9)
 # ---------------------------------------------------------------------------
 
@@ -564,6 +665,10 @@ def _apply_pp_cutoffs(world: DigimonWorldWorld) -> None:
     # both share the in-game 45-PP cave entrance.
     if _LEOMON_CAVE_PP > mt_threshold:
         excluded.append("Leomonstone Pickup")
+        # Nanimon Quest: Drill Tunnel site is also inside Leomon's
+        # Ancestral Cave (Script 109's Nanimon stands next to the Stone
+        # Tablet) — same 45-PP gate.
+        excluded.append("Nanimon Quest: Drill Tunnel")
         excluded.extend(
             chest_name
             for chest_name, region in _CHEST_BY_SLOT.values()
