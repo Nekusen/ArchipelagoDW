@@ -62,9 +62,20 @@ recycle shop was just shipped.
   with AP description-string pointers.
 - Three vanilla `lui+addiu` callsites that loaded the original
   ITEM_DESC_PTR base have been patched. All three use `$r2`.
-- Slots 128..134 are **used by the recycle shop**. Slots 135..255
-  in the relocated table are currently **all zero pointers** —
-  available for the merit shop.
+- Slots 128..134 are **used by the recycle shop**. Slots **135..143
+  are free** for new extensions (9 slots × 32 B = 288 B). The
+  extended-ITEM_PARA region lives at RAM `0x801279DC..0x80127BDC`
+  (the space we freed by relocating ITEM_DESC_PTR — 512 B total,
+  = 16 slots × 32 B). Writes to slots 144+ would land in
+  unfreed vanilla data and are unsafe — same class of mistake
+  as the Cave1 corruption. The relocated ITEM_DESC_PTR table
+  is oversized to 256 entries (in Cave6) for future-proofing,
+  but the **backing ITEM_PARA storage is capped at slot 143**.
+
+  Note: ITEM_PARA entries are NOT in Cave6. Cave6 holds the
+  relocated ITEM_DESC_PTR table and the AP description strings;
+  the ITEM_PARA structs themselves use the freed RAM at
+  `0x801279DC+`.
 - `setItemTexture` is wrapped to clamp `id >= 128 → slot 83`
   (already-blanked icon). Any merit shop AP item displayed via
   an extended slot will show the blank icon automatically.
