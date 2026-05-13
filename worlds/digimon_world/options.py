@@ -403,6 +403,32 @@ class RecycleShopLocations(Toggle):
     display_name = "Recycle Shop Locations"
 
 
+class MeritShopLocations(Toggle):
+    """Add the Merit Shop (ShogunGekomon, Volume Villa) as AP locations.
+
+    DW1's merit shop sells 14 fixed merit-priced items (sup.recovery,
+    Sup.restore, 6 Chips, Rainbowhorn, 4 500-merit consumables, and
+    Amazing rod). With this on, each row becomes its own AP location
+    (``Merit Shop #1..#14``), and the shop UI displays the multiworld
+    AP item name + a "From <player>'s World" hover description. The
+    v1 ``Amazing Rod Pickup`` row at slot 83 (300 merits) is preserved
+    as a 15th row in the shop — its AP location is unchanged.
+
+    Mechanics: extends the recycle shop's relocated-ITEM_DESC_PTR
+    infrastructure. The merit-shop scan loop's hard upper bound (vanilla
+    ``< 0x80``) is bumped to ``< 0x95`` (= 149) so the scan reaches
+    extended ITEM_PARA slots 135..148. The shop's existing
+    ``giveItem``-callsite jal hijack (installed by v1) is re-targeted at
+    an extended dispatch wrapper that handles 15 ``(item_id, trigger)``
+    pairs. Vanilla items' ``meritValue`` is zeroed so their rows
+    disappear; AP-slot ``meritValue`` is set to the vanilla price of
+    the slot it replaces (preserves displayed cost). Merits are still
+    deducted (vanilla shop logic deducts before the give-item callsite).
+    """
+
+    display_name = "Merit Shop Locations"
+
+
 class GroundItemRandomization(DefaultOnToggle):
     """Shuffle the items that randomly spawn on field maps.
 
@@ -613,6 +639,7 @@ class DigimonWorldOptions(PerGameCommonOptions):
     card_locations: CardLocations
     vending_locations: VendingLocations
     recycle_shop_locations: RecycleShopLocations
+    merit_shop_locations: MeritShopLocations
     technique_rewards: TechniqueRewards
     god_mode: GodMode
 
@@ -631,7 +658,10 @@ option_groups: list[OptionGroup] = [
             StarterUseWeakestTech,
         ],
     ),
-    OptionGroup("Locations", [CardLocations, VendingLocations, RecycleShopLocations]),
+    OptionGroup(
+        "Locations",
+        [CardLocations, VendingLocations, RecycleShopLocations, MeritShopLocations],
+    ),
     OptionGroup(
         "Quality of Life",
         [

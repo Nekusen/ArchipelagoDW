@@ -150,19 +150,24 @@ class TestChestDispatch(DigimonWorldTestBase):
         # Giromon) + 65 chests + 8 key items (Old Fishrod Pickup,
         # Mansion Key Pickup, Frig Key Pickup, Gear Pickup, Rain Plant
         # Pickup, Blue Flute Pickup, Leomonstone Pickup, Amazing Rod
-        # Pickup) + 10 vending machines + 7 recycle shop slots.
+        # Pickup) + 10 vending machines + 7 recycle shop slots +
+        # 9 merit shop slots.
         # Per-seed availability of the option-gated entries (the 10
-        # vending, the 7 recycle shop) is filtered on the AP server
-        # side; the dispatch dict is unconditional. Airdramon,
-        # Seadramon, Nanimon, and Giromon stay in RECRUIT_RAM_BITS
-        # but are filtered out of LOCATION_RAM_BITS via
+        # vending, the 7 recycle shop, the 9 merit shop) is filtered
+        # on the AP server side; the dispatch dict is unconditional.
+        # Airdramon, Seadramon, Nanimon, and Giromon stay in
+        # RECRUIT_RAM_BITS but are filtered out of LOCATION_RAM_BITS via
         # ``_DROPPED_RECRUITS_BLACKLIST``.
         # Lava Cave Access / Tropical Jungle Bridge / Great Canyon
         # Bridge are AP items only — no associated AP location.
         # Steak is intentionally not AP-tracked: vanilla DW1 spawns it
         # from the Overdell fridge (gated on Frig Key) and is left on
         # the vanilla path.
-        self.assertEqual(len(LOCATION_RAM_BITS), 46 + 65 + 8 + 10 + 7)
+        # The merit shop architecturally caps at 9 AP slots (the freed
+        # ITEM_DESC_PTR region is 16 slots, 7 used by recycle); the
+        # remaining 5 vanilla merit-shop items get their meritValue
+        # zeroed but don't become AP locations.
+        self.assertEqual(len(LOCATION_RAM_BITS), 46 + 65 + 8 + 10 + 7 + 9)
 
 
 # =============================================================================

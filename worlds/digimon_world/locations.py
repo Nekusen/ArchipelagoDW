@@ -10,6 +10,7 @@ the same way:
 * ``69_005_xxx``..``69_054_xxx`` — recruit checks, one Digimon per 1000-block
 * ``69_055_xxx`` — vending machines (12, opt-in via :class:`worlds.digimon_world.options.VendingLocations`)
 * ``69_056_xxx`` — recycle shop slots (7, opt-in via :class:`worlds.digimon_world.options.RecycleShopLocations`)
+* ``69_057_xxx`` — merit shop slots (14, opt-in via :class:`worlds.digimon_world.options.MeritShopLocations`)
 
 Locked v1 MVP scope: chests + recruits + starter. NPC-gift "K Prosperity"
 locations are gone — prosperity is now a real AP item shipped in the
@@ -35,6 +36,7 @@ from BaseClasses import ItemClassification, Location, LocationProgressType
 
 from .data.addresses import (
     CARD_LOCATION_NIBBLES,
+    MERIT_SHOP_LOCATION_NAMES,
     RECYCLE_SHOP_LOCATION_NAMES,
     VENDING_LOCATION_NAMES,
     VENDING_LOCATION_REGIONS,
@@ -480,6 +482,29 @@ assert len(_RECYCLE_SHOP_LOCATIONS) == 7, len(_RECYCLE_SHOP_LOCATIONS)
 
 
 # =============================================================================
+# Merit-shop locations (14, opt-in)
+# =============================================================================
+# ShogunGekomon's Merit Shop in Volume Villa. 14 fixed merit-priced
+# rows; each becomes its own AP location when
+# :class:`worlds.digimon_world.options.MeritShopLocations` is on. Region
+# = ``Geko Swamp`` (Volume Villa is modeled as part of Geko Swamp per
+# the existing ``Amazing Rod Pickup`` placement). The v1
+# ``Amazing Rod Pickup`` row at slot 83 stays as a 15th AP merit-shop
+# row but is NOT one of these 14 — it's preserved separately as an
+# always-on key-item AP location at trigger 903.
+#
+# Inclusion / patch wiring is documented in
+# :mod:`worlds.digimon_world.data.addresses` under ``MERIT_SHOP_*`` and
+# in :func:`rom._write_merit_shop_locations_tokens`.
+
+_MERIT_SHOP_LOCATIONS: Final[dict[str, LocationEntry]] = {
+    name: LocationEntry(69_057_000 + i, "Geko Swamp")
+    for i, name in enumerate(MERIT_SHOP_LOCATION_NAMES)
+}
+assert len(_MERIT_SHOP_LOCATIONS) == 9, len(_MERIT_SHOP_LOCATIONS)
+
+
+# =============================================================================
 # Final assembled location table
 # =============================================================================
 
@@ -491,6 +516,7 @@ _LOCATION_TABLE: Final[dict[str, LocationEntry]] = {
     **_CARD_LOCATIONS,
     **_VENDING_LOCATIONS,
     **_RECYCLE_SHOP_LOCATIONS,
+    **_MERIT_SHOP_LOCATIONS,
 }
 
 LOCATION_NAME_TO_ID: Final[dict[str, int]] = {
@@ -504,6 +530,7 @@ LOCATION_NAME_GROUPS: Final[dict[str, set[str]]] = {
     "Cards": set(_CARD_LOCATIONS),
     "Vending": set(_VENDING_LOCATIONS),
     "Recycle Shop": set(_RECYCLE_SHOP_LOCATIONS),
+    "Merit Shop": set(_MERIT_SHOP_LOCATIONS),
 }
 
 
@@ -531,6 +558,10 @@ def create_all_locations(world: DigimonWorldWorld) -> None:
     # recycle shop AP locations are excluded from the pool.
     if not int(world.options.recycle_shop_locations.value):
         skip_locations.update(_RECYCLE_SHOP_LOCATIONS)
+    # MeritShopLocations: opt-in, default off. When off, the 14
+    # merit shop AP locations are excluded from the pool.
+    if not int(world.options.merit_shop_locations.value):
+        skip_locations.update(_MERIT_SHOP_LOCATIONS)
     # ChestRandomization: default ON. When OFF, the 65 chest AP
     # locations are excluded from the pool — chests retain vanilla
     # items and don't fire AP checks.

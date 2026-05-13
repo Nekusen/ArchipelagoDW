@@ -8,6 +8,27 @@ Read this first before touching shop-related code in a future session.
 
 ---
 
+## STATUS — Path A ITEM_PARA relocation shipped (2026-05-13)
+
+The merit shop AP randomization is **functional and shipped** with
+9 AP locations (`Merit Shop #1..#9`) plus the v1 `Amazing Rod Pickup`
+row at slot 83 (total 10 AP-tracked merit shop rows).
+
+**Path A is the new architectural baseline.** ITEM_PARA was
+relocated wholesale from vanilla `0x801269DC` to `0x8009DBC8` (a
+Cave6-style libgs-leftover region, 5808 bytes = 181 slots). All
+existing merit-shop / recycle-shop code keeps working unchanged
+beyond the wrapper builders' new sign-extension handling
+(`_decompose_kuseg`).
+
+Slots 144..180 (37 slots) are reserved for future shops. Adding a
+new shop is now a "clone the merit shop pattern, target a slot in
+[144, 180]" exercise. **See
+[item_para_relocation.md](item_para_relocation.md)** for the
+architectural doc + the "how to add a new shop" recipe.
+
+---
+
 ## STATUS — extended-ITEM_PARA now exists (2026-05-11)
 
 **Section 6 of this doc (the "scaling beyond ~12" analysis) is now

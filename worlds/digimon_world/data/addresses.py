@@ -3358,9 +3358,37 @@ def _flat_to_user_data(base: int, table_byte_offset: int) -> int:
 
 
 def _table_byte_to_bin_flat(table_byte_offset: int) -> int:
-    """Backwards-compat shim — ITEM_PARA-specific sector-hop helper."""
+    """Backwards-compat shim — ITEM_PARA-specific sector-hop helper.
+
+    This translates an offset within the **VANILLA** ITEM_PARA region
+    (at RAM 0x801269DC). For most patcher writes that's still the
+    right target — the :func:`relocate_item_para` procedure extension
+    copies the post-token vanilla region to the relocated region at
+    apply time, so writes via this helper flow through to the
+    relocated copy automatically.
+    """
 
     return _flat_to_user_data(ROM_ITEM_TABLE_BASE, table_byte_offset)
+
+
+def _decompose_kuseg(addr: int) -> tuple[int, int]:
+    """Return ``(lui_hi, addiu_lo)`` such that
+    ``lui rN, lui_hi; addiu rN, rN, addiu_lo`` constructs ``addr``.
+
+    The ``addiu`` immediate is sign-extended from 16 bits before being
+    added. When ``addr & 0xFFFF`` is >= 0x8000 the sign extension makes
+    it negative, so we have to increment the ``lui`` high half by 1 to
+    compensate. Standard MIPS toolchain idiom; encoded here so wrapper
+    builders can target arbitrary kuseg addresses (including the
+    relocated ITEM_PARA at 0x8009DBC8, whose low half 0xDBC8 has bit 15
+    set and would otherwise be encoded wrong).
+    """
+
+    lo = addr & 0xFFFF
+    hi = (addr >> 16) & 0xFFFF
+    if lo >= 0x8000:
+        hi = (hi + 1) & 0xFFFF
+    return hi, lo
 
 
 def read_user_data_bytes(rom: bytes, base_bin_offset: int, length: int) -> bytes:
@@ -3466,7 +3494,25 @@ ROM_ITEM_TABLE_ENTRY_COUNT: Final = 0x80  # 128 records in ITEM_PARA
 # convention of every other ``RAM_*`` constant. The wrapper builder
 # (which encodes lui/addiu) ORs in the 0x80000000 prefix to recover
 # the CPU-visible kuseg address.
-RAM_ITEM_PARA: Final = 0x001269DC
+#
+# **Path A relocation (always-on):** ITEM_PARA has been moved from
+# vanilla 0x801269DC to 0x8009DBC8 (a Cave6-style free region inside
+# the SLUS exec). All 24 vanilla SLUS readers of ITEM_PARA are patched
+# to load the new base — see :data:`ITEM_PARA_RELOC_READER_SITES`.
+# This raises the AP-extended-slot ceiling from 16 (the original
+# freed ITEM_DESC_PTR region) to 53 (slots 128..180), enough headroom
+# for the recycle shop + merit shop + future File City + Secret shops.
+#
+# ``RAM_ITEM_PARA`` (this constant) is the **post-relocation** address,
+# used by every runtime read/write (client reconciler, wrapper-emitted
+# lui/addiu instructions). ``RAM_ITEM_PARA_VANILLA`` is the original
+# 0x001269DC location — still used for some patcher writes whose data
+# gets COPIED to the new location by the :func:`relocate_item_para`
+# procedure extension at apply time.
+RAM_ITEM_PARA_VANILLA: Final = 0x001269DC
+RAM_ITEM_PARA_VANILLA_KUSEG: Final = 0x80000000 | RAM_ITEM_PARA_VANILLA
+
+RAM_ITEM_PARA: Final = 0x0009DBC8
 RAM_ITEM_PARA_KUSEG: Final = 0x80000000 | RAM_ITEM_PARA
 
 
@@ -3566,13 +3612,15 @@ assert (_bought_entry_end - ROM_AP_SHOP_BOUGHT_ENTRY_OFFSET) == ROM_ITEM_TABLE_E
     f"start=0x{ROM_AP_SHOP_BOUGHT_ENTRY_OFFSET:08X}, end=0x{_bought_entry_end:08X}"
 )
 
-# RAM address of slot 114's entry (= source for the runtime memcpy).
-# Bare Nymashock offset; the wrapper builder ORs in the kuseg prefix
-# when emitting the lui/addiu pair.
+# RAM address of slot 114's entry in the **relocated** ITEM_PARA
+# (= source for the runtime memcpy). Bare Nymashock offset; the
+# wrapper builder ORs in the kuseg prefix when emitting the lui/addiu
+# pair.
 AP_SHOP_BOUGHT_SENTINEL_RAM: Final = (
     RAM_ITEM_PARA + AP_SHOP_BOUGHT_SENTINEL_ITEM_ID * ROM_ITEM_TABLE_ENTRY_SIZE
 )
-assert AP_SHOP_BOUGHT_SENTINEL_RAM == 0x0012781C
+# Vanilla = 0x0012781C; relocated = 0x0009EA08 (RAM_ITEM_PARA + 114 × 32).
+assert AP_SHOP_BOUGHT_SENTINEL_RAM == 0x0009EA08, hex(AP_SHOP_BOUGHT_SENTINEL_RAM)
 
 # Pre-purchase name "AP Item" written into each dispatched slot's name
 # field at gen time. Just the name (20 bytes) — leaves the slot's
@@ -3930,8 +3978,8 @@ def _build_merit_shop_wrapper_bytes() -> bytes:
     # MIPS lui/addiu encoding needs the CPU-visible kuseg address; the
     # bare RAM_ITEM_PARA / AP_SHOP_BOUGHT_SENTINEL_RAM constants are
     # for client-side bizhawk.read calls (which use bare offsets).
-    ITEM_PARA_BASE = 0x80000000 | RAM_ITEM_PARA          # 0x801269DC
-    SENTINEL_RAM = 0x80000000 | AP_SHOP_BOUGHT_SENTINEL_RAM  # 0x8012781C
+    ITEM_PARA_BASE = 0x80000000 | RAM_ITEM_PARA
+    SENTINEL_RAM = 0x80000000 | AP_SHOP_BOUGHT_SENTINEL_RAM
 
     n_entries = len(MERIT_SHOP_DISPATCH)
     # mark_bought RAM address = wrapper start + prologue (16) + per-entry
@@ -3942,19 +3990,12 @@ def _build_merit_shop_wrapper_bytes() -> bytes:
     j_giveitem = 0x08000000 | ((GIVEITEM_RAM >> 2) & 0x03FFFFFF)
     jal_settrigger = 0x0C000000 | ((SETTRIGGER_RAM >> 2) & 0x03FFFFFF)
 
-    # ITEM_PARA_BASE and SENTINEL_RAM are loaded via lui+addiu — verify
-    # that the lower 16 bits would sign-extend correctly.
-    if (ITEM_PARA_BASE & 0xFFFF) >= 0x8000:
-        raise ValueError(
-            f"ITEM_PARA_BASE low half 0x{ITEM_PARA_BASE & 0xFFFF:04X} would "
-            f"need sign-extension; the addiu encoding here assumes a "
-            f"non-negative 16-bit literal."
-        )
-    if (SENTINEL_RAM & 0xFFFF) >= 0x8000:
-        raise ValueError(
-            f"SENTINEL_RAM low half 0x{SENTINEL_RAM & 0xFFFF:04X} would "
-            f"need sign-extension"
-        )
+    # ITEM_PARA_BASE and SENTINEL_RAM are loaded via lui+addiu. We use
+    # :func:`_decompose_kuseg` so the encoding works whether the low
+    # half needs sign-extension (e.g. relocated ITEM_PARA at
+    # 0x8009DBC8) or not (e.g. vanilla 0x801269DC).
+    item_para_hi, item_para_lo = _decompose_kuseg(ITEM_PARA_BASE)
+    sentinel_hi, sentinel_lo = _decompose_kuseg(SENTINEL_RAM)
 
     out = bytearray()
 
@@ -4001,10 +4042,8 @@ def _build_merit_shop_wrapper_bytes() -> bytes:
     # Compute dest = ITEM_PARA + item_id * 32, then memcpy 32 bytes from
     # the AP-shop-bought sentinel into the dispatched slot. Returns
     # without calling vanilla giveItem.
-    item_para_hi = (ITEM_PARA_BASE >> 16) & 0xFFFF  # 0x8012
-    item_para_lo = ITEM_PARA_BASE & 0xFFFF          # 0x69DC
-    sentinel_hi = (SENTINEL_RAM >> 16) & 0xFFFF     # 0x8012
-    sentinel_lo = SENTINEL_RAM & 0xFFFF             # 0x781C
+    # (item_para_hi/lo and sentinel_hi/lo were computed above using
+    # _decompose_kuseg so the addiu sign-extension is handled correctly.)
 
     # lw    $a0, 0x08($sp)        — restore item_id (clobbered by setTrigger).
     out += _struct.pack("<I", 0x8FA40008)
@@ -6544,8 +6583,10 @@ def ext_item_para_slot_bin_offset(slot: int) -> int:
     return _table_byte_to_bin_flat(slot * ROM_ITEM_TABLE_ENTRY_SIZE)
 
 
-def build_ap_item_para_entry(name: str, price: int) -> bytes:
-    """Build a 32-byte ITEM_PARA entry for one AP recycle-shop slot.
+def build_ap_item_para_entry(
+    name: str, price: int, merit_value: int = 0,
+) -> bytes:
+    """Build a 32-byte ITEM_PARA entry for one AP shop slot.
 
     Layout (matches dw1.hpp Item struct):
 
@@ -6553,18 +6594,24 @@ def build_ap_item_para_entry(name: str, price: int) -> bytes:
       spec — the in-game name field renders 14 chars cleanly; the extra
       6 padding bytes stay zero).
     * bytes 20..23: value (i32 LE, money price — set to ``price``).
-    * bytes 24..25: meritValue (0).
+    * bytes 24..25: meritValue (i16 LE — set to ``merit_value``).
     * bytes 26..27: sortingValue (0).
     * byte  28:     itemColor (0).
     * byte  29:     dropable (0 — never grants to inventory).
     * bytes 30..31: unk (0).
+
+    The recycle shop passes ``merit_value=0`` (default): it filters its
+    runtime array by writing directly to the engine-built [id, flag]
+    array, so meritValue is irrelevant. The merit shop passes a non-zero
+    ``merit_value`` so its open-time ITEM_PARA scan picks the slot up
+    (see :func:`merit_shop_inventory.dw1_merit_inventory`).
     """
 
     name_bytes = name.encode("ascii", errors="replace")[:14]
     return (
         name_bytes.ljust(20, b"\x00")
         + price.to_bytes(4, "little", signed=True)
-        + b"\x00\x00"  # meritValue
+        + merit_value.to_bytes(2, "little", signed=True)
         + b"\x00\x00"  # sortingValue
         + b"\x00"      # itemColor
         + b"\x00"      # dropable
@@ -7006,3 +7053,657 @@ ROM_RECYCLE_SHOP_INIT_PATCH_VALUE: Final = (
     0x00000000,
 )
 
+
+# =============================================================================
+# Merit Shop (Volume Villa, ShogunGekomon) — full AP randomization
+# =============================================================================
+#
+# Extends the merit shop from the v1 single-slot AP-Item flow (slot 83 ->
+# trigger 903 = ``Amazing Rod Pickup``) to full AP randomization with all
+# 14 vanilla merit-shop entries replaced by AP locations. Builds on the
+# recycle shop's extended-ITEM_PARA + relocated-ITEM_DESC_PTR
+# infrastructure (already shipping in Cave6).
+#
+# **Architecture (locked):**
+#
+# The merit shop is engine-driven: on open, the function at
+# RAM 0x801072C4 walks ITEM_PARA from id 0 to bound ``< 0x80`` and
+# includes any entry whose ``meritValue`` is non-zero. We extend that
+# scan to cover slots 128..148 by patching the loop bound at
+# RAM 0x00107430 from ``sltiu $r1, $r5, 0x0080`` to
+# ``sltiu $r1, $r5, 0x0095`` (= 149). Slots 135..148 hold the 14 AP
+# merit-shop entries (one per vanilla merit-shop item); each entry's
+# ``meritValue`` is the vanilla merit price of the slot it replaces, so
+# the displayed cost is preserved. We zero each vanilla entry's
+# ``meritValue`` so the vanilla item rows disappear.
+#
+# Each AP row's name (in ITEM_PARA[135 + i].name) is the multiworld-
+# resolved AP item name truncated to 14 chars. Each row's description
+# (via the relocated ITEM_DESC_PTR[135 + i]) is "From <player>'s World".
+# A new 14-entry AP description-string region lives at the start of
+# Cave6's free zone, AFTER the recycle shop's existing structures.
+#
+# A wrapper at the merit shop's existing giveItem callsite (RAM
+# 0x8010BF3C, already hijacked in v1 to RAM 0x80095800) is *re*-targeted
+# when MeritShopLocations is on: the jal hijack is overridden to point
+# at an extended-dispatch wrapper at RAM 0x80096338 that handles N=15
+# dispatch entries — slot 83 (trigger 903, the v1 ``Amazing Rod Pickup``
+# row, kept) plus slots 135..148 (triggers 912..925). Each match fires
+# ``setTrigger(trigger_id)`` for the AP signal, then memcpys the slot
+# 114 "AP Item Bought" sentinel over the dispatched slot (same dead
+# code path as the v1 wrapper — preserved for shape consistency) and
+# returns without delivering an item. Money / merits are still deducted
+# by the surrounding shop logic before this jal.
+#
+# The N=1 wrapper at RAM 0x80095800 still ships always-on but is dead
+# code when MeritShopLocations is on (the jal override points elsewhere).
+# This zero-touches the v1 single-slot flow when the option is off.
+#
+# **RE source:** docs/merit_shop.md and the static probe at
+# tools/dw1_merit_inventory.py. Inventory enumerated via the probe:
+# 14 entries (sup.recovery, Sup.restore, 6× Chips, Rainbowhorn, 4× 500-
+# merit consumables, Amazing rod) — verified against
+# Digimon World (USA).bin SHA-1 5611645D...
+
+# --- AP slot / trigger / location allocations -------------------------------
+#
+# **Hard ceiling**: the freed ITEM_DESC_PTR region at vanilla RAM
+# ``0x801279DC..0x80127BDC`` is 512 bytes = exactly 16 ITEM_PARA slots
+# (128..143). Beyond slot 143, RAM ``0x80127BDC`` hosts an item-color /
+# palette-index table read by ``setItemTexture`` at ``0x000E5E80..
+# 0x000E5E8C`` (verified 2026-05-13 against references/DW1-Code/SLUS.asm).
+# Writing extended ITEM_PARA entries past slot 143 corrupts that table —
+# the merit-shop ``mark_bought`` memcpy at runtime then doubles the
+# damage with every purchase, causing the post-purchase refresh to
+# freeze the game. Recycle shop uses 7 of the 16 (128..134); merit shop
+# uses the remaining 9 (135..143).
+MERIT_SHOP_AP_ITEM_ID_BASE: Final = 135
+MERIT_SHOP_AP_ITEM_ID_COUNT: Final = 9
+MERIT_SHOP_AP_ITEM_IDS: Final = tuple(
+    MERIT_SHOP_AP_ITEM_ID_BASE + i
+    for i in range(MERIT_SHOP_AP_ITEM_ID_COUNT)
+)
+# Highest used extended slot (143 = 135 + 8). The scan-loop bound patch
+# below uses 144 (= 143 + 1) so the scan reaches up through slot 143.
+MERIT_SHOP_AP_ITEM_ID_LAST: Final = (
+    MERIT_SHOP_AP_ITEM_ID_BASE + MERIT_SHOP_AP_ITEM_ID_COUNT - 1            # 143
+)
+# Sanity: must come after recycle shop's range (128..134) and stay
+# inside the freed ITEM_DESC_PTR region (slots 128..143). Writing past
+# slot 143 corrupts the post-ITEM_DESC_PTR color table — see the block
+# comment above.
+assert MERIT_SHOP_AP_ITEM_ID_BASE == RECYCLE_SHOP_AP_ITEM_ID_BASE + RECYCLE_SHOP_AP_ITEM_ID_COUNT, (
+    f"merit-shop slot base 0x{MERIT_SHOP_AP_ITEM_ID_BASE:X} should follow "
+    f"recycle-shop end 0x{RECYCLE_SHOP_AP_ITEM_ID_BASE + RECYCLE_SHOP_AP_ITEM_ID_COUNT:X}"
+)
+assert MERIT_SHOP_AP_ITEM_ID_LAST <= 143, (
+    f"merit-shop slot ceiling: extended slots cannot exceed 143 without "
+    f"clobbering the per-item color table at RAM 0x80127BDC. "
+    f"Got MERIT_SHOP_AP_ITEM_ID_LAST = {MERIT_SHOP_AP_ITEM_ID_LAST}."
+)
+
+# AP location triggers — allocated 912..920 (9 triggers, follows recycle's
+# 904..910 with bit 7 of byte 0x001BE03E left free as 911).
+#
+# **Range justification**: 912..919 = bits 0..7 of byte 0x001BE03F;
+# 920 = bit 0 of byte 0x001BE040. Bits 1..7 of byte 0x001BE040 stay
+# free for future expansion (921..927). Trigger 928 starts byte
+# 0x001BE041, also free. The danger zone begins at byte 0x001BE042
+# (:data:`RAM_MERAMON_TUNNEL_DRIMOGEMON_STATE`). All 9 triggers stay
+# well clear.
+MERIT_SHOP_TRIGGER_BASE: Final = 912
+MERIT_SHOP_TRIGGER_COUNT: Final = MERIT_SHOP_AP_ITEM_ID_COUNT
+MERIT_SHOP_TRIGGER_IDS: Final = tuple(
+    MERIT_SHOP_TRIGGER_BASE + i for i in range(MERIT_SHOP_TRIGGER_COUNT)
+)
+# Sanity: trigger bytes stay within the unused 0x001BE03F..0x001BE041 gap.
+_MERIT_TRIG_BYTES = {
+    AP_TRIGGER_ARRAY_BASE + (t // 8) for t in MERIT_SHOP_TRIGGER_IDS
+}
+assert _MERIT_TRIG_BYTES == {0x001BE03F, 0x001BE040}, (
+    f"merit shop triggers spilled out of the 0x001BE03F..0x001BE040 gap: "
+    f"{[hex(b) for b in sorted(_MERIT_TRIG_BYTES)]}"
+)
+assert max(_MERIT_TRIG_BYTES) < RAM_MERAMON_TUNNEL_DRIMOGEMON_STATE, (
+    f"merit shop trigger range overflows into RAM_MERAMON_TUNNEL at "
+    f"0x{RAM_MERAMON_TUNNEL_DRIMOGEMON_STATE:08X}: max byte "
+    f"0x{max(_MERIT_TRIG_BYTES):08X}"
+)
+
+# Full vanilla merit-shop inventory — verified 2026-05-13 via
+# tools/dw1_merit_inventory probe against Digimon World (USA).bin (SHA-1
+# 5611645D...). 14 entries with ``meritValue > 0`` in ITEM_PARA.
+#
+# Used by the patcher to drive the per-slot vanilla ``meritValue``
+# zero-outs (so vanilla rows disappear from the shop). The first
+# :data:`MERIT_SHOP_AP_ITEM_ID_COUNT` (= 9) entries also drive each AP
+# slot's displayed merit price — slot ``MERIT_SHOP_AP_ITEM_ID_BASE + i``
+# inherits ``MERIT_SHOP_VANILLA_ENTRIES[i][2]`` so the shop shows the
+# same merit cost the vanilla row would have. The remaining 5 entries
+# are zeroed but DO NOT become AP locations (architectural ceiling — see
+# the ``MERIT_SHOP_AP_ITEM_ID_COUNT`` comment above).
+#
+# Format: ``(slot_id, name_for_docs, vanilla_merit_value)``. The order
+# is by slot_id ascending, matching the merit shop's display order
+# (since the engine's scan walks ITEM_PARA from id 0 up).
+MERIT_SHOP_VANILLA_ENTRIES: Final[tuple[tuple[int, str, int], ...]] = (
+    (0x03, "sup.recovery",   20),  # value=2500   -> Merit Shop #1
+    (0x0C, "Sup.restore",   100),  # value=9500   -> Merit Shop #2
+    (0x17, "Off. Chip",     800),  # value=9999   -> Merit Shop #3
+    (0x18, "Def. Chip",     800),  # value=9999   -> Merit Shop #4
+    (0x19, "Brain Chip",    800),  # value=9999   -> Merit Shop #5
+    (0x1A, "Quick Chip",    800),  # value=9999   -> Merit Shop #6
+    (0x1B, "HP Chip",       800),  # value=9999   -> Merit Shop #7
+    (0x1C, "MP Chip",       800),  # value=9999   -> Merit Shop #8
+    (0x54, "Rainbowhorn",   500),  # value=5000   -> Merit Shop #9
+    # Entries past index 8 do NOT become AP slots — they're zeroed so
+    # they disappear from the shop, but no Merit Shop #N location is
+    # allocated for them.
+    (0x5B, "Waterbottle",   500),  # value=5000   (hidden only)
+    (0x5D, "Red Shell",     500),  # value=5000   (hidden only)
+    (0x5E, "Hard Scale",    500),  # value=5000   (hidden only)
+    (0x60, "Ice crystal",   500),  # value=5000   (hidden only)
+    (0x75, "Amazing rod",   300),  # value=3000   (already hidden in v1)
+)
+assert len(MERIT_SHOP_VANILLA_ENTRIES) == 14, len(MERIT_SHOP_VANILLA_ENTRIES)
+assert len(MERIT_SHOP_VANILLA_ENTRIES) >= MERIT_SHOP_AP_ITEM_ID_COUNT, (
+    f"first {MERIT_SHOP_AP_ITEM_ID_COUNT} entries become AP slots; "
+    f"need at least that many vanilla entries"
+)
+
+# AP location names — index matches MERIT_SHOP_VANILLA_ENTRIES order.
+MERIT_SHOP_LOCATION_NAMES: Final = tuple(
+    f"Merit Shop #{i + 1}"
+    for i in range(MERIT_SHOP_AP_ITEM_ID_COUNT)
+)
+
+# Per-location (byte_addr, bit_index) for the client's bit-poll table.
+MERIT_SHOP_LOCATION_RAM_BITS: Final[dict[str, tuple[int, int]]] = {
+    name: (
+        AP_TRIGGER_ARRAY_BASE + (MERIT_SHOP_TRIGGER_IDS[i] // 8),
+        MERIT_SHOP_TRIGGER_IDS[i] % 8,
+    )
+    for i, name in enumerate(MERIT_SHOP_LOCATION_NAMES)
+}
+
+# --- AP description strings for the 9 merit-shop slots ---------------------
+# **Sector alignment**: the patcher's :func:`apply_tokens` writes bytes
+# **flat** into the .bin (no sector-hop awareness inside a single token
+# write). Mode2/2352 sectors are 2352 bytes with a 24-byte header + 2048
+# user-data + 280 EC. A flat write that spans more than one sector's
+# user-data region clobbers the EC zone (harmless — recalc_edc rewrites
+# it) **and** the next sector's HEADER zone (NOT harmless — corrupts the
+# sector sync pattern, making the PSX CD-ROM unable to reliably load
+# that sector's user-data; the bytes we *wanted* there never make it
+# into RAM at boot).
+#
+# Concretely: an earlier revision placed the merit AP desc strings at
+# RAM 0x80095FB8 (= sector 148349 ud-byte 1976). The 576-byte flat write
+# clobbered sector 148350's 24-byte header, so sector 148350 didn't load
+# correctly — and the merit extended wrapper, also in sector 148350, ran
+# as whatever garbage happened to be at the wrapper's RAM location. The
+# game froze on first OK press in the merit shop ("frozen image, audio
+# loops" symptom).
+#
+# Fix: align the merit AP desc strings region to a sector boundary so
+# the 576-byte write stays inside one sector. The first sector-boundary
+# RAM address in Cave6 *past* the recycle init wrapper (which ends at
+# RAM 0x80095FB8) is sector 148350 ud-byte 0 = RAM 0x80096000. That
+# leaves a 72-byte gap at 0x80095FB8..0x80096000; acceptable trade-off.
+# All subsequent merit-shop pieces stack from 0x80096000 onwards and
+# also stay inside sector 148350's 2048-byte ud-region.
+MERIT_AP_DESC_STRINGS_RAM: Final = 0x80096000
+# 4-byte align (sector-aligned, always a multiple of 4).
+assert MERIT_AP_DESC_STRINGS_RAM % 4 == 0, hex(MERIT_AP_DESC_STRINGS_RAM)
+MERIT_AP_DESC_STRINGS_BIN_OFFSET: Final = _slus_ram_to_bin_offset(
+    MERIT_AP_DESC_STRINGS_RAM,
+)
+MERIT_AP_DESC_STRINGS_TOTAL_SIZE: Final = (
+    AP_DESC_STRING_MAX_LEN * MERIT_SHOP_AP_ITEM_ID_COUNT                     # 576
+)
+# Sanity: desc strings region must stay inside one Mode2/2352 sector.
+# Sector ud-region is 2048 bytes; we start at ud-byte 0 of sector 148350
+# and write MERIT_AP_DESC_STRINGS_TOTAL_SIZE bytes.
+assert MERIT_AP_DESC_STRINGS_TOTAL_SIZE <= 2048, (
+    f"merit AP desc strings size {MERIT_AP_DESC_STRINGS_TOTAL_SIZE} > 2048; "
+    f"a single flat token write would cross a sector boundary and corrupt "
+    f"the next sector's header"
+)
+
+# --- Extended merit-shop wrapper (N=10: slot 83 + slots 135..143) -----------
+# Sits in Cave6 after the merit-shop AP description strings. Built with
+# the same dispatch shape as :func:`_build_merit_shop_wrapper_bytes` so
+# the N=1 wrapper at 0x80095800 stays semantically identical for the
+# option-off path; only the dispatch table size changes.
+#
+# Wrapper size = (38 + 7 * N) * 4 bytes where N = 10 (slot 83 + 9 merit-
+# shop AP slots) = (38 + 70) * 4 = 432 bytes.
+ROM_MERIT_SHOP_EXT_WRAPPER_RAM: Final = (
+    MERIT_AP_DESC_STRINGS_RAM + MERIT_AP_DESC_STRINGS_TOTAL_SIZE             # 0x80096240
+)
+assert ROM_MERIT_SHOP_EXT_WRAPPER_RAM % 4 == 0, hex(ROM_MERIT_SHOP_EXT_WRAPPER_RAM)
+ROM_MERIT_SHOP_EXT_WRAPPER_OFFSET: Final = _slus_ram_to_bin_offset(
+    ROM_MERIT_SHOP_EXT_WRAPPER_RAM,
+)
+# Sanity: extended wrapper must stay inside one Mode2/2352 sector
+# (apply_tokens does flat writes; crossing a boundary corrupts the
+# next sector's header — see MERIT_AP_DESC_STRINGS_RAM block comment).
+# Sector ud-region is 2048 bytes; wrapper at RAM 0x80096240 starts at
+# sector 148350 ud-byte 576 and runs for 432 bytes = ud-byte 1008 end.
+# Both well within the 2048-byte limit.
+_MERIT_EXT_WRAPPER_SECTOR_UD_START: Final = (
+    ROM_MERIT_SHOP_EXT_WRAPPER_RAM - 0x80096000                              # 576
+)
+assert (_MERIT_EXT_WRAPPER_SECTOR_UD_START + (38 + 7 * (1 + MERIT_SHOP_AP_ITEM_ID_COUNT)) * 4
+        <= 2048), (
+    f"extended merit wrapper at ud-byte {_MERIT_EXT_WRAPPER_SECTOR_UD_START} + "
+    f"{(38 + 7 * (1 + MERIT_SHOP_AP_ITEM_ID_COUNT)) * 4} bytes would cross a "
+    f"sector boundary"
+)
+
+# Full N=15 dispatch table = slot 83 (kept as ``Amazing Rod Pickup``) +
+# 14 extended slots. Order: slot 83 first (matches the existing N=1
+# wrapper's behavior for that slot), then slots 135..148 in ascending
+# order matching MERIT_SHOP_VANILLA_ENTRIES / MERIT_SHOP_LOCATION_NAMES.
+MERIT_SHOP_EXT_DISPATCH: Final[tuple[tuple[int, int], ...]] = (
+    (AP_CHEST_SENTINEL_ITEM_ID, AMAZING_ROD_LOCATION_TRIGGER_ID),
+    *(
+        (MERIT_SHOP_AP_ITEM_ID_BASE + i, MERIT_SHOP_TRIGGER_BASE + i)
+        for i in range(MERIT_SHOP_AP_ITEM_ID_COUNT)
+    ),
+)
+assert len(MERIT_SHOP_EXT_DISPATCH) == 1 + MERIT_SHOP_AP_ITEM_ID_COUNT       # 15
+
+
+def _build_merit_shop_ext_wrapper_bytes() -> bytes:
+    """Build the extended merit-shop wrapper (N=15).
+
+    Identical shape to :func:`_build_merit_shop_wrapper_bytes`, but
+    parameterised on :data:`MERIT_SHOP_EXT_DISPATCH` instead of
+    :data:`MERIT_SHOP_DISPATCH`. The wrapper lives at
+    :data:`ROM_MERIT_SHOP_EXT_WRAPPER_RAM` so the ``j mark_bought``
+    target is recomputed for that base.
+
+    Bytecode is decode-verified at module load (see the bottom of this
+    block): each emitted u32 must round-trip through the standard
+    ``(opcode << 26) | (rs << 21) | (rt << 16) | imm`` decomposition.
+    """
+
+    import struct as _struct
+
+    SETTRIGGER_RAM = 0x801065C0
+    GIVEITEM_RAM = 0x800C5240
+    ITEM_PARA_BASE = 0x80000000 | RAM_ITEM_PARA
+    SENTINEL_RAM = 0x80000000 | AP_SHOP_BOUGHT_SENTINEL_RAM
+
+    n_entries = len(MERIT_SHOP_EXT_DISPATCH)
+    # mark_bought RAM address = wrapper start + prologue (16) +
+    # per-entry blocks (28 * N) + give_item path (24).
+    mark_bought_offset = 0x10 + 28 * n_entries + 0x18
+    mark_bought_ram = ROM_MERIT_SHOP_EXT_WRAPPER_RAM + mark_bought_offset
+    j_mark = 0x08000000 | ((mark_bought_ram >> 2) & 0x03FFFFFF)
+    j_giveitem = 0x08000000 | ((GIVEITEM_RAM >> 2) & 0x03FFFFFF)
+    jal_settrigger = 0x0C000000 | ((SETTRIGGER_RAM >> 2) & 0x03FFFFFF)
+
+    # Sign-extension-aware decomposition; works for both vanilla
+    # (0x801269DC, low half 0x69DC < 0x8000) and relocated
+    # (0x8009DBC8, low half 0xDBC8 >= 0x8000) bases.
+    item_para_hi, item_para_lo = _decompose_kuseg(ITEM_PARA_BASE)
+    sentinel_hi, sentinel_lo = _decompose_kuseg(SENTINEL_RAM)
+
+    out = bytearray()
+
+    # --- Prologue (4 instrs, 16 B) -----------------------------------------
+    out += _struct.pack("<I", 0x27BDFFF0)  # addiu $sp, $sp, -0x10
+    out += _struct.pack("<I", 0xAFBF000C)  # sw    $ra, 0x0C($sp)
+    out += _struct.pack("<I", 0xAFA40008)  # sw    $a0, 0x08($sp)
+    out += _struct.pack("<I", 0xAFA50004)  # sw    $a1, 0x04($sp)
+
+    # --- Per-entry blocks (7 instrs / 28 B each) ---------------------------
+    BNE_OFFSET_5 = 0x14810005
+    for item_id, trigger_id in MERIT_SHOP_EXT_DISPATCH:
+        if not (0 <= item_id <= 0xFF):
+            raise ValueError(f"item_id {item_id} out of u8 range")
+        if not (0 <= trigger_id <= 0xFFFF):
+            raise ValueError(f"trigger_id {trigger_id} out of u16 range")
+        # addiu $at, $0, item_id
+        out += _struct.pack("<I", 0x24010000 | (item_id & 0xFFFF))
+        # bne $a0, $at, +5
+        out += _struct.pack("<I", BNE_OFFSET_5)
+        out += _struct.pack("<I", 0x00000000)  # nop (bne delay slot)
+        # jal setTrigger
+        out += _struct.pack("<I", jal_settrigger)
+        # addiu $a0, $0, trigger_id (jal delay slot)
+        out += _struct.pack("<I", 0x24040000 | (trigger_id & 0xFFFF))
+        # j mark_bought
+        out += _struct.pack("<I", j_mark)
+        out += _struct.pack("<I", 0x00000000)  # nop (j delay slot)
+
+    # --- give_item path (6 instrs, 24 B) ----------------------------------
+    out += _struct.pack("<I", 0x8FBF000C)  # lw    $ra, 0x0C($sp)
+    out += _struct.pack("<I", 0x8FA40008)  # lw    $a0, 0x08($sp)
+    out += _struct.pack("<I", 0x8FA50004)  # lw    $a1, 0x04($sp)
+    out += _struct.pack("<I", 0x27BD0010)  # addiu $sp, $sp, 0x10
+    out += _struct.pack("<I", j_giveitem)  # j     0x800C5240
+    out += _struct.pack("<I", 0x00000000)  # nop
+
+    # --- mark_bought path (28 instrs, 112 B) -------------------------------
+    # (item_para_hi/lo and sentinel_hi/lo declared above via
+    # _decompose_kuseg; reuse here.)
+
+    out += _struct.pack("<I", 0x8FA40008)  # lw $a0, 0x08($sp)
+    out += _struct.pack("<I", 0x00045140)  # sll $t2, $a0, 5
+    out += _struct.pack("<I", 0x3C090000 | item_para_hi)
+    out += _struct.pack("<I", 0x25290000 | item_para_lo)
+    out += _struct.pack("<I", 0x01495021)  # addu $t2, $t2, $t1
+    out += _struct.pack("<I", 0x3C080000 | sentinel_hi)
+    out += _struct.pack("<I", 0x25080000 | sentinel_lo)
+    for off in (0, 4, 8, 12, 16, 20, 24, 28):
+        out += _struct.pack("<I", 0x8D0B0000 | off)
+        out += _struct.pack("<I", 0xAD4B0000 | off)
+    out += _struct.pack("<I", 0x8FBF000C)
+    out += _struct.pack("<I", 0x8FA50004)
+    out += _struct.pack("<I", 0x27BD0010)
+    out += _struct.pack("<I", 0x03E00008)
+    out += _struct.pack("<I", 0x24020001)
+
+    return bytes(out)
+
+
+ROM_MERIT_SHOP_EXT_WRAPPER_BYTES: Final = _build_merit_shop_ext_wrapper_bytes()
+# 4 prologue + 6 give_item + 28 mark_bought + 7 per dispatch entry.
+assert len(ROM_MERIT_SHOP_EXT_WRAPPER_BYTES) == (
+    (38 + 7 * len(MERIT_SHOP_EXT_DISPATCH)) * 4
+), (
+    len(ROM_MERIT_SHOP_EXT_WRAPPER_BYTES), len(MERIT_SHOP_EXT_DISPATCH),
+)
+# = 572 bytes for N=15.
+
+# Cave6 bounds re-check — extended wrapper extends past the merit AP
+# desc strings.
+assert (ROM_MERIT_SHOP_EXT_WRAPPER_RAM
+        + len(ROM_MERIT_SHOP_EXT_WRAPPER_BYTES) <= _CAVE6_END_RAM), (
+    f"Extended merit-shop wrapper end "
+    f"0x{ROM_MERIT_SHOP_EXT_WRAPPER_RAM + len(ROM_MERIT_SHOP_EXT_WRAPPER_BYTES):08X} "
+    f"overflows Cave6 end 0x{_CAVE6_END_RAM:08X}"
+)
+
+
+# --- Wrapper-bytecode decode-verify (sanity) --------------------------------
+# Re-decode every emitted instruction in
+# :data:`ROM_MERIT_SHOP_EXT_WRAPPER_BYTES` and confirm a handful of
+# load-bearing pieces round-trip correctly. This catches any encoding
+# typo before it ships — the recycle shop's prebuild wrapper had to be
+# reverted after two encoding bugs slipped through review (see git
+# 0xb5b16796).
+def _verify_merit_shop_ext_wrapper_bytecode() -> None:
+    import struct as _struct
+
+    expected_n = len(MERIT_SHOP_EXT_DISPATCH)
+    n_words = len(ROM_MERIT_SHOP_EXT_WRAPPER_BYTES) // 4
+    words = list(_struct.unpack(f"<{n_words}I", ROM_MERIT_SHOP_EXT_WRAPPER_BYTES))
+
+    # Prologue: 4 instructions starting at index 0.
+    assert words[0] == 0x27BDFFF0, hex(words[0])  # addiu $sp, $sp, -0x10
+    assert words[1] == 0xAFBF000C, hex(words[1])  # sw $ra, 0x0C($sp)
+    assert words[2] == 0xAFA40008, hex(words[2])  # sw $a0, 0x08($sp)
+    assert words[3] == 0xAFA50004, hex(words[3])  # sw $a1, 0x04($sp)
+
+    # Per-entry: 7 instructions × N starting at index 4.
+    for i, (item_id, trigger_id) in enumerate(MERIT_SHOP_EXT_DISPATCH):
+        base = 4 + i * 7
+        w_addiu_at = words[base + 0]
+        # addiu $at, $0, item_id: opcode 9, rs=0, rt=1, imm=item_id
+        opcode = (w_addiu_at >> 26) & 0x3F
+        rs = (w_addiu_at >> 21) & 0x1F
+        rt = (w_addiu_at >> 16) & 0x1F
+        imm = w_addiu_at & 0xFFFF
+        assert (opcode, rs, rt, imm) == (9, 0, 1, item_id), (
+            f"dispatch[{i}] addiu mismatch: word=0x{w_addiu_at:08X}, "
+            f"got (op={opcode}, rs={rs}, rt={rt}, imm={imm}), "
+            f"want (op=9, rs=0, rt=1, imm={item_id})"
+        )
+        # bne $a0, $at, +5: opcode 5, rs=4 ($a0), rt=1 ($at), imm=5
+        w_bne = words[base + 1]
+        opcode = (w_bne >> 26) & 0x3F
+        rs = (w_bne >> 21) & 0x1F
+        rt = (w_bne >> 16) & 0x1F
+        imm = w_bne & 0xFFFF
+        assert (opcode, rs, rt, imm) == (5, 4, 1, 5), (
+            f"dispatch[{i}] bne mismatch: word=0x{w_bne:08X}"
+        )
+        # nop
+        assert words[base + 2] == 0
+        # jal setTrigger (0x801065C0)
+        w_jal = words[base + 3]
+        opcode = (w_jal >> 26) & 0x3F
+        target = (w_jal & 0x03FFFFFF) << 2
+        assert (opcode, target) == (3, 0x801065C0 & 0x0FFFFFFC), (
+            f"dispatch[{i}] jal target mismatch: word=0x{w_jal:08X}, "
+            f"got target=0x{target:08X}"
+        )
+        # addiu $a0, $0, trigger_id
+        w_addiu_a0 = words[base + 4]
+        opcode = (w_addiu_a0 >> 26) & 0x3F
+        rs = (w_addiu_a0 >> 21) & 0x1F
+        rt = (w_addiu_a0 >> 16) & 0x1F
+        imm = w_addiu_a0 & 0xFFFF
+        assert (opcode, rs, rt, imm) == (9, 0, 4, trigger_id), (
+            f"dispatch[{i}] jal-delay addiu mismatch: word=0x{w_addiu_a0:08X}"
+        )
+        # j mark_bought
+        w_j = words[base + 5]
+        opcode = (w_j >> 26) & 0x3F
+        target = (w_j & 0x03FFFFFF) << 2
+        # mark_bought = wrapper_ram + prologue(16) + per_entry(28*N) + giveitem(24)
+        mark_bought_ram = (
+            ROM_MERIT_SHOP_EXT_WRAPPER_RAM + 0x10 + 28 * expected_n + 0x18
+        )
+        assert (opcode, target) == (2, mark_bought_ram & 0x0FFFFFFC), (
+            f"dispatch[{i}] j mark_bought mismatch: word=0x{w_j:08X}, "
+            f"got target=0x{target:08X}, want 0x{mark_bought_ram & 0x0FFFFFFC:08X}"
+        )
+        # nop (j delay slot)
+        assert words[base + 6] == 0, hex(words[base + 6])
+
+    # give_item path: 6 instructions starting at 4 + 7*N.
+    base = 4 + 7 * expected_n
+    assert words[base + 0] == 0x8FBF000C, hex(words[base + 0])  # lw $ra
+    assert words[base + 1] == 0x8FA40008, hex(words[base + 1])  # lw $a0
+    assert words[base + 2] == 0x8FA50004, hex(words[base + 2])  # lw $a1
+    assert words[base + 3] == 0x27BD0010, hex(words[base + 3])  # addiu $sp
+    # j giveItem (0x800C5240)
+    w_jg = words[base + 4]
+    opcode = (w_jg >> 26) & 0x3F
+    target = (w_jg & 0x03FFFFFF) << 2
+    assert (opcode, target) == (2, 0x800C5240 & 0x0FFFFFFC), hex(w_jg)
+    assert words[base + 5] == 0  # nop
+
+
+_verify_merit_shop_ext_wrapper_bytecode()
+
+
+# =============================================================================
+# ITEM_PARA relocation (Path A — always-on, ships with every seed)
+# =============================================================================
+#
+# Vanilla DW1's ITEM_PARA at RAM 0x801269DC is a hardcoded 128-entry
+# table. To grow beyond 16 AP-extended slots (the ceiling of the freed
+# ITEM_DESC_PTR region — see merit_shop.md §6a), we relocate ITEM_PARA
+# wholesale to a 5808-byte free region in the SLUS exec at RAM
+# 0x8009DBC8..0x8009F278.
+#
+# **The free region** was identified by static-analysis ("free RAM"
+# agent 1A, 2026-05-13): zero inbound jal/j/branch targets, zero
+# lui+addiu reads landing inside the range, contents are unused libgs
+# library functions — same identity as Cave6. Empirically confirmed via
+# tools/dw1_freeregion_probe.lua before this code shipped.
+#
+# **Capacity**: floor(5808 / 32) = 181 entries (slots 0..180).
+#   - Slots 0..127:   vanilla items (copied at apply time).
+#   - Slots 128..134: recycle shop AP (7 slots).
+#   - Slots 135..143: merit shop AP (9 slots).
+#   - Slots 144..180: 37 slots reserved for future shops.
+#
+# **Architecture (locked):**
+# 1. apply_tokens writes ALL slot data (vanilla AP mods like slot 83,
+#    114, 117; extended slots 128..143) to the **OLD vanilla** .bin
+#    locations as before. No per-slot offset changes needed.
+# 2. The :func:`relocate_item_para` procedure extension (post-tokens)
+#    reads the OLD location's post-token bytes for slots 0..143
+#    (4608 bytes contiguous, including AP mods) and writes them to the
+#    NEW location.
+# 3. All 24 vanilla SLUS readers of ITEM_PARA — enumerated by
+#    tools/dw1_scan_item_para_readers — have their
+#    ``lui rN, 0x8012; addiu rN, rN, 0x69DC+X`` pair patched to load
+#    ``lui rN, 0x800A; addiu rN, rN, 0xDBC8+X``. See
+#    :data:`ITEM_PARA_RELOC_READER_SITES`.
+# 4. The merit-shop wrappers emit instructions targeting the NEW base
+#    via :func:`_decompose_kuseg`.
+# 5. Slots 144..180 in NEW are left at the .bin's original (libgs)
+#    bytes — the current shops' scan bounds never reach them. Future
+#    shops will write to those slots directly at the NEW .bin offset.
+
+ITEM_PARA_RELOC_RAM: Final = RAM_ITEM_PARA_KUSEG                          # 0x8009DBC8
+ITEM_PARA_RELOC_SIZE: Final = 5808                                        # bytes
+ITEM_PARA_RELOC_CAPACITY: Final = (
+    ITEM_PARA_RELOC_SIZE // ROM_ITEM_TABLE_ENTRY_SIZE                     # 181 slots
+)
+ITEM_PARA_RELOC_BIN_OFFSET: Final = _slus_ram_to_bin_offset(ITEM_PARA_RELOC_RAM)
+
+# Sanity bounds.
+assert ITEM_PARA_RELOC_RAM == 0x8009DBC8, hex(ITEM_PARA_RELOC_RAM)
+assert ITEM_PARA_RELOC_RAM + ITEM_PARA_RELOC_SIZE <= 0x8009F278, (
+    f"Relocated ITEM_PARA spans 0x{ITEM_PARA_RELOC_RAM:08X}.."
+    f"0x{ITEM_PARA_RELOC_RAM + ITEM_PARA_RELOC_SIZE:08X}, exceeds the verified "
+    f"free zone end 0x8009F278."
+)
+assert ITEM_PARA_RELOC_CAPACITY > MERIT_SHOP_AP_ITEM_ID_LAST, (
+    f"Relocated capacity {ITEM_PARA_RELOC_CAPACITY} can't hold the highest "
+    f"used slot {MERIT_SHOP_AP_ITEM_ID_LAST}"
+)
+
+# Slots 0..143 get COPIED from OLD->NEW by the relocate procedure.
+# Slots 0..127 live at vanilla ITEM_PARA, slots 128..143 at the freed
+# ITEM_DESC_PTR region. Both regions are contiguous in the .bin's
+# user-data stream, so a single 4608-byte read of the OLD region picks
+# up both.
+ITEM_PARA_RELOC_COPY_FROM_OLD_SLOTS: Final = 144                          # slots 0..143
+ITEM_PARA_RELOC_COPY_FROM_OLD_SIZE: Final = (
+    ITEM_PARA_RELOC_COPY_FROM_OLD_SLOTS * ROM_ITEM_TABLE_ENTRY_SIZE       # 4608
+)
+ITEM_PARA_VANILLA_BIN_OFFSET: Final = _table_byte_to_bin_flat(0)
+
+
+# --- The 24 vanilla SLUS reader sites -----------------------------------
+# Enumerated by tools/dw1_scan_item_para_readers. Each is a
+# ``lui rN, 0x8012; addiu rN, rN, 0x69DC+field_offset`` pair. After
+# relocation, the pair becomes
+# ``lui rN, 0x800A; addiu rN, rN, 0xDBC8+field_offset``.
+#
+# Field offsets observed in vanilla: 0x00 (name), 0x14 (value/money),
+# 0x18 (meritValue), 0x1A (sortingValue), 0x1C (itemColor), 0x1D
+# (dropable). All small enough that new_lo = 0xDBC8 + field_offset
+# stays in [0xDBC8, 0xDBE5] (always >= 0x8000), so the lui high-half
+# stays at constant 0x800A for every site.
+#
+# Each entry = (lui_pc_kuseg, addiu_pc_kuseg, register_index,
+# field_offset).
+ITEM_PARA_RELOC_READER_SITES: Final[tuple[tuple[int, int, int, int], ...]] = (
+    (0x800AA3AC, 0x800AA3B0, 2, 0x00),
+    (0x800AA760, 0x800AA764, 2, 0x00),
+    (0x800DAB40, 0x800DAB48, 2, 0x00),
+    (0x800DAC10, 0x800DAC18, 2, 0x00),
+    (0x800DAD70, 0x800DAD74, 2, 0x00),
+    (0x800DB7C8, 0x800DB7D0, 2, 0x1C),
+    (0x800DC814, 0x800DC81C, 2, 0x00),
+    (0x800DC8E8, 0x800DC8F0, 2, 0x1D),
+    (0x800DCAB8, 0x800DCAC0, 5, 0x1A),
+    (0x800E4D20, 0x800E4D28, 2, 0x1A),
+    (0x800FA8F8, 0x800FA8FC, 2, 0x14),
+    (0x800FAAAC, 0x800FAAB4, 5, 0x1D),
+    (0x800FB018, 0x800FB020, 2, 0x18),
+    (0x800FB740, 0x800FB744, 2, 0x00),
+    (0x800FB75C, 0x800FB760, 2, 0x00),
+    (0x800FD034, 0x800FD03C, 2, 0x14),
+    (0x800FE7F4, 0x800FE7F8, 2, 0x00),
+    (0x800FE874, 0x800FE878, 2, 0x14),
+    (0x800FE8FC, 0x800FE900, 2, 0x18),
+    (0x800FF01C, 0x800FF024, 2, 0x00),
+    (0x800FF0A8, 0x800FF0B0, 2, 0x00),
+    (0x80101A4C, 0x80101A54, 2, 0x00),
+    (0x80106D90, 0x80106D98, 5, 0x14),
+    (0x8010732C, 0x80107330, 9, 0x18),
+)
+assert len(ITEM_PARA_RELOC_READER_SITES) == 24
+
+
+def build_item_para_reloc_patch_tokens() -> list[tuple[int, bytes]]:
+    """Build (bin_offset, 2-byte patch) tuples for the 24 sites.
+
+    Each site needs two 2-byte patches: the low half of the ``lui``
+    instruction and the low half of the ``addiu`` instruction. The
+    upper 16 bits of each instruction (opcode + register fields) are
+    preserved by writing only the lower 2 bytes (little-endian) of the
+    4-byte word.
+
+    For the relocated base 0x8009DBC8:
+      - New lui high half = 0x800A (sign-ext compensated).
+      - New addiu low half = 0xDBC8 + field_offset.
+    """
+
+    import struct as _struct
+
+    new_hi, new_lo_base = _decompose_kuseg(ITEM_PARA_RELOC_RAM)
+    assert new_hi == 0x800A, hex(new_hi)
+    assert new_lo_base == 0xDBC8, hex(new_lo_base)
+
+    patches: list[tuple[int, bytes]] = []
+    for lui_pc, addiu_pc, _reg, field_offset in ITEM_PARA_RELOC_READER_SITES:
+        lui_bin = _slus_ram_to_bin_offset(lui_pc)
+        patches.append((lui_bin, _struct.pack("<H", new_hi)))
+        new_lo = (new_lo_base + field_offset) & 0xFFFF
+        assert new_lo >= 0x8000, hex(new_lo)
+        addiu_bin = _slus_ram_to_bin_offset(addiu_pc)
+        patches.append((addiu_bin, _struct.pack("<H", new_lo)))
+
+    # 24 sites × 2 patches each = 48 token writes total.
+    assert len(patches) == 48, len(patches)
+    return patches
+
+
+# --- Merit-shop jal-hijack override -----------------------------------------
+# When MeritShopLocations is on, override the jal at the existing
+# ROM_MERIT_SHOP_PATCH_OFFSET (which v1 set to jal ROM_MERIT_SHOP_WRAPPER_RAM
+# = 0x80095800) to instead jal the extended wrapper. This re-writes the
+# same 4 bytes the v1 patcher writes; option-on patcher must run AFTER
+# the v1 patcher emits its token (token order = insertion order) so the
+# override sticks.
+ROM_MERIT_SHOP_EXT_PATCH_FORMAT: Final = "<I"
+ROM_MERIT_SHOP_EXT_PATCH_VALUE: Final = (
+    0x0C000000 | ((ROM_MERIT_SHOP_EXT_WRAPPER_RAM >> 2) & 0x03FFFFFF)
+)
+
+
+# --- Merit-shop scan-loop bound patch ---------------------------------------
+# Vanilla DW1 caps the merit-shop ITEM_PARA scan at id < 128 via the
+# ``sltiu $r1, $r5, 0x0080`` immediate at RAM 0x00107430. Bump to
+# ``sltiu $r1, $r5, 0x0090`` (= 144) so the scan reaches up through
+# extended slot 143 (MERIT_SHOP_AP_ITEM_ID_LAST). Don't push past 144 —
+# slots 144..255 are NOT safe to scan (the per-item color table at
+# RAM 0x80127BDC sits where slot-144's ITEM_PARA entry would start).
+ROM_MERIT_SCAN_BOUND_RAM: Final = 0x80107430
+ROM_MERIT_SCAN_BOUND_OFFSET: Final = _slus_ram_to_bin_offset(
+    ROM_MERIT_SCAN_BOUND_RAM,
+)
+ROM_MERIT_SCAN_BOUND_FORMAT: Final = "<I"
+# Encoding: opcode 0x0B (sltiu), rs=5 ($r5/$a1), rt=1 ($at), imm.
+_MERIT_SCAN_BOUND_NEW_IMM: Final = MERIT_SHOP_AP_ITEM_ID_LAST + 1            # 144
+assert _MERIT_SCAN_BOUND_NEW_IMM < 0x8000, _MERIT_SCAN_BOUND_NEW_IMM
+ROM_MERIT_SCAN_BOUND_VALUE: Final = (
+    (0x0B << 26) | (5 << 21) | (1 << 16) | _MERIT_SCAN_BOUND_NEW_IMM
+)
+# Sanity: vanilla bound = 0x2CA10080. New bound = 0x2CA10090 for limit 144.
+assert ROM_MERIT_SCAN_BOUND_VALUE == 0x2CA10000 | _MERIT_SCAN_BOUND_NEW_IMM, (
+    hex(ROM_MERIT_SCAN_BOUND_VALUE)
+)

@@ -166,6 +166,7 @@ class DigimonWorldWorld(World):
             "lava_cave_access",
             "god_mode",
             "recycle_shop_locations",
+            "merit_shop_locations",
         ))
         slot_data["vanilla_grant_chests"] = sorted(
             name for name, grant in self.chest_grants.items() if grant.vanilla_grant

@@ -88,6 +88,7 @@ from .data.addresses import (
     KEYITEM_DELIVERY_RAM_BITS,
     KEYITEM_LOCATION_RAM_BITS,
     MERIT_SHOP_DISPATCH,
+    MERIT_SHOP_LOCATION_RAM_BITS,
     RAM_ITEM_PARA,
     RAM_RECYCLE_SHOP_GP_SLOT,
     RECYCLE_SHOP_AP_ITEM_ID_BASE,
@@ -335,6 +336,7 @@ LOCATION_RAM_BITS: dict[str, tuple[int, int]] = {
     **KEYITEM_LOCATION_RAM_BITS,
     **VENDING_LOCATION_RAM_BITS,
     **RECYCLE_SHOP_LOCATION_RAM_BITS,
+    **MERIT_SHOP_LOCATION_RAM_BITS,
 }
 
 # Threshold-based detection (e.g. NPC-gift PP gates) is unused in v7 —

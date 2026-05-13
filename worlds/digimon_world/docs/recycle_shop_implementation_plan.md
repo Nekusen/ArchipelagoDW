@@ -11,6 +11,21 @@ the same.
 
 ---
 
+## STATUS — Path A ITEM_PARA relocation shipped (2026-05-13)
+
+The recycle shop AP randomization is **functional and shipped**.
+ITEM_PARA has since been relocated wholesale from vanilla
+`0x801269DC` to `0x8009DBC8` via the always-on **Path A** procedure
+(see [item_para_relocation.md](item_para_relocation.md)). The
+recycle shop's extended slots (128..134) continue to work because
+the relocation procedure copies the post-token bytes for slots
+0..143 from the OLD vanilla location to the NEW location at apply
+time. The recycle shop patcher itself needed **zero changes** for
+Path A. Slots 135..143 are merit shop. Slots 144..180 (37 slots)
+are reserved for future shops.
+
+---
+
 ## STATUS — recycle shop implementation (2026-05-11) ✅ shipped, see also corrections
 
 The recycle shop is **functional and shipped** behind the
