@@ -1787,12 +1787,24 @@ def _write_merit_shop_locations_tokens(
 
         slot_id = MERIT_SHOP_AP_ITEM_ID_BASE + i
         _vanilla_id, _vanilla_name, vanilla_merit = MERIT_SHOP_VANILLA_ENTRIES[i]
-        # Money price = the vanilla money ``value`` of the replaced slot —
-        # but in the merit shop, only ``meritValue`` is displayed as cost.
-        # Set value=0 (the merit shop doesn't use it; defensive against
-        # accidental display by other UIs).
+        # In-game testing 2026-05-13: the merit shop's purchase deduct
+        # path reads the ``value`` field (offset 0x14, 4 bytes) and
+        # subtracts that from the player's merit counter — NOT the
+        # ``meritValue`` field (offset 0x18) that the UI displays. So
+        # the displayed price is purely cosmetic; the actual cost is
+        # ``value``. For vanilla items this happens to work because
+        # ``value`` is just a larger version of ``meritValue`` (e.g.
+        # Rainbowhorn shows 500 merit, deducts 5000).
+        #
+        # For our AP entries we mirror the displayed cost: set both
+        # fields to ``vanilla_merit`` so the player pays exactly the
+        # number they see. (We can't match vanilla's value-is-10x-merit
+        # convention because that would charge the player 10x the
+        # displayed merit price, surprising and harsh.)
         entry_bytes = build_ap_item_para_entry(
-            ap_item_name, price=0, merit_value=vanilla_merit,
+            ap_item_name,
+            price=vanilla_merit,
+            merit_value=vanilla_merit,
         )
         patch.write_token(
             APTokenTypes.WRITE,
