@@ -172,6 +172,10 @@ from .data.addresses import (
     ROM_MERIT_SCAN_BASE_PATCH_BYTES,
     ROM_MERIT_SCAN_TELEPORT_WRAPPER_BYTES,
     CAVE6_MERIT_SCAN_TELEPORT_WRAPPER_OFFSET,
+    ROM_MERIT_NAME_PATCH_OFFSET,
+    ROM_MERIT_NAME_PATCH_BYTES,
+    ROM_MERIT_NAME_TELEPORT_WRAPPER_BYTES,
+    CAVE6_MERIT_NAME_TELEPORT_WRAPPER_OFFSET,
     MERIT_AP_DESC_STRINGS_BIN_OFFSET,
     MERIT_SHOP_AP_ITEM_ID_BASE,
     MERIT_SHOP_AP_ITEM_ID_COUNT,
@@ -1851,6 +1855,27 @@ def _write_merit_shop_locations_tokens(
         APTokenTypes.WRITE,
         ROM_MERIT_SCAN_BASE_PATCH_OFFSET,
         ROM_MERIT_SCAN_BASE_PATCH_BYTES,
+    )
+
+    # 9. Merit-name teleport wrapper bytes in Cave6. Independent from
+    #    the scan teleport: the merit-shop UI renders each row's name
+    #    via a separate codepath at PC 0x80101A4C that, unpatched, reads
+    #    ITEM_PARA[slot].name from vanilla base + slot*32 — for slot
+    #    144+ this falls in the per-item color table and the renderer
+    #    treats palette bytes as ASCII garbage.
+    patch.write_token(
+        APTokenTypes.WRITE,
+        CAVE6_MERIT_NAME_TELEPORT_WRAPPER_OFFSET,
+        ROM_MERIT_NAME_TELEPORT_WRAPPER_BYTES,
+    )
+
+    # 10. Inline name-renderer patch — same 3-instruction shape as
+    #     step 8 but pointed at the name teleport wrapper. Replaces
+    #     the lui/sll/addiu/addu pointer construction at PC 0x80101A4C.
+    patch.write_token(
+        APTokenTypes.WRITE,
+        ROM_MERIT_NAME_PATCH_OFFSET,
+        ROM_MERIT_NAME_PATCH_BYTES,
     )
 
 

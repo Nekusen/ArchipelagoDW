@@ -171,6 +171,45 @@ RAM_ITEM_BANK_SIZE: Final = 128                # one byte per slot, 128 slots
 RAM_CURRENT_BITS: Final = 0x00134EB8           # u32 LE — money (verified live 2026-04-28)
 RAM_MONOCHROME_PROFIT: Final = 0x0013500C      # Monochromon side-business cash
 
+# ----- Fishing locations ----------------------------------------------------
+#
+# Fish AP locations work by client-side heuristic: when the player is on a
+# fishing screen (MAYO06 / MAYO10, screen IDs 6 and 8 — verified by
+# ``checkFishingMap`` in ``references/DW1-SydPatches/src/Fishing.cpp:81``)
+# and the inventory count of a fish item increases between two watcher
+# ticks, the client fires the corresponding AP location.
+#
+# Why count-tracking instead of "fish present in inventory while on screen":
+# the player can enter MAYO06 / MAYO10 with a fish already in inventory
+# (e.g. carried over from the Dragon Eye Lake chest pickup or a prior
+# fishing session whose AP location was already fired). The
+# already-present-fish case must NOT fire the location.
+#
+# AP items delivered by the server land in the **bank**, not the inventory
+# (see ``RAM_ITEM_BANK_BASE`` above), so a foreign-world ``Digiseabass``
+# delivery cannot cause a false fire. The only real false-positive path is
+# opening the Dragon Eye Lake chest while standing on screen 6 or 8 — small
+# enough to accept per user direction.
+#
+# DW1 internal item IDs for the 6 fish (= ``dw_code - 2000`` per the bank
+# layout above; verified against ``worlds.digimon_world.items`` slot 62..67):
+FISH_LOCATION_INVENTORY_IDS: Final[tuple[tuple[str, int], ...]] = (
+    ("Fishing: Digianchovy",  62),
+    ("Fishing: Digisnapper",  63),
+    ("Fishing: DigiTrout",    64),
+    ("Fishing: Black trout",  65),
+    ("Fishing: Digicatfish",  66),
+    ("Fishing: Digiseabass",  67),
+)
+FISHING_LOCATION_NAMES: Final[tuple[str, ...]] = tuple(
+    name for name, _ in FISH_LOCATION_INVENTORY_IDS
+)
+# Screen IDs at which DW1 enables fishing (= ``mapId == 6 || mapId == 8``
+# in ``Fishing.cpp:checkFishingMap``). MAYO06 / MAYO10 in
+# :data:`SCREEN_FILENAMES`. Both screens are part of the AP ``Greatlake``
+# region (Dragon Eye Lake cluster).
+FISHING_SCREEN_IDS: Final[frozenset[int]] = frozenset({6, 8})
+
 # ----- Recruit / town progress ---------------------------------------------
 
 RAM_PROSPERITY_POINTS: Final = 0x001BE032      # primary recruit-progress metric
@@ -7724,6 +7763,127 @@ assert (CAVE6_MERIT_SCAN_TELEPORT_WRAPPER_RAM
 )
 
 
+# =============================================================================
+# Merit-shop NAME teleport wrapper (Cave6, conditional on MeritShopLocations)
+# =============================================================================
+#
+# Independent from the scan teleport. The merit shop renders each row's
+# name via a SEPARATE codepath at PC 0x80101A4C..0x00101A58 (= the
+# 22nd ITEM_PARA reader from tools/dw1_scan_item_para_readers.py). It
+# computes the name address as
+#   r5 = ITEM_PARA + slot_id * 32
+# via
+#   0x00101A4C  lui r2, 0x8012
+#   0x00101A50  sll r3, r5, 5         (r5 = slot_id in, r3 = slot*32)
+#   0x00101A54  addiu r2, r2, 0x69DC
+#   0x00101A58  addu r5, r2, r3       (r5 = name addr out)
+# then jal's a text renderer with r5 as the string pointer.
+#
+# For slot_id >= 144 (Cave6 ext) this naively reads from RAM
+# 0x80127BDC — the per-item color table — and the text renderer
+# treats palette bytes as ASCII (visible as triangles / corrupt text
+# in the merit shop UI; bug reported 2026-05-13 against the Cave6
+# multi-segment release).
+#
+# Fix: patch the same 3 instructions with ``j name_wrapper; nop; nop``,
+# wrapper computes r5 = ITEM_PARA-or-CAVE6_EXT + slot_offset, then
+# ``j`` back to 0x80101A5C (the next instruction, ``addu r18, r5, r0``).
+# Same return-via-``j`` approach as the scan wrapper — no $ra clobber.
+
+CAVE6_MERIT_NAME_TELEPORT_WRAPPER_RAM: Final = (
+    CAVE6_MERIT_SCAN_TELEPORT_WRAPPER_RAM
+    + len(ROM_MERIT_SCAN_TELEPORT_WRAPPER_BYTES)
+)
+assert CAVE6_MERIT_NAME_TELEPORT_WRAPPER_RAM % 4 == 0, hex(
+    CAVE6_MERIT_NAME_TELEPORT_WRAPPER_RAM
+)
+CAVE6_MERIT_NAME_TELEPORT_WRAPPER_OFFSET: Final = _slus_ram_to_bin_offset(
+    CAVE6_MERIT_NAME_TELEPORT_WRAPPER_RAM,
+)
+
+# The 3-instruction patch site in the name-renderer's pointer setup.
+ROM_MERIT_NAME_PATCH_RAM: Final = 0x80101A4C
+ROM_MERIT_NAME_PATCH_OFFSET: Final = _slus_ram_to_bin_offset(
+    ROM_MERIT_NAME_PATCH_RAM,
+)
+# Return target = the instruction immediately after the patch site
+# (``addu r18, r5, r0`` that copies r5 into r18 before the text renderer
+# jal at 0x80101A60).
+ROM_MERIT_NAME_RETURN_RAM: Final = 0x80101A5C
+
+
+def _build_merit_name_teleport_wrapper_bytes() -> bytes:
+    """Build the 16-instruction (64 B) name-renderer teleport wrapper.
+
+    Input: r5 = slot_id (the merit shop's current row's item id, already
+    ``andi r5, r5, 0xFF``-masked by the original 0x00101A48).
+    Output: r5 = name field address inside ITEM_PARA[slot_id]
+    (== ITEM_PARA_base[slot_id] + 0; the text renderer reads bytes 0..19
+    as the ASCII name string).
+
+    Layout (16 words, 64 B). Vanilla path occupies words 3..7; ext path
+    occupies words 9..14. The ``j`` instructions' delay slots are
+    explicit nops at offsets 0x20 and 0x3C — no overlap with the
+    ext_path entry label at 0x24.
+
+    Clobbers r1, r2, r3, r5 (same set the original 3 instructions
+    clobber, plus r1 for the threshold compare). r4, r16, r17, r18,
+    $sp are preserved.
+    """
+
+    import struct as _struct
+
+    j_return = 0x08000000 | (
+        (ROM_MERIT_NAME_RETURN_RAM >> 2) & 0x03FFFFFF
+    )
+
+    cave6_hi = (CAVE6_ITEM_PARA_EXT_RAM >> 16) & 0xFFFF                       # 0x8009
+    cave6_lo = CAVE6_ITEM_PARA_EXT_RAM & 0xFFFF                               # 0x6800
+
+    threshold = CAVE6_ITEM_PARA_EXT_SLOT_BASE                                 # 144
+
+    out = bytearray()
+
+    # offset 0x00 — sltiu r1, r5, threshold
+    out += _struct.pack("<I", (0x0B << 26) | (5 << 21) | (1 << 16) | threshold)
+    # offset 0x04 — beq r1, r0, +7 (ext_path target = 0x04 + 4 + 7*4 = 0x24)
+    out += _struct.pack("<I", (0x04 << 26) | (1 << 21) | (0 << 16) | 7)
+    # offset 0x08 — nop (branch delay slot)
+    out += _struct.pack("<I", 0x00000000)
+
+    # Vanilla path (offsets 0x0C..0x20): r5 = vanilla ITEM_PARA + slot*32
+    # offset 0x0C — sll r3, r5, 5
+    out += _struct.pack("<I", (0 << 26) | (0 << 21) | (5 << 16) | (3 << 11) | (5 << 6))
+    # offset 0x10 — lui r2, 0x8012
+    out += _struct.pack("<I", 0x3C028012)
+    # offset 0x14 — addiu r2, r2, 0x69DC
+    out += _struct.pack("<I", 0x244269DC)
+    # offset 0x18 — addu r5, r2, r3
+    out += _struct.pack("<I", (0 << 26) | (2 << 21) | (3 << 16) | (5 << 11) | (0 << 6) | 0x21)
+    # offset 0x1C — j ROM_MERIT_NAME_RETURN_RAM
+    out += _struct.pack("<I", j_return)
+    # offset 0x20 — nop (j delay slot)
+    out += _struct.pack("<I", 0x00000000)
+
+    # Ext path (offsets 0x24..0x3C): r5 = CAVE6_EXT + (slot - 144) * 32
+    # offset 0x24 — addi r3, r5, -144  (signed imm = 0xFF70)
+    out += _struct.pack("<I", (0x08 << 26) | (5 << 21) | (3 << 16) | 0xFF70)
+    # offset 0x28 — sll r3, r3, 5
+    out += _struct.pack("<I", (0 << 26) | (0 << 21) | (3 << 16) | (3 << 11) | (5 << 6))
+    # offset 0x2C — lui r2, cave6_hi
+    out += _struct.pack("<I", (0x0F << 26) | (0 << 21) | (2 << 16) | cave6_hi)
+    # offset 0x30 — addiu r2, r2, cave6_lo
+    out += _struct.pack("<I", (0x09 << 26) | (2 << 21) | (2 << 16) | cave6_lo)
+    # offset 0x34 — addu r5, r2, r3
+    out += _struct.pack("<I", (0 << 26) | (2 << 21) | (3 << 16) | (5 << 11) | (0 << 6) | 0x21)
+    # offset 0x38 — j ROM_MERIT_NAME_RETURN_RAM
+    out += _struct.pack("<I", j_return)
+    # offset 0x3C — nop (j delay slot)
+    out += _struct.pack("<I", 0x00000000)
+
+    return bytes(out)
+
+
 # The 3-instruction patch at ROM_MERIT_SCAN_BASE_PATCH_RAM:
 #   j   CAVE6_MERIT_SCAN_TELEPORT_WRAPPER_RAM
 #   nop
@@ -7744,6 +7904,43 @@ def _build_merit_scan_base_patch_bytes() -> bytes:
 
 ROM_MERIT_SCAN_BASE_PATCH_BYTES: Final = _build_merit_scan_base_patch_bytes()
 assert len(ROM_MERIT_SCAN_BASE_PATCH_BYTES) == 12
+
+
+ROM_MERIT_NAME_TELEPORT_WRAPPER_BYTES: Final = _build_merit_name_teleport_wrapper_bytes()
+assert len(ROM_MERIT_NAME_TELEPORT_WRAPPER_BYTES) == 64, (
+    len(ROM_MERIT_NAME_TELEPORT_WRAPPER_BYTES)
+)
+
+# Cave6 layout assertion: name teleport wrapper must stay inside sector
+# 148350's ud-region (ends at RAM 0x80096800).
+assert (CAVE6_MERIT_NAME_TELEPORT_WRAPPER_RAM
+        + len(ROM_MERIT_NAME_TELEPORT_WRAPPER_BYTES)
+        <= 0x80096800), (
+    f"merit-name teleport wrapper "
+    f"0x{CAVE6_MERIT_NAME_TELEPORT_WRAPPER_RAM:08X}.."
+    f"0x{CAVE6_MERIT_NAME_TELEPORT_WRAPPER_RAM + len(ROM_MERIT_NAME_TELEPORT_WRAPPER_BYTES):08X} "
+    f"crosses Cave6 sector 148350 boundary at 0x80096800"
+)
+
+
+def _build_merit_name_patch_bytes() -> bytes:
+    """3-instruction patch at ROM_MERIT_NAME_PATCH_RAM (= 0x80101A4C):
+    ``j CAVE6_MERIT_NAME_TELEPORT_WRAPPER_RAM; nop; nop``.
+    """
+
+    import struct as _struct
+    j_wrapper = 0x08000000 | (
+        (CAVE6_MERIT_NAME_TELEPORT_WRAPPER_RAM >> 2) & 0x03FFFFFF
+    )
+    return (
+        _struct.pack("<I", j_wrapper)
+        + _struct.pack("<I", 0x00000000)
+        + _struct.pack("<I", 0x00000000)
+    )
+
+
+ROM_MERIT_NAME_PATCH_BYTES: Final = _build_merit_name_patch_bytes()
+assert len(ROM_MERIT_NAME_PATCH_BYTES) == 12
 
 
 # =============================================================================
