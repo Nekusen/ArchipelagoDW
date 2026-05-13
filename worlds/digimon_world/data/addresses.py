@@ -3358,15 +3358,7 @@ def _flat_to_user_data(base: int, table_byte_offset: int) -> int:
 
 
 def _table_byte_to_bin_flat(table_byte_offset: int) -> int:
-    """Backwards-compat shim — ITEM_PARA-specific sector-hop helper.
-
-    This translates an offset within the **VANILLA** ITEM_PARA region
-    (at RAM 0x801269DC). For most patcher writes that's still the
-    right target — the :func:`relocate_item_para` procedure extension
-    copies the post-token vanilla region to the relocated region at
-    apply time, so writes via this helper flow through to the
-    relocated copy automatically.
-    """
+    """Backwards-compat shim — ITEM_PARA-specific sector-hop helper."""
 
     return _flat_to_user_data(ROM_ITEM_TABLE_BASE, table_byte_offset)
 
@@ -3494,25 +3486,7 @@ ROM_ITEM_TABLE_ENTRY_COUNT: Final = 0x80  # 128 records in ITEM_PARA
 # convention of every other ``RAM_*`` constant. The wrapper builder
 # (which encodes lui/addiu) ORs in the 0x80000000 prefix to recover
 # the CPU-visible kuseg address.
-#
-# **Path A relocation (always-on):** ITEM_PARA has been moved from
-# vanilla 0x801269DC to 0x8009DBC8 (a Cave6-style free region inside
-# the SLUS exec). All 24 vanilla SLUS readers of ITEM_PARA are patched
-# to load the new base — see :data:`ITEM_PARA_RELOC_READER_SITES`.
-# This raises the AP-extended-slot ceiling from 16 (the original
-# freed ITEM_DESC_PTR region) to 53 (slots 128..180), enough headroom
-# for the recycle shop + merit shop + future File City + Secret shops.
-#
-# ``RAM_ITEM_PARA`` (this constant) is the **post-relocation** address,
-# used by every runtime read/write (client reconciler, wrapper-emitted
-# lui/addiu instructions). ``RAM_ITEM_PARA_VANILLA`` is the original
-# 0x001269DC location — still used for some patcher writes whose data
-# gets COPIED to the new location by the :func:`relocate_item_para`
-# procedure extension at apply time.
-RAM_ITEM_PARA_VANILLA: Final = 0x001269DC
-RAM_ITEM_PARA_VANILLA_KUSEG: Final = 0x80000000 | RAM_ITEM_PARA_VANILLA
-
-RAM_ITEM_PARA: Final = 0x0009DBC8
+RAM_ITEM_PARA: Final = 0x001269DC
 RAM_ITEM_PARA_KUSEG: Final = 0x80000000 | RAM_ITEM_PARA
 
 
@@ -3612,15 +3586,13 @@ assert (_bought_entry_end - ROM_AP_SHOP_BOUGHT_ENTRY_OFFSET) == ROM_ITEM_TABLE_E
     f"start=0x{ROM_AP_SHOP_BOUGHT_ENTRY_OFFSET:08X}, end=0x{_bought_entry_end:08X}"
 )
 
-# RAM address of slot 114's entry in the **relocated** ITEM_PARA
-# (= source for the runtime memcpy). Bare Nymashock offset; the
-# wrapper builder ORs in the kuseg prefix when emitting the lui/addiu
-# pair.
+# RAM address of slot 114's entry (= source for the runtime memcpy).
+# Bare Nymashock offset; the wrapper builder ORs in the kuseg prefix
+# when emitting the lui/addiu pair.
 AP_SHOP_BOUGHT_SENTINEL_RAM: Final = (
     RAM_ITEM_PARA + AP_SHOP_BOUGHT_SENTINEL_ITEM_ID * ROM_ITEM_TABLE_ENTRY_SIZE
 )
-# Vanilla = 0x0012781C; relocated = 0x0009EA08 (RAM_ITEM_PARA + 114 × 32).
-assert AP_SHOP_BOUGHT_SENTINEL_RAM == 0x0009EA08, hex(AP_SHOP_BOUGHT_SENTINEL_RAM)
+assert AP_SHOP_BOUGHT_SENTINEL_RAM == 0x0012781C
 
 # Pre-purchase name "AP Item" written into each dispatched slot's name
 # field at gen time. Just the name (20 bytes) — leaves the slot's
@@ -7524,152 +7496,27 @@ _verify_merit_shop_ext_wrapper_bytecode()
 
 
 # =============================================================================
-# ITEM_PARA relocation (Path A — always-on, ships with every seed)
+# Path A (ITEM_PARA relocation) — REVERTED 2026-05-13
 # =============================================================================
 #
-# Vanilla DW1's ITEM_PARA at RAM 0x801269DC is a hardcoded 128-entry
-# table. To grow beyond 16 AP-extended slots (the ceiling of the freed
-# ITEM_DESC_PTR region — see merit_shop.md §6a), we relocate ITEM_PARA
-# wholesale to a 5808-byte free region in the SLUS exec at RAM
-# 0x8009DBC8..0x8009F278.
+# Path A attempted to relocate ITEM_PARA from vanilla 0x801269DC to
+# 0x8009DBC8 (a 5808-byte region thought to be free libgs leftover),
+# raising the AP-extended-slot ceiling from 16 to 53.
 #
-# **The free region** was identified by static-analysis ("free RAM"
-# agent 1A, 2026-05-13): zero inbound jal/j/branch targets, zero
-# lui+addiu reads landing inside the range, contents are unused libgs
-# library functions — same identity as Cave6. Empirically confirmed via
-# tools/dw1_freeregion_probe.lua before this code shipped.
+# It froze the in-game arena. Post-mortem: the chosen region holds 9
+# function pointers stored into the dispatch struct array at RAM
+# 0x80137000..0x801370FF (struct fields +0x0C, +0x14, +0x1C of structs
+# 2/3/6/7), so jalring through any of those handlers executes our
+# ITEM_PARA data as MIPS instructions and crashes. The free-region
+# probe (tools/dw1_freeregion_probe.lua) missed this because it only
+# watched for writes to the region, not for pointer constants stored
+# elsewhere that point into it.
 #
-# **Capacity**: floor(5808 / 32) = 181 entries (slots 0..180).
-#   - Slots 0..127:   vanilla items (copied at apply time).
-#   - Slots 128..134: recycle shop AP (7 slots).
-#   - Slots 135..143: merit shop AP (9 slots).
-#   - Slots 144..180: 37 slots reserved for future shops.
-#
-# **Architecture (locked):**
-# 1. apply_tokens writes ALL slot data (vanilla AP mods like slot 83,
-#    114, 117; extended slots 128..143) to the **OLD vanilla** .bin
-#    locations as before. No per-slot offset changes needed.
-# 2. The :func:`relocate_item_para` procedure extension (post-tokens)
-#    reads the OLD location's post-token bytes for slots 0..143
-#    (4608 bytes contiguous, including AP mods) and writes them to the
-#    NEW location.
-# 3. All 24 vanilla SLUS readers of ITEM_PARA — enumerated by
-#    tools/dw1_scan_item_para_readers — have their
-#    ``lui rN, 0x8012; addiu rN, rN, 0x69DC+X`` pair patched to load
-#    ``lui rN, 0x800A; addiu rN, rN, 0xDBC8+X``. See
-#    :data:`ITEM_PARA_RELOC_READER_SITES`.
-# 4. The merit-shop wrappers emit instructions targeting the NEW base
-#    via :func:`_decompose_kuseg`.
-# 5. Slots 144..180 in NEW are left at the .bin's original (libgs)
-#    bytes — the current shops' scan bounds never reach them. Future
-#    shops will write to those slots directly at the NEW .bin offset.
-
-ITEM_PARA_RELOC_RAM: Final = RAM_ITEM_PARA_KUSEG                          # 0x8009DBC8
-ITEM_PARA_RELOC_SIZE: Final = 5808                                        # bytes
-ITEM_PARA_RELOC_CAPACITY: Final = (
-    ITEM_PARA_RELOC_SIZE // ROM_ITEM_TABLE_ENTRY_SIZE                     # 181 slots
-)
-ITEM_PARA_RELOC_BIN_OFFSET: Final = _slus_ram_to_bin_offset(ITEM_PARA_RELOC_RAM)
-
-# Sanity bounds.
-assert ITEM_PARA_RELOC_RAM == 0x8009DBC8, hex(ITEM_PARA_RELOC_RAM)
-assert ITEM_PARA_RELOC_RAM + ITEM_PARA_RELOC_SIZE <= 0x8009F278, (
-    f"Relocated ITEM_PARA spans 0x{ITEM_PARA_RELOC_RAM:08X}.."
-    f"0x{ITEM_PARA_RELOC_RAM + ITEM_PARA_RELOC_SIZE:08X}, exceeds the verified "
-    f"free zone end 0x8009F278."
-)
-assert ITEM_PARA_RELOC_CAPACITY > MERIT_SHOP_AP_ITEM_ID_LAST, (
-    f"Relocated capacity {ITEM_PARA_RELOC_CAPACITY} can't hold the highest "
-    f"used slot {MERIT_SHOP_AP_ITEM_ID_LAST}"
-)
-
-# Slots 0..143 get COPIED from OLD->NEW by the relocate procedure.
-# Slots 0..127 live at vanilla ITEM_PARA, slots 128..143 at the freed
-# ITEM_DESC_PTR region. Both regions are contiguous in the .bin's
-# user-data stream, so a single 4608-byte read of the OLD region picks
-# up both.
-ITEM_PARA_RELOC_COPY_FROM_OLD_SLOTS: Final = 144                          # slots 0..143
-ITEM_PARA_RELOC_COPY_FROM_OLD_SIZE: Final = (
-    ITEM_PARA_RELOC_COPY_FROM_OLD_SLOTS * ROM_ITEM_TABLE_ENTRY_SIZE       # 4608
-)
-ITEM_PARA_VANILLA_BIN_OFFSET: Final = _table_byte_to_bin_flat(0)
-
-
-# --- The 24 vanilla SLUS reader sites -----------------------------------
-# Enumerated by tools/dw1_scan_item_para_readers. Each is a
-# ``lui rN, 0x8012; addiu rN, rN, 0x69DC+field_offset`` pair. After
-# relocation, the pair becomes
-# ``lui rN, 0x800A; addiu rN, rN, 0xDBC8+field_offset``.
-#
-# Field offsets observed in vanilla: 0x00 (name), 0x14 (value/money),
-# 0x18 (meritValue), 0x1A (sortingValue), 0x1C (itemColor), 0x1D
-# (dropable). All small enough that new_lo = 0xDBC8 + field_offset
-# stays in [0xDBC8, 0xDBE5] (always >= 0x8000), so the lui high-half
-# stays at constant 0x800A for every site.
-#
-# Each entry = (lui_pc_kuseg, addiu_pc_kuseg, register_index,
-# field_offset).
-ITEM_PARA_RELOC_READER_SITES: Final[tuple[tuple[int, int, int, int], ...]] = (
-    (0x800AA3AC, 0x800AA3B0, 2, 0x00),
-    (0x800AA760, 0x800AA764, 2, 0x00),
-    (0x800DAB40, 0x800DAB48, 2, 0x00),
-    (0x800DAC10, 0x800DAC18, 2, 0x00),
-    (0x800DAD70, 0x800DAD74, 2, 0x00),
-    (0x800DB7C8, 0x800DB7D0, 2, 0x1C),
-    (0x800DC814, 0x800DC81C, 2, 0x00),
-    (0x800DC8E8, 0x800DC8F0, 2, 0x1D),
-    (0x800DCAB8, 0x800DCAC0, 5, 0x1A),
-    (0x800E4D20, 0x800E4D28, 2, 0x1A),
-    (0x800FA8F8, 0x800FA8FC, 2, 0x14),
-    (0x800FAAAC, 0x800FAAB4, 5, 0x1D),
-    (0x800FB018, 0x800FB020, 2, 0x18),
-    (0x800FB740, 0x800FB744, 2, 0x00),
-    (0x800FB75C, 0x800FB760, 2, 0x00),
-    (0x800FD034, 0x800FD03C, 2, 0x14),
-    (0x800FE7F4, 0x800FE7F8, 2, 0x00),
-    (0x800FE874, 0x800FE878, 2, 0x14),
-    (0x800FE8FC, 0x800FE900, 2, 0x18),
-    (0x800FF01C, 0x800FF024, 2, 0x00),
-    (0x800FF0A8, 0x800FF0B0, 2, 0x00),
-    (0x80101A4C, 0x80101A54, 2, 0x00),
-    (0x80106D90, 0x80106D98, 5, 0x14),
-    (0x8010732C, 0x80107330, 9, 0x18),
-)
-assert len(ITEM_PARA_RELOC_READER_SITES) == 24
-
-
-def build_item_para_reloc_patch_tokens() -> list[tuple[int, bytes]]:
-    """Build (bin_offset, 2-byte patch) tuples for the 24 sites.
-
-    Each site needs two 2-byte patches: the low half of the ``lui``
-    instruction and the low half of the ``addiu`` instruction. The
-    upper 16 bits of each instruction (opcode + register fields) are
-    preserved by writing only the lower 2 bytes (little-endian) of the
-    4-byte word.
-
-    For the relocated base 0x8009DBC8:
-      - New lui high half = 0x800A (sign-ext compensated).
-      - New addiu low half = 0xDBC8 + field_offset.
-    """
-
-    import struct as _struct
-
-    new_hi, new_lo_base = _decompose_kuseg(ITEM_PARA_RELOC_RAM)
-    assert new_hi == 0x800A, hex(new_hi)
-    assert new_lo_base == 0xDBC8, hex(new_lo_base)
-
-    patches: list[tuple[int, bytes]] = []
-    for lui_pc, addiu_pc, _reg, field_offset in ITEM_PARA_RELOC_READER_SITES:
-        lui_bin = _slus_ram_to_bin_offset(lui_pc)
-        patches.append((lui_bin, _struct.pack("<H", new_hi)))
-        new_lo = (new_lo_base + field_offset) & 0xFFFF
-        assert new_lo >= 0x8000, hex(new_lo)
-        addiu_bin = _slus_ram_to_bin_offset(addiu_pc)
-        patches.append((addiu_bin, _struct.pack("<H", new_lo)))
-
-    # 24 sites × 2 patches each = 48 token writes total.
-    assert len(patches) == 48, len(patches)
-    return patches
+# The infrastructure (tools/dw1_scan_item_para_readers.py, the static
+# analysis in docs/item_para_relocation.md, test_item_para_relocation.py)
+# is retained for re-use whenever we pick a real safe region. Current
+# AP ceiling is back to slot 143 (= freed-ITEM_DESC_PTR region only):
+# 7 recycle + 9 merit = exact fit.
 
 
 # --- Merit-shop jal-hijack override -----------------------------------------
