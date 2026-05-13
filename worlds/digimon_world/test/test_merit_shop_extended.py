@@ -2,28 +2,30 @@
 
 Covers four areas:
 
-* :class:`TestMeritShopLocations` — the 9 AP locations register with
+* :class:`TestMeritShopLocations` — the 14 AP locations register with
   the expected names, IDs, and region (``Geko Swamp``) when
   :class:`worlds.digimon_world.options.MeritShopLocations` is on, and
   don't appear when it's off.
-* :class:`TestMeritShopTriggers` — the trigger range 912..920 lives in
+* :class:`TestMeritShopTriggers` — the trigger range 912..925 lives in
   the documented gap (bytes 0x001BE03F + 0x001BE040) and doesn't
   collide with anything in :data:`LOCATION_RAM_BITS` or with the
   Meramon-tunnel danger zone.
 * :class:`TestMeritShopPatcherOn` / :class:`TestMeritShopPatcherOff` —
   :func:`rom.write_patch` emits the expected token set when the option
-  is on (extended ITEM_PARA entries with non-zero merit prices for 9
-  slots, 9 AP description strings, vanilla-item meritValue zero-outs
-  for all 14 vanilla entries, extended wrapper, jal override,
-  scan-loop bound patch); emits none of those tokens when the option
-  is off, and leaves the always-on N=1 merit wrapper untouched.
-* :class:`TestMeritShopExtendedWrapper` — the 432-byte wrapper bytecode
-  decode-verifies against the dispatch shape.
+  is on (14 extended ITEM_PARA entries with non-zero merit prices,
+  14 AP description strings, vanilla-item meritValue zero-outs for all
+  14 vanilla entries, extended wrapper, jal override, scan-loop bound
+  patch, Cave6 teleport wrapper, scan-base inline patch); emits none
+  of those tokens when the option is off, and leaves the always-on N=1
+  merit wrapper untouched.
+* :class:`TestMeritShopExtendedWrapper` — the 572-byte wrapper bytecode
+  decode-verifies against the 15-entry dispatch shape.
 
-**Architectural ceiling**: the extended ITEM_PARA region (the freed
-ITEM_DESC_PTR bytes) is exactly 16 slots (128..143). Recycle uses 7
-(128..134) and merit uses 9 (135..143); writing past slot 143 corrupts
-the per-item color table at RAM 0x80127BDC and freezes the game.
+**Cave6 multi-segment**: slots 135..143 live in the freed
+ITEM_DESC_PTR region (contiguous with vanilla ITEM_PARA); slots
+144..148 live in the Cave6 ext segment at RAM 0x80096800, reached by
+the merit-scan teleport wrapper. See
+``docs/item_para_cave6_multisegment.md`` for the architecture.
 """
 
 from __future__ import annotations
@@ -80,8 +82,8 @@ from .bases import DigimonWorldTestBase
 class TestMeritShopLocations(DigimonWorldTestBase):
     options: ClassVar[dict[str, Any]] = {"merit_shop_locations": 1}
 
-    def test_nine_locations_with_expected_names(self) -> None:
-        self.assertEqual(len(MERIT_SHOP_LOCATION_NAMES), 9)
+    def test_fourteen_locations_with_expected_names(self) -> None:
+        self.assertEqual(len(MERIT_SHOP_LOCATION_NAMES), 14)
         for i, name in enumerate(MERIT_SHOP_LOCATION_NAMES, start=1):
             self.assertEqual(name, f"Merit Shop #{i}")
 
@@ -126,13 +128,13 @@ class TestMeritShopTriggers(DigimonWorldTestBase):
 
     def test_trigger_count_matches_slot_count(self) -> None:
         self.assertEqual(len(MERIT_SHOP_TRIGGER_IDS), MERIT_SHOP_AP_ITEM_ID_COUNT)
-        self.assertEqual(len(MERIT_SHOP_TRIGGER_IDS), 9)
+        self.assertEqual(len(MERIT_SHOP_TRIGGER_IDS), 14)
 
     def test_triggers_consecutive_starting_at_912(self) -> None:
         self.assertEqual(MERIT_SHOP_TRIGGER_BASE, 912)
         self.assertEqual(
             MERIT_SHOP_TRIGGER_IDS,
-            tuple(range(912, 921)),
+            tuple(range(912, 926)),
         )
 
     def test_triggers_land_in_documented_gap_bytes(self) -> None:
@@ -174,7 +176,7 @@ class TestMeritShopTriggers(DigimonWorldTestBase):
                              f"existing AP trigger")
 
     def test_location_ram_bits_table(self) -> None:
-        self.assertEqual(len(MERIT_SHOP_LOCATION_RAM_BITS), 9)
+        self.assertEqual(len(MERIT_SHOP_LOCATION_RAM_BITS), 14)
         for i, name in enumerate(MERIT_SHOP_LOCATION_NAMES):
             byte_addr, bit_idx = MERIT_SHOP_LOCATION_RAM_BITS[name]
             trig = MERIT_SHOP_TRIGGER_IDS[i]
@@ -190,29 +192,28 @@ class TestMeritShopTriggers(DigimonWorldTestBase):
 class TestMeritShopConstants(unittest.TestCase):
     def test_slot_range(self) -> None:
         self.assertEqual(MERIT_SHOP_AP_ITEM_ID_BASE, 135)
-        self.assertEqual(MERIT_SHOP_AP_ITEM_ID_COUNT, 9)
-        self.assertEqual(MERIT_SHOP_AP_ITEM_ID_LAST, 143)
+        self.assertEqual(MERIT_SHOP_AP_ITEM_ID_COUNT, 14)
+        self.assertEqual(MERIT_SHOP_AP_ITEM_ID_LAST, 148)
         self.assertEqual(
             MERIT_SHOP_AP_ITEM_IDS,
-            tuple(range(135, 144)),
+            tuple(range(135, 149)),
         )
 
-    def test_slot_range_fits_in_freed_item_desc_ptr_region(self) -> None:
-        # Architectural ceiling: the freed ITEM_DESC_PTR region is 16
-        # ITEM_PARA slots (128..143). Writing past slot 143 corrupts
-        # the per-item color table at RAM 0x80127BDC and freezes the
-        # game on merit-shop purchase. Recycle uses 7 (128..134),
-        # merit uses 9 (135..143) -- exhausts the 16-slot budget.
+    def test_slot_range_spans_freed_desc_and_cave6_ext(self) -> None:
+        # Slots 135..143 sit in the freed ITEM_DESC_PTR region
+        # (16-slot ceiling there). Slots 144..148 sit in the Cave6
+        # ext segment, reached by the merit-scan teleport wrapper.
+        # The patch-time helper :func:`ext_item_para_slot_bin_offset`
+        # routes the two ranges to their respective .bin offsets.
         from ..data.addresses import (
-            RECYCLE_SHOP_AP_ITEM_ID_BASE,
-            RECYCLE_SHOP_AP_ITEM_ID_COUNT,
+            CAVE6_ITEM_PARA_EXT_SLOT_BASE,
         )
-        total_extended_slots = (
-            RECYCLE_SHOP_AP_ITEM_ID_COUNT + MERIT_SHOP_AP_ITEM_ID_COUNT
-        )
-        self.assertLessEqual(total_extended_slots, 16,
-                             "extended slots exceed freed ITEM_DESC_PTR region")
-        self.assertLessEqual(MERIT_SHOP_AP_ITEM_ID_LAST, 143)
+        # First 9 merit slots stay in the freed-DESC region.
+        for slot in range(MERIT_SHOP_AP_ITEM_ID_BASE, 144):
+            self.assertLess(slot, CAVE6_ITEM_PARA_EXT_SLOT_BASE)
+        # Last 5 merit slots are in Cave6 ext.
+        for slot in range(144, MERIT_SHOP_AP_ITEM_ID_LAST + 1):
+            self.assertGreaterEqual(slot, CAVE6_ITEM_PARA_EXT_SLOT_BASE)
 
     def test_slots_follow_recycle_range(self) -> None:
         from ..data.addresses import (
@@ -225,10 +226,10 @@ class TestMeritShopConstants(unittest.TestCase):
         )
 
     def test_vanilla_entries_match_count(self) -> None:
-        # All 14 vanilla entries are documented; only the first 9 get
-        # corresponding AP locations (per the architectural ceiling).
+        # All 14 vanilla entries become AP locations now that the
+        # Cave6 ext segment provides slots 144..148.
         self.assertEqual(len(MERIT_SHOP_VANILLA_ENTRIES), 14)
-        self.assertGreaterEqual(
+        self.assertEqual(
             len(MERIT_SHOP_VANILLA_ENTRIES), MERIT_SHOP_AP_ITEM_ID_COUNT,
         )
         # All vanilla slot ids are in the canonical 128-entry range.
@@ -243,11 +244,12 @@ class TestMeritShopConstants(unittest.TestCase):
         self.assertIn(0x75, slot_ids)
 
     def test_scan_bound_encoding(self) -> None:
-        # sltiu $r1, $r5, 0x90 = (0x0B << 26) | (5 << 21) | (1 << 16) | 0x90
+        # sltiu $r1, $r5, 0x95 = (0x0B << 26) | (5 << 21) | (1 << 16) | 0x95
+        # (= scan covers slots 0..148; merit shop's last AP slot is 148).
         expected = (0x0B << 26) | (5 << 21) | (1 << 16) | (MERIT_SHOP_AP_ITEM_ID_LAST + 1)
         self.assertEqual(ROM_MERIT_SCAN_BOUND_VALUE, expected)
-        # And specifically: 0x2CA10090.
-        self.assertEqual(ROM_MERIT_SCAN_BOUND_VALUE, 0x2CA10090)
+        # And specifically: 0x2CA10095.
+        self.assertEqual(ROM_MERIT_SCAN_BOUND_VALUE, 0x2CA10095)
 
     def test_ext_patch_value_targets_extended_wrapper(self) -> None:
         expected = (
@@ -349,19 +351,20 @@ class TestMeritShopPatcherOn(DigimonWorldTestBase):
             )
 
     def test_extended_item_para_count_matches_ap_slot_count(self) -> None:
-        # Exactly MERIT_SHOP_AP_ITEM_ID_COUNT (= 9) extended slots get
-        # written. None outside the 135..143 range — writing past
-        # slot 143 corrupts the color table at RAM 0x80127BDC.
+        # Exactly MERIT_SHOP_AP_ITEM_ID_COUNT (= 14) extended slots get
+        # written. Slots 135..143 go to the freed ITEM_DESC_PTR region;
+        # slots 144..148 go to the Cave6 ext segment.
         written_slots = sum(
             1 for slot in MERIT_SHOP_AP_ITEM_IDS
             if ext_item_para_slot_bin_offset(slot) in self.observed_last
         )
         self.assertEqual(written_slots, MERIT_SHOP_AP_ITEM_ID_COUNT)
-        # Defensive: nothing written for slot 144 or beyond.
-        for slot in range(144, 149):
+        # Defensive: nothing written for slots beyond 148 (reserved for
+        # future shops in the Cave6 ext segment).
+        for slot in range(149, 174):
             self.assertNotIn(
                 ext_item_para_slot_bin_offset(slot), self.observed_last,
-                f"slot {slot} write would corrupt color table at 0x80127BDC",
+                f"slot {slot} write (Cave6 ext) not expected from merit shop",
             )
 
     def test_merit_ap_desc_strings_present(self) -> None:
@@ -501,14 +504,14 @@ class TestMeritShopPatcherOff(DigimonWorldTestBase):
 class TestMeritShopExtendedWrapper(DigimonWorldTestBase):
     options: ClassVar[dict[str, Any]] = {}
 
-    EXPECTED_SIZE: ClassVar[int] = (38 + 7 * 10) * 4  # 432 B for N=10
+    EXPECTED_SIZE: ClassVar[int] = (38 + 7 * 15) * 4  # 572 B for N=15
 
     def test_wrapper_size(self) -> None:
         self.assertEqual(len(ROM_MERIT_SHOP_EXT_WRAPPER_BYTES), self.EXPECTED_SIZE)
 
     def test_dispatch_table_size(self) -> None:
-        # 1 (slot 83) + 9 (slots 135..143) = 10.
-        self.assertEqual(len(MERIT_SHOP_EXT_DISPATCH), 10)
+        # 1 (slot 83) + 14 (slots 135..148) = 15.
+        self.assertEqual(len(MERIT_SHOP_EXT_DISPATCH), 15)
 
     def test_dispatch_first_entry_is_amazing_rod(self) -> None:
         # The v1 ``Amazing Rod Pickup`` slot stays as a 10th merit-shop
@@ -524,8 +527,8 @@ class TestMeritShopExtendedWrapper(DigimonWorldTestBase):
         )
 
     def test_dispatch_extended_entries_match_slot_ranges(self) -> None:
-        # Entries 1..9 map slot 135+i to trigger 912+i for i in 0..8.
-        for i in range(9):
+        # Entries 1..14 map slot 135+i to trigger 912+i for i in 0..13.
+        for i in range(14):
             entry_slot, entry_trig = MERIT_SHOP_EXT_DISPATCH[1 + i]
             self.assertEqual(entry_slot, MERIT_SHOP_AP_ITEM_ID_BASE + i)
             self.assertEqual(entry_trig, MERIT_SHOP_TRIGGER_BASE + i)
@@ -593,3 +596,196 @@ class TestMeritShopExtendedWrapper(DigimonWorldTestBase):
         from ..data.addresses import _CAVE6_END_RAM
         end_ram = ROM_MERIT_SHOP_EXT_WRAPPER_RAM + len(ROM_MERIT_SHOP_EXT_WRAPPER_BYTES)
         self.assertLessEqual(end_ram, _CAVE6_END_RAM)
+
+
+# =============================================================================
+# Cave6 multi-segment (ITEM_PARA ext + teleport wrapper + scan-base patch)
+# =============================================================================
+
+
+class TestCave6MultiSegment(unittest.TestCase):
+    """Cave6 ext segment + merit-scan teleport wrapper invariants."""
+
+    def test_cave6_ext_segment_size_and_alignment(self) -> None:
+        from ..data.addresses import (
+            CAVE6_ITEM_PARA_EXT_RAM,
+            CAVE6_ITEM_PARA_EXT_SIZE,
+            CAVE6_ITEM_PARA_EXT_SLOT_BASE,
+            CAVE6_ITEM_PARA_EXT_SLOT_COUNT,
+            CAVE6_ITEM_PARA_EXT_SLOT_LAST,
+        )
+        # Aligned to a Mode2/2352 sector boundary (sector 148351 starts
+        # at RAM 0x80096800).
+        self.assertEqual(CAVE6_ITEM_PARA_EXT_RAM, 0x80096800)
+        self.assertEqual(CAVE6_ITEM_PARA_EXT_SLOT_BASE, 144)
+        self.assertEqual(CAVE6_ITEM_PARA_EXT_SLOT_COUNT, 30)
+        self.assertEqual(CAVE6_ITEM_PARA_EXT_SLOT_LAST, 173)
+        self.assertEqual(
+            CAVE6_ITEM_PARA_EXT_SIZE, CAVE6_ITEM_PARA_EXT_SLOT_COUNT * 32,
+        )
+        # Must stay inside one 2048-byte sector ud-region so that
+        # apply_tokens flat writes don't corrupt the next sector header.
+        self.assertLessEqual(
+            CAVE6_ITEM_PARA_EXT_RAM + CAVE6_ITEM_PARA_EXT_SIZE, 0x80097000,
+        )
+
+    def test_ext_slot_helper_routes_freed_desc_and_cave6(self) -> None:
+        from ..data.addresses import (
+            CAVE6_ITEM_PARA_EXT_BIN_OFFSET,
+            CAVE6_ITEM_PARA_EXT_SLOT_BASE,
+            CAVE6_ITEM_PARA_EXT_SLOT_LAST,
+            ext_item_para_slot_bin_offset,
+        )
+        # Slot 143 (last freed-DESC slot) and slot 144 (first Cave6 ext
+        # slot) should land in DIFFERENT regions, not be contiguous.
+        off_143 = ext_item_para_slot_bin_offset(143)
+        off_144 = ext_item_para_slot_bin_offset(144)
+        self.assertNotEqual(off_144, off_143 + 32)
+        self.assertEqual(off_144, CAVE6_ITEM_PARA_EXT_BIN_OFFSET)
+        # Slot 173 is the last valid Cave6 ext slot.
+        ext_item_para_slot_bin_offset(CAVE6_ITEM_PARA_EXT_SLOT_LAST)
+        # Slot 174 must reject.
+        with self.assertRaises(ValueError):
+            ext_item_para_slot_bin_offset(CAVE6_ITEM_PARA_EXT_SLOT_LAST + 1)
+
+    def test_teleport_wrapper_size(self) -> None:
+        from ..data.addresses import ROM_MERIT_SCAN_TELEPORT_WRAPPER_BYTES
+        self.assertEqual(len(ROM_MERIT_SCAN_TELEPORT_WRAPPER_BYTES), 64)
+
+    def test_teleport_wrapper_branches_correctly(self) -> None:
+        # Decode-verify the wrapper bytecode. The vanilla path branch
+        # target must be word index 8 (= offset 0x20), and both ``j``
+        # instructions must target 0x80107338 (the original ``lhu``).
+        from ..data.addresses import (
+            CAVE6_ITEM_PARA_EXT_RAM,
+            CAVE6_ITEM_PARA_EXT_SLOT_BASE,
+            ROM_MERIT_SCAN_RETURN_RAM,
+            ROM_MERIT_SCAN_TELEPORT_WRAPPER_BYTES,
+        )
+        self.assertEqual(ROM_MERIT_SCAN_RETURN_RAM, 0x80107338)
+        words = struct.unpack(
+            "<16I", ROM_MERIT_SCAN_TELEPORT_WRAPPER_BYTES,
+        )
+        # Word 0: sltiu r1, r5, 0x90  (threshold = ext slot base)
+        sltiu = words[0]
+        self.assertEqual((sltiu >> 26) & 0x3F, 0x0B)
+        self.assertEqual((sltiu >> 21) & 0x1F, 5)    # rs = r5
+        self.assertEqual((sltiu >> 16) & 0x1F, 1)    # rt = r1
+        self.assertEqual(sltiu & 0xFFFF, CAVE6_ITEM_PARA_EXT_SLOT_BASE)
+        # Word 1: beq r1, r0, +6 (branch to ext_path at word 8)
+        beq = words[1]
+        self.assertEqual((beq >> 26) & 0x3F, 0x04)
+        self.assertEqual(beq & 0xFFFF, 6)
+        # Word 6: j ROM_MERIT_SCAN_RETURN_RAM (end of vanilla path)
+        j1 = words[6]
+        self.assertEqual((j1 >> 26) & 0x3F, 0x02)
+        self.assertEqual(
+            (j1 & 0x03FFFFFF) << 2, ROM_MERIT_SCAN_RETURN_RAM & 0x0FFFFFFC,
+        )
+        # Word 14: j ROM_MERIT_SCAN_RETURN_RAM (end of ext path)
+        j2 = words[14]
+        self.assertEqual((j2 >> 26) & 0x3F, 0x02)
+        self.assertEqual(
+            (j2 & 0x03FFFFFF) << 2, ROM_MERIT_SCAN_RETURN_RAM & 0x0FFFFFFC,
+        )
+        # Word 10/11: lui+addiu constructing CAVE6_ITEM_PARA_EXT_RAM.
+        lui_hi = (CAVE6_ITEM_PARA_EXT_RAM >> 16) & 0xFFFF
+        lui_lo = CAVE6_ITEM_PARA_EXT_RAM & 0xFFFF
+        self.assertEqual(words[10] & 0xFFFF, lui_hi)
+        self.assertEqual(words[11] & 0xFFFF, lui_lo)
+
+    def test_scan_base_patch_jumps_to_teleport_wrapper(self) -> None:
+        from ..data.addresses import (
+            CAVE6_MERIT_SCAN_TELEPORT_WRAPPER_RAM,
+            ROM_MERIT_SCAN_BASE_PATCH_BYTES,
+            ROM_MERIT_SCAN_BASE_PATCH_RAM,
+        )
+        self.assertEqual(ROM_MERIT_SCAN_BASE_PATCH_RAM, 0x8010732C)
+        self.assertEqual(len(ROM_MERIT_SCAN_BASE_PATCH_BYTES), 12)
+        j_word, nop1, nop2 = struct.unpack(
+            "<3I", ROM_MERIT_SCAN_BASE_PATCH_BYTES,
+        )
+        # j CAVE6_MERIT_SCAN_TELEPORT_WRAPPER_RAM
+        self.assertEqual((j_word >> 26) & 0x3F, 0x02)
+        self.assertEqual(
+            (j_word & 0x03FFFFFF) << 2,
+            CAVE6_MERIT_SCAN_TELEPORT_WRAPPER_RAM & 0x0FFFFFFC,
+        )
+        # Both delay/replacement slots are nop.
+        self.assertEqual(nop1, 0)
+        self.assertEqual(nop2, 0)
+
+
+class TestCave6MultiSegmentPatcherOn(DigimonWorldTestBase):
+    """Patcher emits the Cave6 multi-segment token writes."""
+
+    options: ClassVar[dict[str, Any]] = {"merit_shop_locations": 1}
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.tokens, self.procedure = _CapturedPatch.run(self.world)
+        self.observed_last: dict[int, bytes] = {}
+        for _t, off, data in self.tokens:
+            self.observed_last[off] = data
+
+    def test_teleport_wrapper_bytes_written(self) -> None:
+        from ..data.addresses import (
+            CAVE6_MERIT_SCAN_TELEPORT_WRAPPER_OFFSET,
+            ROM_MERIT_SCAN_TELEPORT_WRAPPER_BYTES,
+        )
+        self.assertIn(
+            CAVE6_MERIT_SCAN_TELEPORT_WRAPPER_OFFSET, self.observed_last,
+        )
+        self.assertEqual(
+            self.observed_last[CAVE6_MERIT_SCAN_TELEPORT_WRAPPER_OFFSET],
+            ROM_MERIT_SCAN_TELEPORT_WRAPPER_BYTES,
+        )
+
+    def test_scan_base_patch_bytes_written(self) -> None:
+        from ..data.addresses import (
+            ROM_MERIT_SCAN_BASE_PATCH_BYTES,
+            ROM_MERIT_SCAN_BASE_PATCH_OFFSET,
+        )
+        self.assertIn(ROM_MERIT_SCAN_BASE_PATCH_OFFSET, self.observed_last)
+        self.assertEqual(
+            self.observed_last[ROM_MERIT_SCAN_BASE_PATCH_OFFSET],
+            ROM_MERIT_SCAN_BASE_PATCH_BYTES,
+        )
+
+    def test_cave6_ext_slots_144_to_148_written(self) -> None:
+        """All 5 Cave6-segment merit slots get ITEM_PARA entries."""
+        for slot in range(144, 149):
+            offset = ext_item_para_slot_bin_offset(slot)
+            self.assertIn(
+                offset, self.observed_last,
+                f"slot {slot} (Cave6 ext) not patched",
+            )
+            self.assertEqual(len(self.observed_last[offset]), 32)
+
+
+class TestCave6MultiSegmentPatcherOff(DigimonWorldTestBase):
+    """When MeritShopLocations is off, no Cave6 multi-segment tokens fire."""
+
+    options: ClassVar[dict[str, Any]] = {"merit_shop_locations": 0}
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.tokens, _ = _CapturedPatch.run(self.world)
+        self.observed_offsets = {off for _t, off, _d in self.tokens}
+
+    def test_teleport_wrapper_not_written(self) -> None:
+        from ..data.addresses import CAVE6_MERIT_SCAN_TELEPORT_WRAPPER_OFFSET
+        self.assertNotIn(
+            CAVE6_MERIT_SCAN_TELEPORT_WRAPPER_OFFSET, self.observed_offsets,
+        )
+
+    def test_scan_base_patch_not_written(self) -> None:
+        from ..data.addresses import ROM_MERIT_SCAN_BASE_PATCH_OFFSET
+        self.assertNotIn(
+            ROM_MERIT_SCAN_BASE_PATCH_OFFSET, self.observed_offsets,
+        )
+
+    def test_cave6_ext_slots_not_written(self) -> None:
+        for slot in range(144, 174):
+            offset = ext_item_para_slot_bin_offset(slot)
+            self.assertNotIn(offset, self.observed_offsets)

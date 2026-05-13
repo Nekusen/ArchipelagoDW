@@ -163,11 +163,11 @@ class TestChestDispatch(DigimonWorldTestBase):
         # Steak is intentionally not AP-tracked: vanilla DW1 spawns it
         # from the Overdell fridge (gated on Frig Key) and is left on
         # the vanilla path.
-        # The merit shop architecturally caps at 9 AP slots (the freed
-        # ITEM_DESC_PTR region is 16 slots, 7 used by recycle); the
-        # remaining 5 vanilla merit-shop items get their meritValue
-        # zeroed but don't become AP locations.
-        self.assertEqual(len(LOCATION_RAM_BITS), 46 + 65 + 8 + 10 + 7 + 9)
+        # Merit shop: 14 AP slots. Slots 135..143 live in the freed
+        # ITEM_DESC_PTR region (contiguous with vanilla ITEM_PARA);
+        # slots 144..148 live in the Cave6 ext segment via the
+        # merit-scan teleport wrapper.
+        self.assertEqual(len(LOCATION_RAM_BITS), 46 + 65 + 8 + 10 + 7 + 14)
 
 
 # =============================================================================

@@ -168,6 +168,10 @@ from .data.addresses import (
     ROM_MERIT_SCAN_BOUND_FORMAT,
     ROM_MERIT_SCAN_BOUND_OFFSET,
     ROM_MERIT_SCAN_BOUND_VALUE,
+    ROM_MERIT_SCAN_BASE_PATCH_OFFSET,
+    ROM_MERIT_SCAN_BASE_PATCH_BYTES,
+    ROM_MERIT_SCAN_TELEPORT_WRAPPER_BYTES,
+    CAVE6_MERIT_SCAN_TELEPORT_WRAPPER_OFFSET,
     MERIT_AP_DESC_STRINGS_BIN_OFFSET,
     MERIT_SHOP_AP_ITEM_ID_BASE,
     MERIT_SHOP_AP_ITEM_ID_COUNT,
@@ -1697,46 +1701,57 @@ def _write_merit_shop_locations_tokens(
 ) -> None:
     """Write all Merit Shop AP-randomization tokens for the seed.
 
-    Six sets of writes (only when
+    Eight sets of writes (only when
     :class:`worlds.digimon_world.options.MeritShopLocations` is on):
 
-    1. **Extended ITEM_PARA entries (slots 135..143)** at the freed
-       ITEM_DESC_PTR location. One 32-byte entry per AP merit-shop slot
-       (9 total), carrying the multiworld-resolved AP item name
-       (truncated to 14 chars) and the vanilla ``meritValue`` of the
-       corresponding entry in :data:`MERIT_SHOP_VANILLA_ENTRIES` (so
-       the merit-shop scan picks it up at the same displayed price).
+    1. **Extended ITEM_PARA entries (slots 135..148)** — one 32-byte
+       entry per of the 14 AP merit-shop slots, carrying the
+       multiworld-resolved AP item name (truncated to 14 chars) and
+       the vanilla ``meritValue`` of the corresponding entry in
+       :data:`MERIT_SHOP_VANILLA_ENTRIES` (so the merit-shop scan
+       picks it up at the same displayed price). The helper
+       :func:`ext_item_para_slot_bin_offset` transparently routes
+       slots 135..143 to the freed ITEM_DESC_PTR region and slots
+       144..148 to :data:`CAVE6_ITEM_PARA_EXT_RAM`.
     2. **AP description strings** at
-       :data:`MERIT_AP_DESC_STRINGS_BIN_OFFSET`. 9 × 64-byte NUL-padded
+       :data:`MERIT_AP_DESC_STRINGS_BIN_OFFSET`. 14 × 64-byte NUL-padded
        slots holding ``"From <player>'s World"``. The relocated
        ITEM_DESC_PTR (built later by :meth:`relocate_item_desc_ptr`)
        references these.
     3. **Vanilla-item meritValue zero-outs** — for **all 14** entries in
        :data:`MERIT_SHOP_VANILLA_ENTRIES`, write ``meritValue = 0`` to
        its ITEM_PARA entry so every vanilla merit-shop row disappears.
-       Only the first 9 become AP locations; the remaining 5 just go
-       away (architectural ceiling — extended ITEM_PARA can't grow past
-       slot 143 without clobbering the per-item color table at
-       0x80127BDC). Slot 117 (Amazing rod) is already zeroed by the
-       always-on v1 :func:`_write_merit_shop_wrapper_tokens`; this
-       duplicate write is idempotent.
+       Slot 117 (Amazing rod) is already zeroed by the always-on v1
+       :func:`_write_merit_shop_wrapper_tokens`; this duplicate write
+       is idempotent.
     4. **Extended wrapper bytes** at
-       :data:`ROM_MERIT_SHOP_EXT_WRAPPER_OFFSET` — 432-byte MIPS
-       sequence that dispatches 10 entries (slot 83 → trigger 903 +
-       slots 135..143 → triggers 912..920).
+       :data:`ROM_MERIT_SHOP_EXT_WRAPPER_OFFSET` — 572-byte MIPS
+       sequence that dispatches 15 entries (slot 83 → trigger 903 +
+       slots 135..148 → triggers 912..925).
     5. **Jal-hijack override** at the existing
        :data:`ROM_MERIT_SHOP_PATCH_OFFSET`. The v1 always-on patcher
        writes ``jal ROM_MERIT_SHOP_WRAPPER_RAM`` (= 0x80095800) at this
        offset; we re-write it to
-       ``jal ROM_MERIT_SHOP_EXT_WRAPPER_RAM`` (= 0x80096338). Token
-       order is insertion order so this token must be emitted **after**
+       ``jal ROM_MERIT_SHOP_EXT_WRAPPER_RAM``. Token order is insertion
+       order so this token must be emitted **after**
        :func:`_write_merit_shop_wrapper_tokens` runs.
     6. **Scan-loop bound patch** at
        :data:`ROM_MERIT_SCAN_BOUND_OFFSET` — single 4-byte rewrite
-       changing ``sltiu $r1, $r5, 0x80`` to ``sltiu $r1, $r5, 0x90`` so
-       the merit-shop ITEM_PARA scan reaches slot 143.
+       changing ``sltiu $r1, $r5, 0x80`` to ``sltiu $r1, $r5, 0x95`` so
+       the merit-shop ITEM_PARA scan reaches slot 148.
+    7. **Merit-scan teleport wrapper bytes** at
+       :data:`CAVE6_MERIT_SCAN_TELEPORT_WRAPPER_OFFSET` — 64-byte MIPS
+       sequence that recomputes the scan's per-iteration ITEM_PARA
+       pointer, routing slot_id < 144 to vanilla ITEM_PARA + 0x18 and
+       slot_id >= 144 to :data:`CAVE6_ITEM_PARA_EXT_RAM` + 0x18.
+    8. **Scan-base inline patch** at
+       :data:`ROM_MERIT_SCAN_BASE_PATCH_OFFSET` — 12-byte rewrite
+       replacing the original 3-instruction
+       ``lui/addiu/addu`` pointer-computation sequence with
+       ``j teleport_wrapper; nop; nop``. The wrapper returns to PC
+       0x80107338 (the original ``lhu``).
 
-    The 256-entry relocated ITEM_DESC_PTR table populates slots 135..143
+    The 256-entry relocated ITEM_DESC_PTR table populates slots 135..148
     in the :meth:`DigimonWorldPatchExtension.relocate_item_desc_ptr`
     procedure step, which is added to the procedure by
     :func:`_assemble_procedure` whenever this token writer is invoked
@@ -1819,6 +1834,23 @@ def _write_merit_shop_locations_tokens(
         APTokenTypes.WRITE,
         ROM_MERIT_SCAN_BOUND_OFFSET,
         struct.pack(ROM_MERIT_SCAN_BOUND_FORMAT, ROM_MERIT_SCAN_BOUND_VALUE),
+    )
+
+    # 7. Merit-scan teleport wrapper bytes in Cave6.
+    patch.write_token(
+        APTokenTypes.WRITE,
+        CAVE6_MERIT_SCAN_TELEPORT_WRAPPER_OFFSET,
+        ROM_MERIT_SCAN_TELEPORT_WRAPPER_BYTES,
+    )
+
+    # 8. Inline scan-base patch (3 instructions) — `j teleport_wrapper; nop; nop`.
+    #    Replaces the original `lui/addiu/addu` pointer construction at
+    #    PC 0x8010732C..0x00107334 so the wrapper computes r10 for slots
+    #    144..148 in Cave6.
+    patch.write_token(
+        APTokenTypes.WRITE,
+        ROM_MERIT_SCAN_BASE_PATCH_OFFSET,
+        ROM_MERIT_SCAN_BASE_PATCH_BYTES,
     )
 
 

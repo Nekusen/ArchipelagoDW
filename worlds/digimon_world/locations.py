@@ -228,11 +228,16 @@ RECRUIT_PP_REQUIREMENTS: Final[dict[str, int]] = {
     "Monzaemon": 0,
     "Nanimon": 0,
     "Numemon": 0,
-    "Andromon": 0,
     "Giromon": 0,
     "MetalMamemon": 0,
     # 15 PP
     "Greymon": 15,
+    # Andromon: vanilla in-game gate is technically 0 PP, but practically
+    # the recruit requires 4 specific File City buildings whose collective
+    # PP cost lands around 15. Modeled as a 15 PP gate so
+    # ``_apply_pp_cutoffs`` correctly excludes Andromon when
+    # ``prosperity_goal < 15``.
+    "Andromon": 15,
     # 40 PP
     "SkullGreymon": 40,
     # 45 PP
@@ -501,7 +506,7 @@ _MERIT_SHOP_LOCATIONS: Final[dict[str, LocationEntry]] = {
     name: LocationEntry(69_057_000 + i, "Geko Swamp")
     for i, name in enumerate(MERIT_SHOP_LOCATION_NAMES)
 }
-assert len(_MERIT_SHOP_LOCATIONS) == 9, len(_MERIT_SHOP_LOCATIONS)
+assert len(_MERIT_SHOP_LOCATIONS) == 14, len(_MERIT_SHOP_LOCATIONS)
 
 
 # =============================================================================
