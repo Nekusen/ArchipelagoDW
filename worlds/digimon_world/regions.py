@@ -290,7 +290,7 @@ _EDGES: Final[tuple[tuple[str, str], ...]] = (
     ("Ancient Dino Region", "Tropical Jungle"),
     ("Greatlake", "Native Forest"),
     ("Beetle Land", "Greatlake"),           # Blue Flute (same as forward)
-    ("Great Canyon", "Tropical Jungle"),    # free reverse of the GC-Bridge edge
+    ("Great Canyon", "Tropical Jungle"),    # GC-Bridge gated (both ways)
     ("Freezeland", "Great Canyon"),
     ("Misty Trees", "Freezeland"),
 )

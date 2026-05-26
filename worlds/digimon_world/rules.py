@@ -42,9 +42,10 @@ from BaseClasses import ItemClassification, LocationProgressType
 from rule_builder.rules import CanReachRegion, False_, Has
 from worlds.generic.Rules import add_rule
 
-from .data.addresses import FISHING_LOCATION_NAMES
+from .data.addresses import ARENA_CUP_TIERS, FISHING_LOCATION_NAMES
 from .items import PROSPERITY_PER_ITEM
 from .locations import (
+    ARENA_CUP_NAMES,
     RECRUIT_PP_REQUIREMENTS,
     _CHEST_BY_SLOT,
 )
@@ -94,6 +95,7 @@ def set_all_rules(world: DigimonWorldWorld) -> None:
     _set_keyitem_pickup_rules(world)
     _set_fishing_rules(world)
     _set_nanimon_quest_rules(world)
+    _set_arena_cup_rules(world)
     _apply_pp_cutoffs(world)
     _set_completion_condition(world)
 
@@ -308,17 +310,25 @@ def _set_entrance_rules(world: DigimonWorldWorld) -> None:
         Has("Blue Flute"),
     )
 
-    # Tropical Jungle → Great Canyon: mode-gated. The GC Bridge spans
-    # the TJ↔GC ravine; the Greatlake branch is a dead-end into
-    # Beetle Land and never connects to Great Canyon.
+    # Tropical Jungle ↔ Great Canyon: mode-gated **in both directions**.
+    # The GC Bridge spans the TJ↔GC ravine; without it, the player can
+    # neither cross from TJ to GC nor walk back from GC to TJ (the
+    # ravine is the only walking path between the two regions).
+    # Vanilla mode requires 6 PP on either side. Greatlake is a dead-
+    # end branch into Beetle Land and never connects to Great Canyon.
     if canyon_mode == _OPT_SHUFFLED:
         _set_entrance_rule(
             world, "Tropical Jungle", "Great Canyon",
             Has("Great Canyon Bridge"),
         )
+        _set_entrance_rule(
+            world, "Great Canyon", "Tropical Jungle",
+            Has("Great Canyon Bridge"),
+        )
     elif canyon_mode == _OPT_VANILLA:
         _set_entrance_rule(world, "Tropical Jungle", "Great Canyon", _pp(6))
-    # always_open: free
+        _set_entrance_rule(world, "Great Canyon", "Tropical Jungle", _pp(6))
+    # always_open: free in both directions
 
     # Great Canyon → Freezeland: free
     # Freezeland → Misty Trees: free
@@ -746,6 +756,47 @@ def _set_nanimon_quest_rules(world: DigimonWorldWorld) -> None:
             world.get_location("Nanimon Quest: Drill Tunnel"),
             nanimon_drill_rule,
         )
+
+
+# ---------------------------------------------------------------------------
+# Arena Cup rules
+# ---------------------------------------------------------------------------
+
+def _set_arena_cup_rules(world: DigimonWorldWorld) -> None:
+    """PP-progress gating for the 5 arena grade-tier cups.
+
+    All 20 arena-cup locations (5 tiers x 4 checks) live in File City,
+    which is unconditionally reachable. The per-tier PP gate
+    (:data:`ARENA_CUP_TIERS` 4th element) is an AP-logic proxy for the
+    in-game difficulty -- DW1's cups are partner-stage/stats-gated
+    (Rookie partner can field Grade D; Champion for C/B; Ultimate for
+    A/S), which AP can't directly model, so we approximate via PP
+    progression.
+
+    When a tier's PP gate exceeds the player's ``prosperity_goal``,
+    the 4 locations under it are flagged ``LocationProgressType.EXCLUDED``
+    so AP fill never places progression there. The locations still
+    exist and still fire on cup win -- the player just can't earn
+    progression by clearing them.
+    """
+
+    mt_threshold = int(world.options.prosperity_goal.value)
+
+    for tier, _bit, _trig, pp_gate in ARENA_CUP_TIERS:
+        for i in range(1, 5):
+            loc = world.get_location(f"Arena Cup: {tier} {i}")
+            if pp_gate > mt_threshold:
+                # Tier's PP proxy is past the configured goal: keep the
+                # location in the pool but lock it to filler.
+                loc.progress_type = LocationProgressType.EXCLUDED
+                loc.item_rule = (
+                    lambda item: item.classification == ItemClassification.filler
+                )
+            elif pp_gate > 0:
+                world.set_rule(loc, _pp(pp_gate))
+    # Reference both addresses-side and locations-side tables so the
+    # imports above are exercised even when only one is consulted.
+    assert len(ARENA_CUP_NAMES) == len(ARENA_CUP_TIERS) * 4
 
 
 # ---------------------------------------------------------------------------
