@@ -45,6 +45,7 @@ from .data.addresses import (
     TECH_MASTERY_SLOTS,
     TECH_NAMES_BY_SLOT,
 )
+from .regions import LOCKABLE_REGIONS, region_access_item_name
 
 if TYPE_CHECKING:
     from .world import DigimonWorldWorld
@@ -114,6 +115,36 @@ _KEY_ITEMS: Final[dict[str, ItemEntry]] = {
     "Tropical Jungle Bridge": ItemEntry(5001, ItemClassification.progression),
     "Great Canyon Bridge":    ItemEntry(5002, ItemClassification.progression),
 }
+
+# =============================================================================
+# Region Access items (RegionLocking option)
+# =============================================================================
+#
+# One ``<region> Region Access`` AP item per name in
+# :data:`worlds.digimon_world.regions.LOCKABLE_REGIONS`. Pure-logic items
+# (no in-game effect) — AP placement treats the region's checks as
+# unreachable until the item is delivered, but nothing physically gates
+# the player from walking in. See :class:`worlds.digimon_world.options.RegionLocking`
+# for the full design rationale.
+#
+# dw_codes follow the 5000+ "virtual access item" range (LCA = 5000,
+# TJ Bridge = 5001, GC Bridge = 5002); region-access codes start at 5010
+# to leave a small gap for future bridge-style virtual items.
+#
+# Items are added to the pool selectively — only those whose region is
+# in :func:`options.get_locked_regions` ship. The other entries stay in
+# :data:`_ITEM_TABLE` (so name-to-id lookups remain stable across
+# option combinations) but never enter the itempool. This matches the
+# pattern used by Lava Cave Access / Tropical Jungle Bridge / Great
+# Canyon Bridge in :func:`create_all_items`.
+
+_REGION_ACCESS_ITEMS: Final[dict[str, ItemEntry]] = {
+    region_access_item_name(region): ItemEntry(
+        5010 + i, ItemClassification.progression,
+    )
+    for i, region in enumerate(LOCKABLE_REGIONS)
+}
+assert len(_REGION_ACCESS_ITEMS) == len(LOCKABLE_REGIONS)
 
 # =============================================================================
 # Bank-item catalog — unified table for non-key, non-recruit items
@@ -430,7 +461,10 @@ _BUNDLED_RECRUITS: Final[frozenset[str]] = frozenset({
     name for name in AP_RECRUIT_ITEM_DIGIMON
     if name not in _INDIVIDUAL_RECRUIT_CLASSIFICATIONS
 })
-assert len(_BUNDLED_RECRUITS) == 26, len(_BUNDLED_RECRUITS)
+# 25 = 26 bundled - Coelamon (dropped 2026-05-24 from the AP pool, but
+# his city-visibility bit is still toggled by Progressive Item Shop T1
+# because the client uses BEATEN_RAM_BITS, not AP_RECRUIT_ITEM_DIGIMON).
+assert len(_BUNDLED_RECRUITS) == 25, len(_BUNDLED_RECRUITS)
 
 
 def _digimon_id_from_recruit_bit(byte_addr: int, bit: int) -> int:
@@ -529,9 +563,11 @@ _bundle_members = {
     name for tiers in PROGRESSIVE_BUNDLES.values() for tier in tiers for name in tier
 }
 # Digitamamon is in _AP_RECRUIT_EXCLUDED (post-game) but appears in
-# Progressive Restaurant T3 as a side-flag. Subtract him before the
-# equality check.
-assert _bundle_members - {"Digitamamon"} == _BUNDLED_RECRUITS, (
+# Progressive Restaurant T3 as a side-flag. Coelamon is similarly in
+# _AP_RECRUIT_EXCLUDED (dropped 2026-05-24 — bugged cutscene) but still
+# rides Progressive Item Shop T1 for city visibility. Subtract both
+# before the equality check.
+assert _bundle_members - {"Digitamamon", "Coelamon"} == _BUNDLED_RECRUITS, (
     f"Bundle membership mismatch: in-bundles={sorted(_bundle_members)}, "
     f"_BUNDLED_RECRUITS={sorted(_BUNDLED_RECRUITS)}"
 )
@@ -645,6 +681,7 @@ def choose_technique_pool(rng) -> list[str]:
 
 _ITEM_TABLE: Final[dict[str, ItemEntry]] = {
     **_KEY_ITEMS,
+    **_REGION_ACCESS_ITEMS,
     **_BANK_ITEMS,
     **_BITS,
     **_PROSPERITY,
@@ -868,6 +905,32 @@ FILLER_ITEM_NAME: Final = "1000 Bits"
 #    :data:`FILLER_DISTRIBUTION` proportions per seed.
 
 
+def get_bootstrap_items(world: DigimonWorldWorld) -> tuple[str, ...]:
+    """Items that should be pre-collected (start_inventory) for this
+    world, computed from the options.
+
+    Single source of truth for :meth:`world.DigimonWorldWorld.generate_early`
+    (which calls ``push_precollected`` for each name) and
+    :func:`create_all_items` (which skips these from the pool to avoid
+    double-shipping). Order doesn't matter; the caller treats it as a set.
+
+    For PR 2 the only contributor is ``region_locking: all`` mode,
+    where Native Forest Region Access is the default bootstrap (so the
+    player has somewhere to walk on a fresh save). PR 3's
+    ``starting_region`` option will extend this with a randomized kit.
+    """
+
+    from .options import RegionLocking, get_locked_regions
+
+    mode = int(world.options.region_locking.value)
+    if mode != RegionLocking.option_all:
+        return ()
+    locked = get_locked_regions(world.options)
+    if "Native Forest" not in locked:
+        return ()
+    return (region_access_item_name("Native Forest"),)
+
+
 def create_item(world: DigimonWorldWorld, name: str) -> DigimonWorldItem:
     entry = _ITEM_TABLE[name]
     return DigimonWorldItem(name, entry.classification, ITEM_NAME_TO_ID[name], world.player)
@@ -893,12 +956,23 @@ def create_all_items(world: DigimonWorldWorld) -> None:
 
     pool: list[Item] = []
     pool.extend(world.create_item(name) for name in _KEY_ITEMS if name not in skip_keys)
-    # When recruit_randomization is OFF, recruit items are locked to
-    # their own AP location in :meth:`DigimonWorldWorld.create_regions`
-    # (via ``_lock_recruit_items_if_disabled``) and must NOT enter the
-    # multiworld pool.
-    if int(world.options.recruit_randomization.value):
-        pool.extend(world.create_item(name) for name in _RECRUIT_ITEMS)
+    # Region Access items — one per locked region under the
+    # ``region_locking`` option, MINUS items already pre-collected by
+    # :func:`get_bootstrap_items` (so we don't double-ship the bootstrap
+    # kit). Empty set under ``off``; full :data:`LOCKABLE_REGIONS` under
+    # ``all`` (minus bootstrap); the user's subset under ``custom``.
+    from .options import get_locked_regions
+    bootstrap = set(get_bootstrap_items(world))
+    for region in get_locked_regions(world.options):
+        name = region_access_item_name(region)
+        if name in bootstrap:
+            continue
+        pool.append(world.create_item(name))
+    # Recruit items are always shuffled into the multiworld pool. The
+    # ``recruit_randomization`` option was removed 2026-05-24 — its
+    # "off" mode (self-locked recruits) was incompatible with Progressive
+    # ladder items and other Phase 7+ randomization features.
+    pool.extend(world.create_item(name) for name in _RECRUIT_ITEMS)
     pool.extend(world.create_item(name) for name in _BIRDRAMON_FLIGHT_ITEMS)
     pp_count = prosperity_point_count(int(world.options.prosperity_goal.value))
     pool.extend(

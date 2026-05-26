@@ -39,6 +39,7 @@ from typing import TYPE_CHECKING
 
 from BaseClasses import ItemClassification, LocationProgressType
 from rule_builder.rules import CanReachRegion, Has
+from worlds.generic.Rules import add_rule
 
 from .data.addresses import FISHING_LOCATION_NAMES
 from .items import PROSPERITY_PER_ITEM
@@ -46,6 +47,8 @@ from .locations import (
     RECRUIT_PP_REQUIREMENTS,
     _CHEST_BY_SLOT,
 )
+from .options import get_locked_regions
+from .regions import _EDGES, region_access_item_name
 
 if TYPE_CHECKING:
     from .world import DigimonWorldWorld
@@ -85,12 +88,50 @@ def _set_entrance_rule(world: DigimonWorldWorld, source: str, target: str, rule)
 
 def set_all_rules(world: DigimonWorldWorld) -> None:
     _set_entrance_rules(world)
+    _apply_region_locks(world)
     _set_recruit_rules(world)
     _set_keyitem_pickup_rules(world)
     _set_fishing_rules(world)
     _set_nanimon_quest_rules(world)
     _apply_pp_cutoffs(world)
     _set_completion_condition(world)
+
+
+def _apply_region_locks(world: DigimonWorldWorld) -> None:
+    """AND a ``Has("<region> Region Access")`` term onto every incoming
+    edge of each locked region.
+
+    Pure post-pass over the regular entrance-rule layer:
+
+    * Runs AFTER :func:`_set_entrance_rules` so existing per-edge rules
+      (Birdramon flight gates, bridge unlocks, etc.) are already in place.
+    * For every locked region L, iterates over all ``(source, L)`` pairs
+      in :data:`worlds.digimon_world.regions._EDGES` and uses
+      :func:`worlds.generic.Rules.add_rule` to AND a resolved
+      ``Has("L Region Access")`` term onto that entrance.
+    * ``add_rule`` cleanly handles both the "no existing rule" case
+      (free edge → just install our rule) and the "rule already set"
+      case (lambda-wrap with AND on the resolved callables).
+
+    Bypasses the rule_builder's symbolic AND because the existing
+    entrance rule has already been resolved to a callable by
+    :meth:`World.set_rule`. Safe here because ``Has`` has no
+    region-dependencies — no indirect-conditions or dependency-cache
+    bookkeeping needs to fire.
+
+    No-op when ``region_locking == off`` (empty locked set).
+    """
+
+    locked = get_locked_regions(world.options)
+    if not locked:
+        return
+    for source, target in _EDGES:
+        if target not in locked:
+            continue
+        access_rule = Has(region_access_item_name(target)).resolve(world)
+        entrance_name = f"{source} to {target}"
+        entrance = world.multiworld.get_entrance(entrance_name, world.player)
+        add_rule(entrance, access_rule, combine="and")
 
 
 # ---------------------------------------------------------------------------

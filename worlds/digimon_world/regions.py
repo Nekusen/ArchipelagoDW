@@ -75,6 +75,58 @@ if TYPE_CHECKING:
     from .world import DigimonWorldWorld
 
 
+# Regions that can be locked behind a "<region> Region Access" AP item
+# when :class:`worlds.digimon_world.options.RegionLocking` is on.
+#
+# Each name here MUST also appear in :data:`REGION_NAMES`. Order in this
+# tuple defines a stable order for option valid_keys, item names, and
+# generation tests; do NOT reorder casually.
+#
+# Excluded from this list (and why):
+#   * ``Menu`` — synthetic AP origin.
+#   * ``File City`` — always-reachable hub; locking would softlock.
+#   * ``Greatlake`` — barely any content; per user feedback it's a
+#     transit region, not worth a slot.
+#   * ``Meramon Tunnel`` — sub-area of Drill Tunnel reached via the
+#     boulder; the Drill Tunnel lock already gates this entire chain
+#     and the Lava Cave Access boulder gate handles the inner step.
+#   * ``Mt. Infinity``, ``Big Store``, ``Tower`` — hard-gated by the
+#     prosperity threshold; adding a Region Access would just delay
+#     endgame without changing sphere distribution.
+#   * ``Grey Lord's Mansion`` — already gated by Mansion Key (AP item).
+#   * ``Leomon Ancestor Cave`` — 1-chest sub-area, 45 PP gated.
+#   * ``Secret Beach Cave`` — 1-chest sub-area, Whamon-gated.
+#   * ``Back Dimension`` — post-game, all chests EXCLUDED + filler-only.
+#   * ``Card Vending`` — synthetic; physical machines live in Gear
+#     Savanna and File City.
+LOCKABLE_REGIONS: Final[tuple[str, ...]] = (
+    "Native Forest",
+    "Tropical Jungle",
+    "Overdell",
+    "Ancient Dino Region",
+    "Beetle Land",
+    "Great Canyon",
+    "Freezeland",
+    "Drill Tunnel",
+    "Mt. Panorama",
+    "Gear Savanna",
+    "Geko Swamp",
+    "Misty Trees",
+    "Toy Town",
+    "Factorial Town",
+)
+
+
+def region_access_item_name(region: str) -> str:
+    """Canonical AP-item name for ``region``'s region-locking gate.
+
+    Centralized so :mod:`.items`, :mod:`.rules`, and the option set's
+    ``valid_keys`` all agree on the spelling.
+    """
+
+    return f"{region} Region Access"
+
+
 REGION_NAMES: Final[tuple[str, ...]] = (
     "Menu",
     "File City",
@@ -218,6 +270,12 @@ _EDGES: Final[tuple[tuple[str, str], ...]] = (
     ("Great Canyon", "Greatlake"),
     ("Freezeland", "Great Canyon"),
     ("Misty Trees", "Freezeland"),
+)
+
+
+assert set(LOCKABLE_REGIONS).issubset(REGION_NAMES), (
+    "LOCKABLE_REGIONS contains names that aren't real regions: "
+    f"{set(LOCKABLE_REGIONS) - set(REGION_NAMES)}"
 )
 
 

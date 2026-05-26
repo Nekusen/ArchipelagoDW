@@ -12,7 +12,9 @@ plumbing it correctly is a Phase 4+ topic.
 
 from dataclasses import dataclass
 
-from Options import Choice, DefaultOnToggle, OptionGroup, PerGameCommonOptions, Range, Toggle
+from Options import Choice, DefaultOnToggle, OptionGroup, OptionSet, PerGameCommonOptions, Range, Toggle
+
+from .regions import LOCKABLE_REGIONS
 
 
 class Goal(Choice):
@@ -170,6 +172,48 @@ class LavaCaveAccess(Choice):
     option_vanilla = 0
     option_shuffled = 1
     default = option_shuffled
+
+
+class RegionLocking(Choice):
+    """Whether walking into a region requires an AP "Region Access" item.
+
+    Pure logic option — adds no in-game gates. Each lockable region
+    gets a ``<region> Region Access`` AP item; AP placement treats the
+    region's checks as unreachable until that item is delivered. The
+    player can still physically walk into the region without the item
+    (no script patch); they just find whatever filler AP placed there
+    rather than progression. Lets seeds break the "one new region opens
+    a sphere of N checks at once" cascade.
+
+    * ``off`` — no region locking (default). Vanilla AP behavior.
+    * ``all`` — every region in
+      :data:`worlds.digimon_world.regions.LOCKABLE_REGIONS` is locked.
+      Pairs naturally with :class:`StartingRegion` to randomize where
+      the player begins.
+    * ``custom`` — only regions listed in :class:`RegionLockingList`
+      are locked. Empty list under custom = identical to ``off``.
+    """
+
+    display_name = "Region Locking"
+    option_off = 0
+    option_all = 1
+    option_custom = 2
+    default = option_off
+
+
+class RegionLockingList(OptionSet):
+    """Which regions to lock when :class:`RegionLocking` is ``custom``.
+
+    Ignored under ``off`` and ``all``. Each entry is the canonical
+    region name as used in :data:`worlds.digimon_world.regions.REGION_NAMES`.
+    Regions not in :data:`worlds.digimon_world.regions.LOCKABLE_REGIONS`
+    can't be added (they're either always-reachable hubs, already
+    strongly gated by another mechanism, or trivial sub-areas).
+    """
+
+    display_name = "Region Locking List"
+    valid_keys = frozenset(LOCKABLE_REGIONS)
+    default = frozenset()
 
 
 class ItemStatGain(Toggle):
@@ -623,6 +667,28 @@ class GodMode(Toggle):
     display_name = "God Mode"
 
 
+def get_locked_regions(options: "DigimonWorldOptions") -> frozenset[str]:
+    """Resolve the region-locking option triple to a concrete name set.
+
+    Single source of truth for :mod:`.items` (pool gating) and
+    :mod:`.rules` (entrance-rule augmentation), so the two never drift.
+
+    * ``off``    → empty set.
+    * ``all``    → every name in :data:`.regions.LOCKABLE_REGIONS`.
+    * ``custom`` → exactly the user's ``region_locking_list`` (filtered
+      to the LOCKABLE set as a defensive belt-and-suspenders; the
+      OptionSet's ``valid_keys`` should already reject anything outside).
+    """
+
+    mode = int(options.region_locking.value)
+    if mode == RegionLocking.option_off:
+        return frozenset()
+    if mode == RegionLocking.option_all:
+        return frozenset(LOCKABLE_REGIONS)
+    # custom
+    return frozenset(options.region_locking_list.value) & frozenset(LOCKABLE_REGIONS)
+
+
 @dataclass
 class DigimonWorldOptions(PerGameCommonOptions):
     goal: Goal
@@ -635,6 +701,8 @@ class DigimonWorldOptions(PerGameCommonOptions):
     bridge_unlock: BridgeUnlock
     great_canyon_unlock: GreatCanyonUnlock
     lava_cave_access: LavaCaveAccess
+    region_locking: RegionLocking
+    region_locking_list: RegionLockingList
     spawn_rate_boost: SpawnRateBoost
     stat_gain_multiplier: StatGainMultiplier
     combat_stat_multiplier: CombatStatMultiplier
@@ -683,6 +751,7 @@ option_groups: list[OptionGroup] = [
         [
             FastDrimogemon, EasyMonochromon, SkipIntro, ItemStatGain,
             TypeLockUnlocks, BridgeUnlock, GreatCanyonUnlock, LavaCaveAccess,
+            RegionLocking, RegionLockingList,
             SpawnRateBoost, StatGainMultiplier, CombatStatMultiplier,
         ],
     ),

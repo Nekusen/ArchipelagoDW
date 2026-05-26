@@ -34,7 +34,6 @@ from . import (
     rom,
     rules,
 )
-from .data.addresses import AP_RECRUIT_ITEM_DIGIMON
 from .options import DigimonWorldOptions
 from .rom import DigimonWorldSettings
 
@@ -66,55 +65,31 @@ class DigimonWorldWorld(World):
     # Maps each chest AP location name to its resolved grant decision.
     _chest_grants: dict[str, chest_assignments.ChestGrant] | None = None
 
+    def generate_early(self) -> None:
+        """Pre-collect the bootstrap kit for ``region_locking`` modes.
+
+        Under ``region_locking: all`` (and eventually under the future
+        ``starting_region`` option), the player needs at least one
+        region's access item already in inventory to have anywhere to
+        go on a fresh save. We push-precollect those items so AP fill
+        treats them as starting inventory, and :func:`items.create_all_items`
+        skips them from the itempool to avoid double-shipping.
+
+        For PR 2 the default bootstrap when ``region_locking == all`` is
+        just ``Native Forest Region Access`` (the implicit "vanilla"
+        starting region from File City). PR 3's ``starting_region``
+        option will override this default with a randomized starting
+        kit (e.g. ``Birdramon Recruit + Flight: Freezeland + Freezeland
+        Region Access`` for a Freezeland start).
+        """
+
+        for name in items.get_bootstrap_items(self):
+            self.multiworld.push_precollected(self.create_item(name))
+
     def create_regions(self) -> None:
         regions.create_and_connect_regions(self)
         locations.create_all_locations(self)
-        # Lock recruit items to their own AP locations when
-        # :class:`worlds.digimon_world.options.RecruitRandomization` is
-        # off. Must run before :meth:`create_items` so the pool sizing
-        # (which depends on ``get_unfilled_locations``) accounts for
-        # the 48 pre-placed recruit slots.
-        self._lock_recruit_items_if_disabled()
         locations.create_events(self)
-
-    def _lock_recruit_items_if_disabled(self) -> None:
-        """Self-place each ``<Name> Recruit`` item at its AP location
-        when recruit randomization is off.
-
-        With the option off, ``items.create_all_items`` separately
-        skips the individual recruit items from the pool — they're
-        created fresh here and locked, so each recruit's join-city
-        item is delivered exclusively by the player completing that
-        recruit's encounter, never sourced from another player's
-        slot. The recruit AP location's other roles (firing on
-        cutscene completion, gating progression via
-        ``Has(Birdramon Recruit)`` etc.) are unaffected.
-
-        Bundled recruits (whose individual ``<X> Recruit`` item was
-        replaced by a Progressive ladder item per the Phase 7 rework
-        — see :data:`items.PROGRESSIVE_BUNDLES`) are skipped: their
-        AP location stays unlocked and AP fill places whatever it
-        wants there. The bundled Digimon's city visibility is
-        unlocked separately by collecting Progressive ladder items.
-        """
-
-        if int(self.options.recruit_randomization.value):
-            return  # randomization on — nothing to lock
-
-        for name in AP_RECRUIT_ITEM_DIGIMON:
-            recruit_item_name = f"{name} Recruit"
-            if recruit_item_name not in items.ITEM_NAME_TO_ID:
-                # Bundled recruit — no individual item to lock; the
-                # city-visibility bit is set by a Progressive ladder
-                # item, and the AP location stays unlocked for fill.
-                continue
-            try:
-                location = self.get_location(name)
-            except KeyError:
-                # Defensive: a recruit AP location should always exist
-                # in v7+, but skip if it's somehow been excluded.
-                continue
-            location.place_locked_item(self.create_item(recruit_item_name))
 
     def create_items(self) -> None:
         items.create_all_items(self)

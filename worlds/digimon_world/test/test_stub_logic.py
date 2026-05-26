@@ -414,73 +414,6 @@ class TestChestRandomizationOff(DigimonWorldTestBase):
 
 
 # =============================================================================
-# Recruit randomization toggle
-# =============================================================================
-
-
-class TestRecruitRandomizationOff(DigimonWorldTestBase):
-    """RecruitRandomization off — every <Name> Recruit item is locked at
-    the matching recruit AP location."""
-
-    # Cards on for fill capacity (see TestPhase4LogicVendingOn rationale).
-    options: ClassVar[dict[str, Any]] = {
-        "recruit_randomization": False,
-        "card_locations": True,
-    }
-
-    def test_each_recruit_self_locked(self) -> None:
-        from ..data.addresses import AP_RECRUIT_ITEM_DIGIMON
-        from ..items import ITEM_NAME_TO_ID
-
-        for digimon in AP_RECRUIT_ITEM_DIGIMON:
-            recruit_item_name = f"{digimon} Recruit"
-            if recruit_item_name not in ITEM_NAME_TO_ID:
-                # Bundled recruit (Phase 7 rework — see
-                # ``items.PROGRESSIVE_BUNDLES``): no individual
-                # ``<X> Recruit`` item exists, so the AP location
-                # stays unlocked and AP fill places whatever it
-                # wants. Verify it's NOT pre-filled with a recruit
-                # item, which would indicate a regression.
-                location = self.multiworld.get_location(digimon, self.player)
-                if location.item is not None:
-                    self.assertFalse(
-                        location.item.name.endswith(" Recruit"),
-                        f"bundled {digimon} location should not be "
-                        f"pre-filled with a recruit item",
-                    )
-                continue
-            location = self.multiworld.get_location(digimon, self.player)
-            self.assertIsNotNone(
-                location.item, f"{digimon} location should be pre-filled",
-            )
-            self.assertEqual(
-                location.item.name, recruit_item_name,
-                f"{digimon} location should hold its own recruit item, "
-                f"got {location.item.name}",
-            )
-            self.assertEqual(location.item.player, self.player)
-            self.assertTrue(
-                location.locked,
-                f"{digimon} recruit item should be locked",
-            )
-
-    def test_no_recruit_items_in_multiworld_pool(self) -> None:
-        recruit_items_in_pool = [
-            item for item in self.multiworld.itempool
-            if item.name.endswith(" Recruit") and item.player == self.player
-        ]
-        self.assertEqual(
-            recruit_items_in_pool, [],
-            "no <Name> Recruit items should remain in the pool",
-        )
-
-    def test_pool_size_matches_unfilled_locations(self) -> None:
-        # 48 recruit locations are pre-filled; pool should match remaining.
-        unfilled = self.multiworld.get_unfilled_locations(self.player)
-        self.assertEqual(len(self.multiworld.itempool), len(unfilled))
-
-
-# =============================================================================
 # Filler distribution (Phase 8)
 # =============================================================================
 
@@ -848,3 +781,143 @@ class TestNanimonQuestLowProsperity(DigimonWorldTestBase):
                 loc.progress_type, LocationProgressType.EXCLUDED,
                 f"{site} should not be EXCLUDED at threshold=30",
             )
+
+
+# =====================================================================
+# RegionLocking option
+# =====================================================================
+
+class TestRegionLockingOff(DigimonWorldTestBase):
+    """Default — no region locking. No Region Access items in the pool;
+    every region reachable in all_state without any access item."""
+
+    options: ClassVar[dict[str, Any]] = {}
+
+    def test_no_region_access_items_in_pool(self) -> None:
+        from ..regions import LOCKABLE_REGIONS, region_access_item_name
+
+        pool_names = {item.name for item in self.multiworld.itempool}
+        for region in LOCKABLE_REGIONS:
+            self.assertNotIn(region_access_item_name(region), pool_names)
+
+
+class TestRegionLockingAll(DigimonWorldTestBase):
+    """``region_locking: all`` — every lockable region has its access
+    item in the pool, and AP logic requires the item to reach the
+    region."""
+
+    options: ClassVar[dict[str, Any]] = {
+        "region_locking": "all",
+        # Force lava_cave_access vanilla so the left chain doesn't need
+        # an extra AP item beyond the region-access ones; keeps the
+        # all_state reachability tests focused on the region locks.
+        "lava_cave_access": "vanilla",
+    }
+
+    def test_all_region_access_items_in_pool(self) -> None:
+        """All 14 Region Access items must exist (in the pool OR
+        pre-collected as part of the bootstrap kit), with no duplicates
+        and no missing entries. PR 2 default bootstrap is Native Forest;
+        the other 13 ship in the pool."""
+
+        from ..items import get_bootstrap_items
+        from ..regions import LOCKABLE_REGIONS, region_access_item_name
+
+        pool_names = {item.name for item in self.multiworld.itempool}
+        precollected_names = {
+            item.name for item in self.multiworld.precollected_items[self.player]
+        }
+        bootstrap = set(get_bootstrap_items(self.world))
+
+        for region in LOCKABLE_REGIONS:
+            access = region_access_item_name(region)
+            if access in bootstrap:
+                self.assertIn(
+                    access, precollected_names,
+                    f"{access} should be pre-collected (bootstrap)",
+                )
+                self.assertNotIn(
+                    access, pool_names,
+                    f"{access} should NOT also ship in pool (bootstrap)",
+                )
+            else:
+                self.assertIn(
+                    access, pool_names,
+                    f"{access} should ship in pool under region_locking=all",
+                )
+
+    def test_locked_region_unreachable_without_access(self) -> None:
+        """Smoke test: with no items collected at all, a deep locked
+        region (Misty Trees) should not be reachable. (Native Forest is
+        also locked under ``all`` mode, so even the first step out of
+        File City requires Native Forest Region Access.)"""
+
+        empty_state = self.multiworld.get_all_state(False)
+        # Drop every Region Access item from the state to check the
+        # gate. ``get_all_state`` grants all progression items, so we
+        # remove them explicitly to test the locked path.
+        from ..regions import LOCKABLE_REGIONS, region_access_item_name
+
+        for region in LOCKABLE_REGIONS:
+            access = region_access_item_name(region)
+            while access in empty_state.prog_items[self.player]:
+                empty_state.remove(
+                    self.world.create_item(access),
+                )
+
+        # Misty Trees should be unreachable now.
+        misty = self.multiworld.get_region("Misty Trees", self.player)
+        self.assertFalse(
+            misty.can_reach(empty_state),
+            "Misty Trees should be unreachable without its Region Access "
+            "item (and without the chain regions' accesses)",
+        )
+
+    def test_reachable_in_all_state(self) -> None:
+        """With all progression items granted (including all Region
+        Access items), every locked region is reachable. Verifies the
+        gate works in both directions — locked off → blocked, granted →
+        passable."""
+
+        all_state = self.multiworld.get_all_state(False)
+        from ..regions import LOCKABLE_REGIONS
+
+        for region_name in LOCKABLE_REGIONS:
+            region = self.multiworld.get_region(region_name, self.player)
+            self.assertTrue(
+                region.can_reach(all_state),
+                f"{region_name} should be reachable in all_state",
+            )
+
+
+class TestRegionLockingCustom(DigimonWorldTestBase):
+    """``region_locking: custom`` — only the listed regions get locked.
+    Unlisted regions stay freely reachable; listed ones get their
+    access item."""
+
+    options: ClassVar[dict[str, Any]] = {
+        "region_locking": "custom",
+        "region_locking_list": {"Misty Trees", "Toy Town"},
+        "lava_cave_access": "vanilla",
+    }
+
+    def test_only_listed_access_items_in_pool(self) -> None:
+        from ..regions import LOCKABLE_REGIONS, region_access_item_name
+
+        pool_names = {item.name for item in self.multiworld.itempool}
+        expected_in = {
+            region_access_item_name("Misty Trees"),
+            region_access_item_name("Toy Town"),
+        }
+        for region in LOCKABLE_REGIONS:
+            access = region_access_item_name(region)
+            if access in expected_in:
+                self.assertIn(
+                    access, pool_names,
+                    f"{access} should ship in pool (region listed)",
+                )
+            else:
+                self.assertNotIn(
+                    access, pool_names,
+                    f"{access} should NOT ship in pool (region not listed)",
+                )
