@@ -119,47 +119,16 @@ class TestPhase4Logic(DigimonWorldTestBase):
     # ------------------------------------------------------------------
 
     def test_final_battle_requires_pp(self) -> None:
-        """Final Battle event needs prosperity-goal PP AND all 3
-        Progressive Item Shop copies (the difficulty-floor gate added
-        because vanilla DW1's endgame fights are intentionally hard
-        without the full shop's consumables). AS Decoder used to also
-        be required, but it is a no-op item in DW1 and gates nothing —
-        removed from the pool 2026-05-08."""
+        """Final Battle event needs prosperity-goal PP. AS Decoder used
+        to also be required, but it is a no-op item in DW1 and gates
+        nothing — removed from the pool 2026-05-08. Progressive Item
+        Shop was briefly a requirement too but reverted on 2026-05-27
+        (the shop isn't strictly needed to beat Machinedramon)."""
 
-        # Both items required together — passed as one group so
-        # assertAccessDependency collects both before checking reach.
         self.assertAccessDependency(
             ["Final Battle"],
-            [["Prosperity Point", "Progressive Item Shop"]],
+            [["Prosperity Point"]],
             only_check_listed=True,
-        )
-
-    def test_final_battle_blocked_without_full_shop(self) -> None:
-        """Concrete state check: with all progression items except
-        ``Progressive Item Shop``, Final Battle is still unreachable.
-        Catches regressions where the shop requirement gets dropped."""
-
-        from BaseClasses import CollectionState
-
-        state = self.multiworld.get_all_state(False)
-        # Remove every Progressive Item Shop the all-state granted.
-        while "Progressive Item Shop" in state.prog_items[self.player]:
-            state.remove(self.world.create_item("Progressive Item Shop"))
-        final_battle = self.multiworld.get_location("Final Battle", self.player)
-        self.assertFalse(
-            final_battle.can_reach(state),
-            "Final Battle should require all 3 Progressive Item Shop copies",
-        )
-
-        # Restore: 3 copies is the required count.
-        for _ in range(3):
-            state.collect(
-                self.world.create_item("Progressive Item Shop"),
-                prevent_sweep=True,
-            )
-        self.assertTrue(
-            final_battle.can_reach(state),
-            "Final Battle should be reachable with 3 Progressive Item Shop copies + other progression",
         )
 
     # ------------------------------------------------------------------
@@ -444,6 +413,54 @@ class TestChestRandomizationOff(DigimonWorldTestBase):
         ]
         # Pool size must equal location count.
         self.assertEqual(len(self.multiworld.itempool), len(non_event_locations))
+
+
+# =============================================================================
+# Arena cup locations
+# =============================================================================
+
+
+class TestArenaCupLocations(DigimonWorldTestBase):
+    """Cup-win AP locations: 20 entries (5 tiers x 4 checks)."""
+
+    options: ClassVar[dict[str, Any]] = {}
+
+    def test_arena_cup_name_count(self) -> None:
+        from .. import locations as loc_module
+
+        self.assertEqual(len(loc_module.ARENA_CUP_NAMES), 20)
+
+    def test_arena_cup_locations_exist(self) -> None:
+        from .. import locations as loc_module
+
+        for cup_name in loc_module.ARENA_CUP_NAMES:
+            loc = self.multiworld.get_location(cup_name, self.player)
+            self.assertIsNotNone(loc.address, f"{cup_name} should be id-bearing")
+            self.assertEqual(loc.parent_region.name, "File City")
+
+    def test_arena_cup_shares_bit_per_tier(self) -> None:
+        """Each tier's 4 locations share exactly one (byte, bit) pair."""
+
+        from ..data.addresses import (
+            ARENA_CUP_LOCATION_RAM_BITS,
+            ARENA_CUP_TIERS,
+        )
+
+        for tier, expected_bit, _trig, _pp in ARENA_CUP_TIERS:
+            bits_for_tier = {
+                ARENA_CUP_LOCATION_RAM_BITS[f"Arena Cup: {tier} {i}"]
+                for i in range(1, 5)
+            }
+            self.assertEqual(bits_for_tier, {expected_bit}, tier)
+
+    def test_arena_cup_trigger_formula(self) -> None:
+        """Every cup trigger derives to its RAM bit via setTrigger formula."""
+
+        from ..data.addresses import ARENA_CUP_TIERS
+
+        for tier, (byte, bit), trigger_id, _pp in ARENA_CUP_TIERS:
+            self.assertEqual(byte, 0x001BDFCD + trigger_id // 8, tier)
+            self.assertEqual(bit, trigger_id % 8, tier)
 
 
 # =============================================================================
