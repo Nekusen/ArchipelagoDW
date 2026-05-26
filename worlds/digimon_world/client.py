@@ -151,6 +151,16 @@ from .items import (
     digimon_id_for_recruit_item,
     technique_slot_for_item,
 )
+from .regions import LOCKABLE_REGIONS, region_access_item_name
+
+# Frozen set of every ``<Region> Region Access`` item name. Used by
+# :func:`_build_item_delivery_routes` to attach a no-op deliverer to
+# the pure-logic region-locking items (no in-game effect; the
+# items_received counter still needs to advance on receive so the
+# client doesn't log "No delivery route" warnings).
+_REGION_ACCESS_ITEM_NAMES: frozenset[str] = frozenset(
+    region_access_item_name(region) for region in LOCKABLE_REGIONS
+)
 
 if TYPE_CHECKING:
     from worlds._bizhawk.context import BizHawkClientContext
@@ -684,6 +694,15 @@ def _build_item_delivery_routes() -> dict[str, ItemDeliverer]:
         # delivery through here just advances the items_received
         # counter without doing anything else.
         if name == KEYCHAIN_ITEM_NAME:
+            routes[name] = _make_progressive_bundle_deliverer()
+            continue
+        # ``<Region> Region Access`` items (PR 2 region-locking) are
+        # pure-logic AP items — no in-game effect, the gate is purely
+        # in AP placement logic. They need a no-op deliverer so the
+        # items_received counter advances cleanly; without one, the
+        # client would log "No delivery route" every time AP sends
+        # one. Same shape as the Progressive Bundle deliverers.
+        if name in _REGION_ACCESS_ITEM_NAMES:
             routes[name] = _make_progressive_bundle_deliverer()
             continue
         # Key items live as trigger-array bits, not bank slots — must be
