@@ -152,8 +152,16 @@ _EDGES: Final[tuple[tuple[str, str], ...]] = (
     ("Misty Trees", "Toy Town"),
     # Drill Tunnel sub-area: Leomon Ancestor Cave (PP 45)
     ("Drill Tunnel", "Leomon Ancestor Cave"),
-    # Whamon-gated beach detour: Secret Beach Cave from File City
+    # Secret Beach Cave has two parallel entrances:
+    #   * File City → SBC via Whamon Recruit (Whamon the bank NPC ferries
+    #     the player to his cave once he's joined).
+    #   * Freezeland → SBC free — Whamon the wild NPC stands at the
+    #     Freezeland beach and ferries the player to SBC regardless of
+    #     recruit status (the recruit fight HAPPENS in SBC, so the
+    #     transport must work pre-recruit).
+    # AP region access treats parallel edges as OR; one path is enough.
     ("File City", "Secret Beach Cave"),    # Has(Whamon Recruit)
+    ("Freezeland", "Secret Beach Cave"),   # free
     # Post-game Back Dimension entrance from File City
     ("File City", "Back Dimension"),       # 50 PP + reach (GLM | Freezeland | Great Canyon)
     # Right chain: Native Forest → Tropical Jungle / Greatlake → ...
@@ -198,6 +206,7 @@ _EDGES: Final[tuple[tuple[str, str], ...]] = (
     # Sub-area reverses (free — once you can enter, you can leave)
     ("Leomon Ancestor Cave", "Drill Tunnel"),
     ("Secret Beach Cave", "File City"),
+    ("Secret Beach Cave", "Freezeland"),    # free reverse (Whamon ferries back)
     ("Back Dimension", "File City"),
     # Right chain reverses
     ("Tropical Jungle", "Native Forest"),

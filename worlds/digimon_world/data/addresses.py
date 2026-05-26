@@ -1056,11 +1056,9 @@ DWAP_CHEST_RAM_BITS: Final[dict[str, tuple[int, int]]] = {
     "Chest: Grey Lord's Mansion 8": (0x001BE01E, 7),
     "Chest: Grey Lord's Mansion 9": (0x001BE01F, 0),
     "Chest: Ice Sanctuary 1": (0x001BE01F, 1),
-    # Triggers 658-659 → Lava Cave 5, 6 (Script ID 33; chamber sub-area
-    # with "Are you still hot?... Lava has hardened" NPC dialog —
-    # spawnChest verified at DW1Script.txt:9094-9095).
-    "Chest: Lava Cave 5":      (0x001BE01F, 2),
-    "Chest: Lava Cave 6":      (0x001BE01F, 3),
+    # Triggers 658-659 (Lava Cave 5, 6) dropped 2026-05-24 — the
+    # chests do not exist in any reachable area (suspected debug /
+    # cut content). Bits stay vanilla; no AP location polls them.
     # Trigger 660..661 → Ice Sanctuary 2..3 (Script ID 98)
     "Chest: Ice Sanctuary 2": (0x001BE01F, 4),
     "Chest: Ice Sanctuary 3": (0x001BE01F, 5),
@@ -1213,8 +1211,10 @@ CHEST_NAME_TO_ROM_OFFSETS: Final[dict[str, tuple[int, ...]]] = {
     "Chest: Grey Lord's Mansion 8": (0x140073F4,),
     "Chest: Grey Lord's Mansion 9": (0x14008F7C,),
     "Chest: Ice Sanctuary 1":     (0x14021168,),
-    "Chest: Lava Cave 5":          (0x13FF6978,),
-    "Chest: Lava Cave 6":          (0x13FF6984,),
+    # Lava Cave 5/6 dropped 2026-05-24 — chests don't exist in any
+    # reachable area; ROM offsets stay unpatched (left vanilla so
+    # nothing weird happens if the player ever reaches the spawn site
+    # via debug means).
     "Chest: Ice Sanctuary 2":     (0x14023624,),
     "Chest: Ice Sanctuary 3":     (0x14023630,),
     "Chest: Ice Sanctuary 4":     (0x14023F54,),
@@ -1271,9 +1271,9 @@ CHEST_NAME_TO_ROM_OFFSETS: Final[dict[str, tuple[int, ...]]] = {
     "Chest: Factorial Town 4":     (0x14054318,),
     "Chest: Factorial Town 5":     (0x14054324,),
 }
-assert len(CHEST_NAME_TO_ROM_OFFSETS) == 65, len(CHEST_NAME_TO_ROM_OFFSETS)
-assert sum(len(v) for v in CHEST_NAME_TO_ROM_OFFSETS.values()) == 73, (
-    "expected 73 total ROM offsets (8 duplicate spawn entries)"
+assert len(CHEST_NAME_TO_ROM_OFFSETS) == 63, len(CHEST_NAME_TO_ROM_OFFSETS)
+assert sum(len(v) for v in CHEST_NAME_TO_ROM_OFFSETS.values()) == 71, (
+    "expected 71 total ROM offsets (8 duplicate spawn entries)"
 )
 assert set(CHEST_NAME_TO_ROM_OFFSETS) == set(DWAP_CHEST_RAM_BITS), (
     "chest-name set must match DWAP_CHEST_RAM_BITS exactly"
@@ -4370,6 +4370,18 @@ assert _beaten_bytes.isdisjoint(_chest_bytes), (
 
 AGUMON_RECRUIT_BIT: Final[tuple[int, int]] = RECRUIT_RAM_BITS["Agumon"]
 
+# Coelamon's "in city / shop is open" recruit-block bit. Pinned to 1
+# each tick by the client (see :meth:`DigimonWorldClient._enforce_coelamon_beaten`)
+# because Coelamon's recruit cutscene is bugged and was dropped from
+# the AP pool (see :data:`_AP_RECRUIT_EXCLUDED`). The File City Item
+# Shop is gated on this bit in vanilla DW1 — pinning it makes the
+# game treat the shop as built, removing the need for an AP-side
+# workaround (e.g. an "Item Shop Built" logic gate or a synthetic AP
+# location). Andromon's recruit chain (per :func:`rules._andromon_extra`)
+# normally depends on the shop being open; the pin makes that always
+# true so AP logic doesn't need an explicit term for it.
+COELAMON_RECRUIT_BIT: Final[tuple[int, int]] = RECRUIT_RAM_BITS["Coelamon"]
+
 # AP-item Digimon = every recruit *except* Agumon (force-recruited bank
 # NPC), Digitamamon (post-game optional goal, not an AP location), and
 # the dropped recruits below.
@@ -4406,11 +4418,21 @@ _AP_RECRUIT_EXCLUDED: Final = frozenset({
     # Effectively non-functional in our target build, so dropping
     # both the AP location and the AP item.
     "Giromon",
+    # 2026-05-24 — Coelamon dropped from AP pool. His recruit cutscene
+    # is bugged in our current build (per user direction); rather than
+    # invest in a fix, treat his slot as unreachable for now. The name
+    # stays in :data:`RECRUIT_RAM_BITS` (vanilla recruit-block layout),
+    # but is filtered out everywhere AP cares: no ``Coelamon Recruit``
+    # item, no AP location, no bit poll. Vanilla bytecode reads of
+    # ``trigger(249)`` are left in the visibility-patch tables so the
+    # city still behaves correctly if the player triggers his cutscene
+    # via vanilla flow.
+    "Coelamon",
 })
 AP_RECRUIT_ITEM_DIGIMON: Final[tuple[str, ...]] = tuple(
     name for name in RECRUIT_RAM_BITS if name not in _AP_RECRUIT_EXCLUDED
 )
-assert len(AP_RECRUIT_ITEM_DIGIMON) == 44, len(AP_RECRUIT_ITEM_DIGIMON)
+assert len(AP_RECRUIT_ITEM_DIGIMON) == 43, len(AP_RECRUIT_ITEM_DIGIMON)
 
 
 # =============================================================================
@@ -5597,10 +5619,19 @@ ROM_FIELD_SPAWN_TRIGGER_PATCHES: Final = (
     (0x14058400, 225, 745),  # script 160
     (0x1405843C, 225, 745),  # script 160
     (0x14058460, 225, 745),  # script 160
-    (0x140599B2, 225, 745),  # script 162
-    (0x1405ACC8, 225, 745),  # script 162
-    (0x1405AD10, 225, 745),  # script 162
-    (0x1405AF5A, 225, 745),  # script 162
+    (0x140599B2, 225, 745),  # script 162 offset 1030 — city object visibility
+    (0x1405ACC8, 225, 745),  # script 162 offset 5308 — Section_81 multi-cond
+    # 0x1405AD10 (script 162 offset 5376) is EXCLUDED. It's Tanemon's
+    # NPC dialog gate `if pstat(1) < 10 OR trigger(225) == true then 5540`
+    # which controls whether `setTrigger 86` fires to spawn the sprout
+    # in Tropical Jungle (TROP03). If we redirect this to trigger 745
+    # (AP-delivered), the gate suppresses sprout spawn the moment AP
+    # delivers `Vegiemon Recruit` — before the player has actually used
+    # the rain plant — so the Rain Plant cutscene location becomes
+    # impossible to complete. Vanilla `trigger(225)` only flips after
+    # the recruit cutscene fires, which is the correct gate for sprout
+    # setup. Reported 2026-05-24.
+    (0x1405AF5A, 225, 745),  # script 162 offset 5966 — Vegiemon celebration dialog
     (0x1405E5A8, 225, 745),  # script 163
     (0x1405E5CC, 225, 745),  # script 163
     (0x1405E608, 225, 745),  # script 163

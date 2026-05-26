@@ -103,24 +103,23 @@ class BridgeUnlock(Choice):
     Vanilla DW1 keeps the bridge from Native Forest to Tropical Jungle
     broken until the player triggers a cutscene by walking near it on
     the Tropical Jungle side (which they can only reach after Coelamon
-    brings them across the first time).
+    brings them across the first time). Since Coelamon's recruit
+    cutscene is bugged in our current build (and was dropped from the
+    AP pool — see :data:`worlds.digimon_world.data.addresses._AP_RECRUIT_EXCLUDED`),
+    the original ``vanilla`` mode would never be obtainable and is no
+    longer shipped.
 
     * ``always_open`` — the bridge is open from the start (default).
       The client pins bit 1 of :data:`RAM_TROPICAL_JUNGLE_BRIDGE_FIXED`
       so the bit is always 1, even on a fresh save.
-    * ``vanilla`` — the unlock cutscene must trigger the bit organically.
     * ``shuffled`` — the ``Tropical Jungle Bridge`` AP item must be
       delivered before the bridge is fixed; receiving the item pins
-      the bit (no cutscene played, bridge appears "as if always there"
-      from that point on). The vanilla cutscene path also still works
-      as a fallback if the player reaches the trigger tile by other
-      means before AP delivers. The bridge is an AP item only — there
-      is no associated AP location.
+      the bit. The bridge is an AP item only — there is no associated
+      AP location.
     """
 
     display_name = "Tropical Jungle Bridge"
     option_always_open = 0
-    option_vanilla = 1
     option_shuffled = 2
     default = option_always_open
 
@@ -290,29 +289,6 @@ class ChestRandomization(DefaultOnToggle):
     """
 
     display_name = "Chest Randomization"
-
-
-class RecruitRandomization(DefaultOnToggle):
-    """Whether ``<Name> Recruit`` items shuffle into the multiworld pool.
-
-    * **On (default)** — each recruit's "<Name> Recruit" AP item can
-      end up at any AP location in any world. To get Tyrannomon into
-      File City, *somebody* (you, or another player) has to find and
-      send Tyrannomon Recruit. Whoever beats Tyrannomon at his spawn
-      gets the AP location check, but the recruit item itself is
-      anywhere in the multiworld.
-    * **Off** — each ``<Name> Recruit`` item is locked to its own
-      recruit AP location. Beating Tyrannomon at his spawn fires the
-      AP location *and* immediately delivers Tyrannomon Recruit to
-      you. No recruit item ever leaves your slot; recruits play out
-      essentially vanilla. Other AP items (chests, etc.) can still
-      be placed at recruit locations if those slots are otherwise
-      unconstrained — wait, no: with this off, the recruit item is
-      locked-in, so the recruit location holds the recruit and
-      nothing else.
-    """
-
-    display_name = "Recruit Randomization"
 
 
 class TechniqueRewards(Choice):
@@ -663,7 +639,6 @@ class DigimonWorldOptions(PerGameCommonOptions):
     stat_gain_multiplier: StatGainMultiplier
     combat_stat_multiplier: CombatStatMultiplier
     chest_randomization: ChestRandomization
-    recruit_randomization: RecruitRandomization
     randomize_ground_items: GroundItemRandomization
     ground_items_food_only: GroundItemFoodOnly
     ground_items_match_value: GroundItemMatchValue
@@ -689,7 +664,7 @@ option_groups: list[OptionGroup] = [
     OptionGroup(
         "Randomization",
         [
-            ChestRandomization, RecruitRandomization, TechniqueRewards,
+            ChestRandomization, TechniqueRewards,
             GroundItemRandomization, GroundItemFoodOnly,
             GroundItemMatchValue, GroundItemValueCutoff,
             StarterRandomization, StarterAllowFresh,

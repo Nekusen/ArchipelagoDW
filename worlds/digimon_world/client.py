@@ -74,6 +74,7 @@ from .data.addresses import (
     CARD_BLOCK_BASE,
     CARD_BLOCK_SIZE,
     CARD_LOCATION_NIBBLES,
+    COELAMON_RECRUIT_BIT,
     DWAP_CHEST_RAM_BITS,
     EASY_MONOCHROMON_MAP_ID,
     EASY_MONOCHROMON_PROFIT_TARGET,
@@ -174,11 +175,35 @@ logger = logging.getLogger("Client")
 
 DOMAIN_MAIN_RAM = "MainRAM"
 
-# Plausible-range bound for RAM_PROSPERITY_POINTS used by validate_rom.
-# DW1's prosperity counter saturates at 100 in normal play; an
-# uninitialized save slot reads 0; anything > 100 means we are not
-# looking at a running DW1 (almost certainly a different game).
+# Plausible-range bound for RAM_PROSPERITY_POINTS used as a secondary
+# sanity check in validate_rom. DW1's prosperity counter saturates at
+# 100 in normal play; an uninitialized save slot reads 0; anything >
+# 100 means we are not on a running DW1.
 _PROSPERITY_VALIDATION_CEILING = 100
+
+# DW1-specific ROM signature used by validate_rom to distinguish a
+# running DW1 from other PSX games on Nymashock.
+#
+# The vanilla DW1 USA build populates ``MAP_ENTRIES[255]`` at
+# RAM ``0x801292D4`` (MainRAM offset ``0x001292D4``) with 10-byte
+# null-padded ASCII filenames (see the ``SCREEN_FILENAMES`` comment in
+# ``data/addresses.py``). The first entry is screen 0 = ``MAYO01``
+# (Native Forest first room), which gives us a 6-character ASCII
+# signature followed by 4 null bytes. The 10-byte sequence is unique
+# enough that no other PSX game would coincidentally have it at the
+# same RAM offset.
+#
+# Until the player has loaded a DW1 save, this region is zeroed, so
+# validate_rom correctly reports "not DW1" while BizHawk is on the
+# BIOS / title screen / a different game.
+#
+# Without this check, the old validate_rom only required the byte at
+# RAM_PROSPERITY_POINTS to be in 0..100, which any PSX RAM at that
+# offset trivially satisfies — and the DW1 handler would mistakenly
+# claim a BizHawk session connected to, e.g., SOTN, blocking that
+# game's own client from connecting (reported 2026-05-24).
+_DW1_SIGNATURE_ADDR: int = 0x001292D4
+_DW1_SIGNATURE_BYTES: bytes = b"MAYO01\x00\x00\x00\x00"
 
 
 # =============================================================================
@@ -338,6 +363,9 @@ _DROPPED_RECRUITS_BLACKLIST: frozenset[str] = frozenset({
     # Giromon dropped 2026-05-09: his Restaurant Jukebox crashes
     # the NTSC build, so we don't make him an AP location either.
     "Giromon",
+    # Coelamon dropped 2026-05-24: recruit cutscene bugged in the
+    # current build, fix deferred. No AP location.
+    "Coelamon",
 })
 LOCATION_RAM_BITS: dict[str, tuple[int, int]] = {
     **DWAP_CHEST_RAM_BITS,
@@ -850,27 +878,39 @@ class DigimonWorldClient(BizHawkClient):
     # ------------------------------------------------------------------
 
     async def validate_rom(self, ctx: BizHawkClientContext) -> bool:
-        """Accept the connection if BizHawk is on a plausible DW1 save.
+        """Accept the connection if BizHawk is on a running DW1 save.
 
-        v1 sanity check: read one byte at ``RAM_PROSPERITY_POINTS`` and
-        require it to be in 0..100. The PSX BIOS leaves this address
-        untouched, so a failed read or an out-of-range value usually
-        means we are not looking at a running PSX game (or are looking
-        at the wrong PSX game). The user is responsible for loading
-        the seed-matched ROM — that check is Phase 4 v2.
+        Primary check: read 10 bytes at :data:`_DW1_SIGNATURE_ADDR`
+        and require them to equal :data:`_DW1_SIGNATURE_BYTES`
+        (``MAYO01`` padded with nulls — the first entry of DW1's
+        ``MAP_ENTRIES`` table). This signature is effectively unique
+        to a loaded DW1 save and rules out other PSX games sharing
+        the ``MainRAM`` domain (reported 2026-05-24: a friend running
+        SOTN saw the DW1 handler falsely claim their session because
+        the old validate_rom only checked a generic byte range).
+
+        Secondary check: read one byte at ``RAM_PROSPERITY_POINTS``
+        and require it to be in 0..100. Cheap redundancy on top of
+        the signature.
         """
 
         try:
-            data = (await bizhawk.read(
+            blocks = await bizhawk.read(
                 ctx.bizhawk_ctx,
-                [(RAM_PROSPERITY_POINTS, 1, DOMAIN_MAIN_RAM)],
-            ))[0]
+                [
+                    (_DW1_SIGNATURE_ADDR, len(_DW1_SIGNATURE_BYTES), DOMAIN_MAIN_RAM),
+                    (RAM_PROSPERITY_POINTS, 1, DOMAIN_MAIN_RAM),
+                ],
+            )
         except bizhawk.RequestFailedError:
             return False
 
-        if not data:
+        if len(blocks) != 2:
             return False
-        if data[0] > _PROSPERITY_VALIDATION_CEILING:
+        signature, prosperity = blocks
+        if bytes(signature) != _DW1_SIGNATURE_BYTES:
+            return False
+        if not prosperity or prosperity[0] > _PROSPERITY_VALIDATION_CEILING:
             return False
 
         ctx.game = self.game
@@ -923,7 +963,7 @@ class DigimonWorldClient(BizHawkClient):
                 ctx.slot_data.get("stat_gain_multiplier", 1),
             )
         if self._bridge_always_open is None and ctx.slot_data is not None:
-            # BridgeUnlock: 0 = always_open (default), 1 = vanilla.
+            # BridgeUnlock: 0 = always_open (default), 2 = shuffled.
             self._bridge_always_open = (
                 int(ctx.slot_data.get("bridge_unlock", 0)) == 0
             )
@@ -966,6 +1006,7 @@ class DigimonWorldClient(BizHawkClient):
             await self._enforce_prosperity(ctx)
             await self._reconcile_keychain_inventory(ctx)
             await self._enforce_agumon_recruited(ctx)
+            await self._enforce_coelamon_beaten(ctx)
             if self._bridge_always_open:
                 await self._enforce_bridge_always_open(ctx)
             if self._great_canyon_always_open:
@@ -990,22 +1031,42 @@ class DigimonWorldClient(BizHawkClient):
         flows — likely because vanilla DW1 has additional grant paths
         (NPC dialog, plot triggers, possibly a non-script chest path)
         that bypass the patched ``jal``. This wipe catches whatever the
-        wrapper missed: each tick, scan the 10 inventory slots and
+        wrapper missed: each tick, scan the current inventory slots and
         clear any holding the sentinel ID.
 
-        Cost: a single 10-byte read; writes only when sentinels are
-        actually present.
+        Reads the live ``RAM_INVENTORY_SIZE`` byte so the scan covers
+        the full active inventory range — Progressive Keychain
+        deliveries expand the inventory from 10 → 20 → 30 slots, and
+        the old fixed-10 scan would miss sentinels in the expanded
+        slots (2026-05-24).
+
+        Cost: 1-byte size read + N-byte item-id read (N up to 30);
+        writes only when sentinels are actually present.
         """
+
+        size_block = (await bizhawk.read(
+            ctx.bizhawk_ctx,
+            [(RAM_INVENTORY_SIZE, 1, DOMAIN_MAIN_RAM)],
+        ))[0]
+        if len(size_block) != 1:
+            return
+        live_size = size_block[0]
+        # Clamp to the structural cap. If the byte is somehow zero
+        # (uninitialized save) fall back to the vanilla default — the
+        # wrapper handles the chest-pickup path even with no slots.
+        if live_size == 0:
+            live_size = RAM_INVENTORY_DEFAULT_SIZE
+        live_size = min(live_size, RAM_INVENTORY_MAX_SIZE)
 
         ids = (await bizhawk.read(
             ctx.bizhawk_ctx,
-            [(RAM_INVENTORY_ITEM_IDS_BASE, RAM_INVENTORY_SLOT_COUNT, DOMAIN_MAIN_RAM)],
+            [(RAM_INVENTORY_ITEM_IDS_BASE, live_size, DOMAIN_MAIN_RAM)],
         ))[0]
-        if len(ids) != RAM_INVENTORY_SLOT_COUNT:
+        if len(ids) != live_size:
             return
 
         writes: list[RamWrite] = []
-        for slot in range(RAM_INVENTORY_SLOT_COUNT):
+        for slot in range(live_size):
             if ids[slot] == AP_CHEST_SENTINEL_ITEM_ID:
                 writes.append((
                     RAM_INVENTORY_ITEM_IDS_BASE + slot,
@@ -1435,6 +1496,34 @@ class DigimonWorldClient(BizHawkClient):
         """
 
         byte_addr, bit_index = AGUMON_RECRUIT_BIT
+        bit_mask = 1 << bit_index
+        current = (await bizhawk.read(
+            ctx.bizhawk_ctx, [(byte_addr, 1, DOMAIN_MAIN_RAM)],
+        ))[0]
+        if not current:
+            return
+        if current[0] & bit_mask:
+            return  # already set
+        await bizhawk.write(
+            ctx.bizhawk_ctx,
+            [(byte_addr, [current[0] | bit_mask], DOMAIN_MAIN_RAM)],
+        )
+
+    async def _enforce_coelamon_beaten(self, ctx: BizHawkClientContext) -> None:
+        """Pin Coelamon's recruit-block bit on every tick.
+
+        Coelamon's recruit cutscene is bugged and Coelamon was dropped
+        from the AP pool (:data:`_AP_RECRUIT_EXCLUDED`). The File City
+        Item Shop is gated in vanilla DW1 on Coelamon's recruit-block
+        bit; pinning it to 1 makes the game treat the shop as built so
+        Andromon's recruit chain (which requires all four major
+        buildings) doesn't permanently stall. Same shape as
+        :meth:`_enforce_agumon_recruited` — read, OR the bit in if
+        unset, write back. Cheap: one read per tick, at most one write
+        per save load (the bit is sticky once set).
+        """
+
+        byte_addr, bit_index = COELAMON_RECRUIT_BIT
         bit_mask = 1 << bit_index
         current = (await bizhawk.read(
             ctx.bizhawk_ctx, [(byte_addr, 1, DOMAIN_MAIN_RAM)],

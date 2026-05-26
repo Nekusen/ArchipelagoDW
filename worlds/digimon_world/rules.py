@@ -150,10 +150,20 @@ def _set_entrance_rules(world: DigimonWorldWorld) -> None:
     # vanilla 45-PP check). We drop the AP rule so fill can still place
     # filler at the cave's chest location, and ``_apply_pp_cutoffs``
     # below marks that chest EXCLUDED + filler-only.
+    #
+    # When ``lava_cave_access`` is shuffled, also AND ``Lava Cave Access``
+    # in: per the recruitment guide the cave only opens once Meramon
+    # is beaten and the tunnel is forced open, and in shuffled mode the
+    # tunnel access is gated by the ``Lava Cave Access`` AP item. In
+    # vanilla mode the in-game tier-whitelist on Meramon stays the
+    # player's responsibility (no AP item exists), so no extra rule.
     if 45 <= mt_threshold:
+        cave_rule = _pp(45)
+        if lava_mode == _LCA_SHUFFLED:
+            cave_rule = cave_rule & Has("Lava Cave Access")
         _set_entrance_rule(
             world, "Drill Tunnel", "Leomon Ancestor Cave",
-            _pp(45),
+            cave_rule,
         )
     # File City → Secret Beach Cave: Whamon Recruit (Whamon transports
     # the player to the beach where the cave is).
@@ -196,7 +206,15 @@ def _set_entrance_rules(world: DigimonWorldWorld) -> None:
             Has("Lava Cave Access"),
         )
     # vanilla mode: free (Champion partner is player problem; no AP rule)
-    # Meramon Tunnel → Mt. Panorama: free
+    # Meramon Tunnel → Mt. Panorama: Meramon physically blocks the
+    # forward path until recruited (he stands in the corridor on the
+    # Meramon-Tunnel side). Reverse direction is unobstructed by him
+    # (the geometry only blocks the Mt. Panorama-bound walk), and the
+    # alternative Gear Savanna → Mt. Panorama approach is unaffected.
+    _set_entrance_rule(
+        world, "Meramon Tunnel", "Mt. Panorama",
+        Has("Meramon Recruit"),
+    )
     # Mt. Panorama → Gear Savanna: free
     # Gear Savanna → Geko Swamp: free
     # Geko Swamp → Misty Trees: free
@@ -209,16 +227,21 @@ def _set_entrance_rules(world: DigimonWorldWorld) -> None:
             world, "Native Forest", "Tropical Jungle",
             Has("Tropical Jungle Bridge"),
         )
-    # vanilla / always_open: free (Coelamon escort or pre-fixed bridge)
+    # always_open: free (client pins the bridge bit at boot).
 
     # Tropical Jungle → Overdell: free
     # Tropical Jungle → Ancient Dino Region: free
     # Native Forest → Greatlake: free
 
-    # Greatlake → Beetle Land: rod path or AP-delivered Blue Flute
+    # Greatlake → Beetle Land: AP-delivered Blue Flute. The fishing
+    # rod is NOT a Beetle Land gate — vanilla DW1 uses the rod to
+    # catch Seadramon (whose befriend cutscene IS the Blue Flute
+    # pickup); Beetle Land itself is only reachable via Seadramon
+    # (Blue Flute). The Birdramon Flight: Beetle Land alternative is
+    # already wired as a separate File City → Beetle Land edge above.
     _set_entrance_rule(
         world, "Greatlake", "Beetle Land",
-        Has("Old Fishrod") | Has("Amazing rod") | Has("Blue Flute"),
+        Has("Blue Flute"),
     )
 
     # Greatlake → Great Canyon: mode-gated
@@ -289,11 +312,12 @@ def _set_entrance_rules(world: DigimonWorldWorld) -> None:
             world, "Mt. Panorama", "Meramon Tunnel",
             Has("Lava Cave Access"),
         )
-    # Beetle Land → Greatlake reverse: same fishing-rod / flute gate as
-    # the forward edge (it's the same body of water either way).
+    # Beetle Land → Greatlake reverse: same flute gate as the forward
+    # edge (Seadramon ferries you back; the rod doesn't unlock the
+    # crossing).
     _set_entrance_rule(
         world, "Beetle Land", "Greatlake",
-        Has("Old Fishrod") | Has("Amazing rod") | Has("Blue Flute"),
+        Has("Blue Flute"),
     )
 
 
@@ -333,14 +357,20 @@ def _leomon_extra(_world: DigimonWorldWorld):
     return Has("Leomonstone")
 
 
-# Ogremon's 4-battle chain spans 3 regions: Great Canyon (Battle 1),
-# Great Canyon / Ogre Fortress sub-area (Battle 2), Freezeland /
-# Whamon's Secret Beach Cave (Battle 3), Drill Tunnel (Battle 4 —
-# final, joins). Drill Tunnel is always reachable; Great Canyon is
-# Ogremon's home region (already implicit via region access). The
-# explicit gate we need is **Freezeland** for Battle 3.
+# Ogremon's 4-battle chain spans 3 regions: Great Canyon (Battles 1+2
+# at Ogre Fortress), Whamon's Secret Beach Cave (Battle 3 — reachable
+# via either Freezeland's beach or Whamon Recruit; the SBC region rule
+# already collapses both paths), and Drill Tunnel (Battle 4 — final,
+# Ogremon then joins).
+#
+# Under region locking each of these stops can be locked independently,
+# so all three are required as explicit ``CanReachRegion`` rules.
 def _ogremon_extra(_world: DigimonWorldWorld):
-    return CanReachRegion("Freezeland")
+    return (
+        CanReachRegion("Great Canyon")
+        & CanReachRegion("Secret Beach Cave")
+        & CanReachRegion("Drill Tunnel")
+    )
 
 
 # Whamon's recruit chain requires Ogremon defeated at Ogre Fortress
@@ -357,8 +387,11 @@ def _whamon_extra(_world: DigimonWorldWorld):
 # Great Canyon sub-area), then go to Freezeland SW to find Shellmon
 # and talk. Shellmon's home region is Great Canyon (the cry-for-help
 # triggers there), but the actual recruit happens in Freezeland.
+# Under region locking, Great Canyon is no longer implicit via Freezeland
+# (Freezeland is also reachable via Birdramon flight, which bypasses GC),
+# so it needs to be explicit.
 def _shellmon_extra(_world: DigimonWorldWorld):
-    return CanReachRegion("Freezeland")
+    return CanReachRegion("Great Canyon") & CanReachRegion("Freezeland")
 
 
 # Ninjamon's recruit spawn is in Native Forest, but reaching that
@@ -371,9 +404,9 @@ def _shellmon_extra(_world: DigimonWorldWorld):
 # ``items.PROGRESSIVE_BUNDLES``); receiving 1 copy is enough.
 #
 # Only emit the bridge rule when ``bridge_unlock`` is in shuffled
-# mode — in vanilla / always_open the ``Tropical Jungle Bridge``
-# AP item isn't in the pool, so ``Has`` would never be satisfied
-# and the recruit would become permanently unreachable.
+# mode — in always_open the ``Tropical Jungle Bridge`` AP item isn't
+# in the pool, so ``Has`` would never be satisfied and the recruit
+# would become permanently unreachable.
 def _ninjamon_extra(world: DigimonWorldWorld):
     secret_shop_rule = Has("Progressive Secret Shop")
     if int(world.options.bridge_unlock.value) == _OPT_SHUFFLED:
@@ -389,22 +422,9 @@ def _unimon_extra(_world: DigimonWorldWorld):
     return Has("Centarumon Recruit")
 
 
-# Coelamon's recruit fires when his "take you across the water" case
-# resolves into "Coelamon joins the city". In shuffled mode the patcher
-# rewrites his Section_51 branch target so case 1 ("I'll take you
-# across") is dead until trigger 185 — the Tropical Jungle Bridge bit —
-# is set (see ``ROM_COELAMON_GATE_OFFSETS`` in addresses.py). Without
-# the AP item, the cutscene that fires the recruit location never
-# completes, so AP logic must AND the bridge in too even though the
-# spawn point is geographically in Native Forest.
-#
-# In vanilla / always_open mode the bridge bit is set organically (or
-# pre-pinned), so no extra rule is needed. Returning ``None`` keeps
-# the recruit freely reachable in those modes.
-def _coelamon_extra(world: DigimonWorldWorld):
-    if int(world.options.bridge_unlock.value) == _OPT_SHUFFLED:
-        return Has("Tropical Jungle Bridge")
-    return None
+# Coelamon dropped from the AP pool 2026-05-24 (recruit cutscene
+# bugged; see addresses.py ``_AP_RECRUIT_EXCLUDED``). The
+# ``_coelamon_extra`` rule is gone with it.
 
 
 # Drimogemon is the in-game source of "Lava Cave Access" — vanilla
@@ -426,17 +446,35 @@ def _drimogemon_extra(world: DigimonWorldWorld):
     return None
 
 
-# Andromon's recruit requires 4 specific File City buildings, which in
-# turn require visiting the prosperity NPCs that live in Tropical Jungle
-# (right side) and at least one of Great Canyon (right side) or
-# Gear Savanna (left side). Whamon Recruit is already implied by the
-# Factorial Town region rule. The 15 PP gate is encoded in
-# ``RECRUIT_PP_REQUIREMENTS``.
+# Andromon's recruit requires File City to host all four major
+# buildings, which in turn need specific recruits to "create" them:
+#
+#   * **Hospital** — Centarumon. His recruit fight is in Tropical
+#     Jungle (Amida Forest); reaching Tropical Jungle is sufficient.
+#   * **Arena** — Greymon + 15 PP. Greymon is always reachable in
+#     File City and the 15 PP gate is in :data:`RECRUIT_PP_REQUIREMENTS`,
+#     so no extra rule is needed.
+#   * **Restaurant** — either Meramon OR Tyrannomon "creates" it
+#     (the other minor recruits only "join"). Meramon lives in
+#     Meramon Tunnel; Tyrannomon lives in Ancient Dino Region. Either
+#     path is sufficient.
+#   * **Item Shop** — Coelamon. Coelamon was dropped from the AP pool
+#     (his recruit cutscene is bugged); the client pins his beaten-bit
+#     to 1 each tick so the game treats the shop as built without any
+#     AP logic gate. No extra rule.
+#
+# ``CanReachRegion("Meramon Tunnel")`` transitively requires Lava Cave
+# Access in shuffled LCA mode (via the entrance rule), so we don't need
+# to AND it explicitly here. In vanilla LCA mode the Drill Tunnel →
+# Meramon Tunnel edge is free in AP logic (the in-game Champion-tier
+# boulder is left as the player's responsibility), so reaching Meramon
+# Tunnel is logic-free — see :func:`_drimogemon_extra` for the matching
+# stance on the Drimogemon recruit.
 def _andromon_extra(_world: DigimonWorldWorld):
-    return (
-        CanReachRegion("Tropical Jungle")
-        & (CanReachRegion("Great Canyon") | CanReachRegion("Gear Savanna"))
+    restaurant = (
+        CanReachRegion("Meramon Tunnel") | CanReachRegion("Ancient Dino Region")
     )
+    return CanReachRegion("Tropical Jungle") & restaurant
 
 
 _RECRUIT_EXTRA_RULES = {
@@ -462,7 +500,6 @@ _RECRUIT_EXTRA_RULES = {
     "Unimon":       _unimon_extra,
     # Shuffled-mode option gates: each is a no-op rule in non-shuffled
     # modes (the corresponding AP item isn't in the pool).
-    "Coelamon":     _coelamon_extra,
     "Drimogemon":   _drimogemon_extra,
     "Andromon":     _andromon_extra,
 }
@@ -530,6 +567,7 @@ def _set_keyitem_pickup_rules(world: DigimonWorldWorld) -> None:
       breaks through to the cave once city Prosperity reaches 45."""
 
     mt_threshold = int(world.options.prosperity_goal.value)
+    lava_mode = int(world.options.lava_cave_access.value)
 
     world.set_rule(world.get_location("Rain Plant Pickup"), Has("Palmon Recruit"))
     world.set_rule(
@@ -539,8 +577,13 @@ def _set_keyitem_pickup_rules(world: DigimonWorldWorld) -> None:
     # Drop the Leomonstone Pickup gate when the cave is unreachable
     # (threshold < 45). ``_apply_pp_cutoffs`` will mark the location
     # EXCLUDED + filler-only.
+    # In shuffled lava_cave_access mode, the Stone Tablet is also
+    # behind the Meramon tunnel — AND ``Lava Cave Access`` in.
     if 45 <= mt_threshold:
-        world.set_rule(world.get_location("Leomonstone Pickup"), _pp(45))
+        leomonstone_rule = _pp(45)
+        if lava_mode == _LCA_SHUFFLED:
+            leomonstone_rule = leomonstone_rule & Has("Lava Cave Access")
+        world.set_rule(world.get_location("Leomonstone Pickup"), leomonstone_rule)
 
 
 # ---------------------------------------------------------------------------
@@ -588,12 +631,12 @@ def _set_nanimon_quest_rules(world: DigimonWorldWorld) -> None:
       Rule: ``Has("Gear")``.
     * **Factorial Town (sewers)**: vanilla precondition is Andromon's
       recruit completed. Andromon's recruit chain (per
-      :func:`_andromon_extra`) requires Tropical Jungle + (Great Canyon
-      OR Gear Savanna) + 15 PP. Great Canyon is already implied by
-      Factorial Town's ``Has("Whamon Recruit")`` entrance rule, so we
-      only need Tropical Jungle + 15 PP on top. (The
-      ``prosperity_goal`` option's floor is 20, so the 15 PP gate is
-      always reachable.)
+      :func:`_andromon_extra`) requires Tropical Jungle (Hospital) +
+      (Meramon Tunnel OR Ancient Dino Region) (Restaurant) + 15 PP
+      (Arena). Whamon Recruit is already implied by Factorial Town's
+      region rule but the other Andromon prereqs are independent and
+      must be replicated here. (The ``prosperity_goal`` option's floor
+      is 20, so the 15 PP gate is always reachable.)
     * **Drill Tunnel** (Leomon's Ancestral Cave): vanilla precondition
       is Leomon recruited, which AP encodes as ``Has("Leomonstone")``
       (matches :func:`_leomon_extra`). The existing 45 PP cave-entrance
@@ -603,27 +646,39 @@ def _set_nanimon_quest_rules(world: DigimonWorldWorld) -> None:
     """
 
     mt_threshold = int(world.options.prosperity_goal.value)
+    lava_mode = int(world.options.lava_cave_access.value)
 
     # Toy Town — Section_6 only fires once Gear is obtained.
     world.set_rule(
         world.get_location("Nanimon Quest: Toy Town"), Has("Gear"),
     )
 
-    # Factorial Town — Andromon's recruit chain, minus what Factorial
-    # Town's region rule already enforces (Whamon Recruit ⇒ Great
-    # Canyon access path).
+    # Factorial Town — Andromon's recruit chain, kept in lockstep with
+    # :func:`_andromon_extra`. Whamon Recruit is already implied by
+    # Factorial Town's region rule but the rest of Andromon's chain
+    # is independent.
     world.set_rule(
         world.get_location("Nanimon Quest: Factorial Town"),
-        CanReachRegion("Tropical Jungle") & _pp(15),
+        CanReachRegion("Tropical Jungle")
+        & (
+            CanReachRegion("Meramon Tunnel")
+            | CanReachRegion("Ancient Dino Region")
+        )
+        & _pp(15),
     )
 
     # Drill Tunnel — 45 PP cave entrance + Leomonstone (matches the
     # Leomon recruit gate). Both dropped when prosperity_goal < 45;
-    # ``_apply_pp_cutoffs`` excludes the location entirely in that case.
+    # ``_apply_pp_cutoffs`` excludes the location entirely in that
+    # case. In shuffled lava_cave_access mode, AND ``Lava Cave Access``
+    # in as well (the cave is past the Meramon tunnel).
     if 45 <= mt_threshold:
+        nanimon_drill_rule = _pp(45) & Has("Leomonstone")
+        if lava_mode == _LCA_SHUFFLED:
+            nanimon_drill_rule = nanimon_drill_rule & Has("Lava Cave Access")
         world.set_rule(
             world.get_location("Nanimon Quest: Drill Tunnel"),
-            _pp(45) & Has("Leomonstone"),
+            nanimon_drill_rule,
         )
 
 
