@@ -271,15 +271,13 @@ def _set_entrance_rules(world: DigimonWorldWorld) -> None:
             Has("Lava Cave Access"),
         )
     # vanilla mode: free (Champion partner is player problem; no AP rule)
-    # Meramon Tunnel → Mt. Panorama: Meramon physically blocks the
-    # forward path until recruited (he stands in the corridor on the
-    # Meramon-Tunnel side). Reverse direction is unobstructed by him
-    # (the geometry only blocks the Mt. Panorama-bound walk), and the
-    # alternative Gear Savanna → Mt. Panorama approach is unaffected.
-    _set_entrance_rule(
-        world, "Meramon Tunnel", "Mt. Panorama",
-        Has("Meramon Recruit"),
-    )
+    # Meramon Tunnel → Mt. Panorama: free in AP logic. Meramon physically
+    # blocks the forward corridor until beaten in the wild, but the
+    # block resolves automatically once the player reaches Meramon
+    # Tunnel and engages him — wild block events key on the in-game
+    # ``defeated in field`` bit, not on any AP-delivered item. Reaching
+    # Meramon Tunnel ⇒ player can beat Meramon there ⇒ corridor opens.
+    # No additional AP gate needed.
     # Mt. Panorama → Gear Savanna: free
     # Gear Savanna → Geko Swamp: free
     # Geko Swamp → Misty Trees: free
