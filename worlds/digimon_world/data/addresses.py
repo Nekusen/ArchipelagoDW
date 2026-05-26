@@ -3350,7 +3350,7 @@ ROM_GREAT_CANYON_CUTSCENE_VALUE: Final = bytes((0x67, 0x00))  # trigger 103 LE
 # vanilla the player needs both 6 PP AND that NPC dialog before the
 # bridge is approachable. In shuffled mode the AP rules
 # (:func:`worlds.digimon_world.rules._set_entrance_rules`) gate the
-# Greatlake → Great Canyon entrance on ``Has("Great Canyon Bridge")``
+# Tropical Jungle → Great Canyon entrance on ``Has("Great Canyon Bridge")``
 # alone — so the in-game gate must follow. Rewriting the cond1 trigger
 # ID byte (+0 from IF base) from 124 → 103 makes the AP item the only
 # gate. 3 sections × 2 BIN copies = 6 patch sites.

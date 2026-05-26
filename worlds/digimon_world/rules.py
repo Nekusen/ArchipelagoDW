@@ -308,14 +308,16 @@ def _set_entrance_rules(world: DigimonWorldWorld) -> None:
         Has("Blue Flute"),
     )
 
-    # Greatlake → Great Canyon: mode-gated
+    # Tropical Jungle → Great Canyon: mode-gated. The GC Bridge spans
+    # the TJ↔GC ravine; the Greatlake branch is a dead-end into
+    # Beetle Land and never connects to Great Canyon.
     if canyon_mode == _OPT_SHUFFLED:
         _set_entrance_rule(
-            world, "Greatlake", "Great Canyon",
+            world, "Tropical Jungle", "Great Canyon",
             Has("Great Canyon Bridge"),
         )
     elif canyon_mode == _OPT_VANILLA:
-        _set_entrance_rule(world, "Greatlake", "Great Canyon", _pp(6))
+        _set_entrance_rule(world, "Tropical Jungle", "Great Canyon", _pp(6))
     # always_open: free
 
     # Great Canyon → Freezeland: free

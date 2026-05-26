@@ -12,18 +12,29 @@ Region inventory (22 regions):
 * ``Native Forest`` — entry to both halves; sub-points include Coela
   Point (Coelamon), Dragon Eye Lake (Seadramon), Digimon Bridge
   (Ninjamon at night), Tree House (Etemon).
-* **Right side (Tropical Jungle chain)**:
+* **Right side**: two parallel branches off Native Forest.
 
-    * ``Tropical Jungle`` — gated by the TJ-bridge mode option.
-    * ``Overdell`` — Bakemon, plus Grey Lord's Mansion (SkullGreymon
-      via Mansion Key + Frig Key; Steak drops from the Overdell
-      fridge on the vanilla path).
-    * ``Ancient Dino Region`` — Tyrannomon.
-    * ``Greatlake`` (= Dragon Eye Lake cluster) — fishing region.
-    * ``Beetle Land`` — only via Blue Flute / rod path or
-      Birdramon Flight.
-    * ``Great Canyon`` — gated by the GC-bridge mode option.
-    * ``Freezeland`` — recruits cluster, chains into Misty Trees.
+    * Tropical Jungle branch — ``Native Forest → Tropical Jungle``
+      (TJ-bridge gated) → ``Tropical Jungle → Overdell / Ancient
+      Dino Region / Great Canyon`` (GC-bridge gated)
+      ``→ Freezeland → Misty Trees``.
+
+      - ``Tropical Jungle`` — gated by the TJ-bridge mode option.
+      - ``Overdell`` — Bakemon, plus Grey Lord's Mansion (SkullGreymon
+        via Mansion Key + Frig Key; Steak drops from the Overdell
+        fridge on the vanilla path).
+      - ``Ancient Dino Region`` — Tyrannomon.
+      - ``Great Canyon`` — gated by the GC-bridge mode option (the
+        bridge spans Tropical Jungle ↔ Great Canyon; **not**
+        Greatlake-side). Connects forward to Freezeland.
+      - ``Freezeland`` — recruits cluster, chains into Misty Trees.
+
+    * Greatlake branch — ``Native Forest → Greatlake → Beetle Land``.
+      Dead-end branch with no connection to Great Canyon.
+
+      - ``Greatlake`` (= Dragon Eye Lake cluster) — fishing region.
+      - ``Beetle Land`` — only via Blue Flute (Seadramon ferry) or
+        Birdramon Flight.
 
 * **Left side (Drill Tunnel chain)**:
 
@@ -230,8 +241,12 @@ _EDGES: Final[tuple[tuple[str, str], ...]] = (
     ("Overdell", "Grey Lord's Mansion"),  # Has(Mansion Key)
     ("Tropical Jungle", "Ancient Dino Region"),
     ("Native Forest", "Greatlake"),
-    ("Greatlake", "Beetle Land"),        # Has(rod) | Has(Blue Flute)
-    ("Greatlake", "Great Canyon"),       # Mode-gated (GC Bridge)
+    ("Greatlake", "Beetle Land"),        # Has(Blue Flute)
+    # Great Canyon's only walking entry from the right chain is via
+    # Tropical Jungle (the GC Bridge spans the TJ↔GC ravine, not the
+    # Greatlake side). Greatlake itself is a dead-end branch that only
+    # leads to Beetle Land via Seadramon.
+    ("Tropical Jungle", "Great Canyon"),  # Mode-gated (GC Bridge)
     ("Great Canyon", "Freezeland"),
     ("Freezeland", "Misty Trees"),
     # Card vending — multi-parent. Either machine reaches the synthetic
@@ -274,8 +289,8 @@ _EDGES: Final[tuple[tuple[str, str], ...]] = (
     ("Grey Lord's Mansion", "Overdell"),  # free reverse (key already obtained to enter)
     ("Ancient Dino Region", "Tropical Jungle"),
     ("Greatlake", "Native Forest"),
-    ("Beetle Land", "Greatlake"),           # rod | Blue Flute (same as forward)
-    ("Great Canyon", "Greatlake"),
+    ("Beetle Land", "Greatlake"),           # Blue Flute (same as forward)
+    ("Great Canyon", "Tropical Jungle"),    # free reverse of the GC-Bridge edge
     ("Freezeland", "Great Canyon"),
     ("Misty Trees", "Freezeland"),
 )
