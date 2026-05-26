@@ -38,7 +38,7 @@ from math import ceil
 from typing import TYPE_CHECKING
 
 from BaseClasses import ItemClassification, LocationProgressType
-from rule_builder.rules import CanReachRegion, Has
+from rule_builder.rules import CanReachRegion, False_, Has
 from worlds.generic.Rules import add_rule
 
 from .data.addresses import FISHING_LOCATION_NAMES
@@ -176,16 +176,30 @@ def _set_entrance_rules(world: DigimonWorldWorld) -> None:
             world, "File City", region,
             Has("Birdramon Recruit") & Has(flight_item),
         )
-    # G Canyon Top is the 6th Birdramon flight destination but auto-
-    # unlocks on Birdramon Recruit alone (no per-destination Flight
-    # item — its vanilla trigger 221 IS the Birdramon Recruit bit,
-    # see :data:`worlds.digimon_world.data.addresses.BIRDRAMON_FLIGHT_RAM_BITS`).
-    # This makes ``starting_region: great_canyon`` viable without a
-    # separate Flight item in the bootstrap kit.
-    _set_entrance_rule(
-        world, "File City", "Great Canyon",
-        Has("Birdramon Recruit"),
-    )
+    # G Canyon Top is the 6th Birdramon-Messenger destination, but its
+    # in-game availability isn't simply "Birdramon Recruit set." In
+    # vanilla DW1 the player must have physically reached G Canyon Top
+    # at least once via the Greatlake bridge before the flight slot
+    # becomes navigable; Birdramon Recruit alone is not enough in
+    # general AP logic.
+    #
+    # The ``starting_region: great_canyon`` bootstrap kit is the only
+    # case where AP wants to treat this flight as accessible from the
+    # start — the kit pre-collects ``Birdramon Recruit`` and the
+    # ``Great Canyon Region Access`` and implicitly stands in for the
+    # "you've been here once" precondition that the start kit
+    # represents thematically. For every other ``starting_region`` (and
+    # under ``region_locking: off`` / ``custom``), this flight edge is
+    # unreachable in AP logic; the bridge / GC-bridge AP item remains
+    # the only AP-modeled way to walk into Great Canyon.
+    from .options import StartingRegion
+    if int(options.starting_region.value) == StartingRegion.option_great_canyon:
+        _set_entrance_rule(
+            world, "File City", "Great Canyon",
+            Has("Birdramon Recruit"),
+        )
+    else:
+        _set_entrance_rule(world, "File City", "Great Canyon", False_())
 
     # ------- Mt. Infinity → Tower (endgame) -------
     _set_entrance_rule(

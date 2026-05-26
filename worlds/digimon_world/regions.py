@@ -192,11 +192,14 @@ _EDGES: Final[tuple[tuple[str, str], ...]] = (
     ("File City", "Ancient Dino Region"),  # Has(BR Recruit) & Has(Flight: Ancient Dino)
     ("File City", "Freezeland"),         # Has(BR Recruit) & Has(Flight: Freezeland)
     ("File City", "Beetle Land"),        # Has(BR Recruit) & Has(Flight: Beetle Land)
-    # G Canyon Top auto-unlocks in the Birdra-Messenger menu on
-    # Birdramon Recruit (no separate Flight item — see
-    # ``BIRDRAMON_FLIGHT_RAM_BITS`` in addresses.py). Rule attached
-    # in :mod:`.rules` uses ``Has("Birdramon Recruit")`` alone.
-    ("File City", "Great Canyon"),       # Has(BR Recruit)
+    # G Canyon Top is the 6th Birdramon-Messenger destination, but its
+    # AP-modeled flight access is gated specifically on
+    # ``starting_region == great_canyon``: only in that bootstrap kit
+    # does the player implicitly satisfy the in-game "you've been
+    # here once" precondition for the flight slot. The rule attached
+    # in :mod:`.rules` returns ``False_()`` under every other
+    # ``starting_region``, so this edge stays a no-op for normal seeds.
+    ("File City", "Great Canyon"),       # great_canyon start only
     # Mt. Infinity terminal
     ("Mt. Infinity", "Tower"),           # 50 PP
     # Left chain: Native Forest → Drill Tunnel → Meramon Tunnel → Mt. Panorama → ...

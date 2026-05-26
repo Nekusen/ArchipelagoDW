@@ -237,8 +237,13 @@ class StartingRegion(Choice):
       Region Access``. Player flies in via the Birdra-Messenger menu.
     * ``great_canyon`` — bootstrap kit is ``Birdramon Recruit +
       Great Canyon Region Access``. There's no separate ``Flight:``
-      item — "G Canyon Top" auto-unlocks in the Birdra-Messenger menu
-      once Birdramon Recruit is delivered (see :data:`worlds.digimon_world.data.addresses.BIRDRAMON_FLIGHT_RAM_BITS`).
+      item — the kit stands in for the in-game "you've been here
+      once" precondition for G Canyon Top in the Birdra-Messenger menu.
+      AP logic models the ``File City → Great Canyon`` flight edge
+      as accessible **only** under ``starting_region: great_canyon``;
+      every other start (and ``region_locking: off`` / ``custom``)
+      leaves that edge logically inaccessible — the GC-Bridge AP item
+      remains the way to walk in.
     * ``factorial_town`` — bootstrap kit is ``Whamon Recruit +
       Factorial Town Region Access``. Asymmetric with the Birdramon
       starts because Factorial Town is reached via Whamon's ferry,
