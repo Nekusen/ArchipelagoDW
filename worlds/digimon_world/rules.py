@@ -27,9 +27,10 @@ PP scaling
 ==========
 
 Each shipped ``Prosperity Point`` AP item delivers
-:data:`worlds.digimon_world.items.PROSPERITY_PER_ITEM` (= 2) PP.
+:data:`worlds.digimon_world.items.PROSPERITY_PER_ITEM` (= 3) PP.
 ``items_needed = ceil(pp_needed / PROSPERITY_PER_ITEM)``. We round up
-per the user's spec — a 15-PP gate becomes a 16-PP / 8-item gate.
+per the user's spec — a 6-PP gate becomes a 6-PP / 2-item gate, a
+15-PP gate becomes a 15-PP / 5-item gate.
 """
 
 from __future__ import annotations
