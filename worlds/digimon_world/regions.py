@@ -192,6 +192,11 @@ _EDGES: Final[tuple[tuple[str, str], ...]] = (
     ("File City", "Ancient Dino Region"),  # Has(BR Recruit) & Has(Flight: Ancient Dino)
     ("File City", "Freezeland"),         # Has(BR Recruit) & Has(Flight: Freezeland)
     ("File City", "Beetle Land"),        # Has(BR Recruit) & Has(Flight: Beetle Land)
+    # G Canyon Top auto-unlocks in the Birdra-Messenger menu on
+    # Birdramon Recruit (no separate Flight item — see
+    # ``BIRDRAMON_FLIGHT_RAM_BITS`` in addresses.py). Rule attached
+    # in :mod:`.rules` uses ``Has("Birdramon Recruit")`` alone.
+    ("File City", "Great Canyon"),       # Has(BR Recruit)
     # Mt. Infinity terminal
     ("Mt. Infinity", "Tower"),           # 50 PP
     # Left chain: Native Forest → Drill Tunnel → Meramon Tunnel → Mt. Panorama → ...

@@ -216,6 +216,78 @@ class RegionLockingList(OptionSet):
     default = frozenset()
 
 
+class StartingRegion(Choice):
+    """Which region the player begins with access to (besides File City).
+
+    **Only takes effect when** :class:`RegionLocking` **is** ``all``.
+    Under ``off`` and ``custom`` modes this option is ignored; the
+    player simply walks out of File City through whatever isn't
+    locked. Combine with ``region_locking: all`` to get the full
+    "fly in to your starting area, all other regions locked" feel.
+
+    The chosen region's Access item is added to the start_inventory,
+    along with the means to get there from File City:
+
+    * ``native_forest`` (default) — degenerate case; only Native
+      Forest Region Access is bootstrapped. Player walks File City →
+      Native Forest like vanilla.
+    * ``gear_savanna``, ``ancient_dino_region``, ``freezeland``,
+      ``misty_trees``, ``beetle_land`` — bootstrap kit is
+      ``Birdramon Recruit + Birdramon Flight: <region> + <region>
+      Region Access``. Player flies in via the Birdra-Messenger menu.
+    * ``great_canyon`` — bootstrap kit is ``Birdramon Recruit +
+      Great Canyon Region Access``. There's no separate ``Flight:``
+      item — "G Canyon Top" auto-unlocks in the Birdra-Messenger menu
+      once Birdramon Recruit is delivered (see :data:`worlds.digimon_world.data.addresses.BIRDRAMON_FLIGHT_RAM_BITS`).
+    * ``factorial_town`` — bootstrap kit is ``Whamon Recruit +
+      Factorial Town Region Access``. Asymmetric with the Birdramon
+      starts because Factorial Town is reached via Whamon's ferry,
+      not Birdramon.
+
+    To randomize across all starts, use the AP YAML's per-value
+    weights (or the ``random`` keyword) — no separate "random" option
+    is needed. To stay at the vanilla start, leave at the default.
+    """
+
+    display_name = "Starting Region"
+    option_native_forest = 0
+    option_gear_savanna = 1
+    option_ancient_dino_region = 2
+    option_freezeland = 3
+    option_misty_trees = 4
+    option_beetle_land = 5
+    option_great_canyon = 6
+    option_factorial_town = 7
+    default = option_native_forest
+
+
+# Map :class:`StartingRegion` option values to their canonical region
+# name in :data:`worlds.digimon_world.regions.REGION_NAMES`. Used by
+# :func:`get_starting_region_name` so callers don't have to hand-roll
+# the int-to-name translation.
+_STARTING_REGION_BY_VALUE: dict[int, str] = {
+    StartingRegion.option_native_forest:       "Native Forest",
+    StartingRegion.option_gear_savanna:        "Gear Savanna",
+    StartingRegion.option_ancient_dino_region: "Ancient Dino Region",
+    StartingRegion.option_freezeland:          "Freezeland",
+    StartingRegion.option_misty_trees:         "Misty Trees",
+    StartingRegion.option_beetle_land:         "Beetle Land",
+    StartingRegion.option_great_canyon:        "Great Canyon",
+    StartingRegion.option_factorial_town:      "Factorial Town",
+}
+
+
+def get_starting_region_name(options: "DigimonWorldOptions") -> str:
+    """Canonical region name for the configured :class:`StartingRegion`.
+
+    Returns the name regardless of whether :class:`RegionLocking` is
+    actually ``all`` — the option's "active only under all" semantics
+    are enforced by callers (e.g. :func:`worlds.digimon_world.items.get_bootstrap_items`).
+    """
+
+    return _STARTING_REGION_BY_VALUE[int(options.starting_region.value)]
+
+
 class ItemStatGain(Toggle):
     """Grant stat gains and lifetime increases when digivolving via a
     Digivolution Item.
@@ -703,6 +775,7 @@ class DigimonWorldOptions(PerGameCommonOptions):
     lava_cave_access: LavaCaveAccess
     region_locking: RegionLocking
     region_locking_list: RegionLockingList
+    starting_region: StartingRegion
     spawn_rate_boost: SpawnRateBoost
     stat_gain_multiplier: StatGainMultiplier
     combat_stat_multiplier: CombatStatMultiplier
@@ -751,7 +824,7 @@ option_groups: list[OptionGroup] = [
         [
             FastDrimogemon, EasyMonochromon, SkipIntro, ItemStatGain,
             TypeLockUnlocks, BridgeUnlock, GreatCanyonUnlock, LavaCaveAccess,
-            RegionLocking, RegionLockingList,
+            RegionLocking, RegionLockingList, StartingRegion,
             SpawnRateBoost, StatGainMultiplier, CombatStatMultiplier,
         ],
     ),

@@ -921,3 +921,208 @@ class TestRegionLockingCustom(DigimonWorldTestBase):
                     access, pool_names,
                     f"{access} should NOT ship in pool (region not listed)",
                 )
+
+
+# =====================================================================
+# StartingRegion option (only active under region_locking: all)
+# =====================================================================
+#
+# Expected bootstrap kits per starting region (option name -> kit).
+# Mirrors :func:`items.get_bootstrap_items`; if either side changes the
+# other should too.
+
+_EXPECTED_KITS: dict[str, tuple[str, ...]] = {
+    "native_forest":       ("Native Forest Region Access",),
+    "gear_savanna":        (
+        "Birdramon Recruit", "Birdramon Flight: Gear Savanna",
+        "Gear Savanna Region Access",
+    ),
+    "ancient_dino_region": (
+        "Birdramon Recruit", "Birdramon Flight: Ancient Dino Region",
+        "Ancient Dino Region Region Access",
+    ),
+    "freezeland": (
+        "Birdramon Recruit", "Birdramon Flight: Freezeland",
+        "Freezeland Region Access",
+    ),
+    "misty_trees": (
+        "Birdramon Recruit", "Birdramon Flight: Misty Trees",
+        "Misty Trees Region Access",
+    ),
+    "beetle_land": (
+        "Birdramon Recruit", "Birdramon Flight: Beetle Land",
+        "Beetle Land Region Access",
+    ),
+    "great_canyon":   (
+        "Birdramon Recruit", "Great Canyon Region Access",
+    ),
+    "factorial_town": (
+        "Whamon Recruit", "Factorial Town Region Access",
+    ),
+}
+
+
+class _StartingRegionTestMixin:
+    """Mixin that validates the bootstrap kit for the configured
+    ``starting_region``. Concrete subclasses set ``options`` to pick a
+    specific region — one subclass per option value below.
+    """
+
+    STARTING_REGION: ClassVar[str]
+    CANONICAL_NAME: ClassVar[str]
+
+    def test_bootstrap_kit_matches_expected(self) -> None:
+        from ..items import get_bootstrap_items
+
+        expected = set(_EXPECTED_KITS[self.STARTING_REGION])
+        actual = set(get_bootstrap_items(self.world))
+        self.assertEqual(actual, expected)
+
+    def test_get_starting_region_name(self) -> None:
+        from ..options import get_starting_region_name
+        self.assertEqual(
+            get_starting_region_name(self.world.options), self.CANONICAL_NAME,
+        )
+
+    def test_kit_precollected_not_in_pool(self) -> None:
+        from ..items import get_bootstrap_items
+
+        kit = set(get_bootstrap_items(self.world))
+        precollected_names = {
+            item.name for item in
+            self.multiworld.precollected_items[self.player]
+        }
+        pool_names = {item.name for item in self.multiworld.itempool}
+
+        self.assertTrue(
+            kit.issubset(precollected_names),
+            f"bootstrap items missing from precollected: "
+            f"{kit - precollected_names}",
+        )
+        self.assertFalse(
+            kit & pool_names,
+            f"bootstrap items double-shipped in pool: {kit & pool_names}",
+        )
+
+    def test_starting_region_reachable_from_bootstrap(self) -> None:
+        """With just the bootstrap kit collected (no other progression),
+        the starting region must be reachable. Exercises both the
+        :func:`get_bootstrap_items` shape AND the entrance rules added
+        by :func:`rules._apply_region_locks`."""
+
+        from BaseClasses import CollectionState
+
+        from ..items import get_bootstrap_items
+
+        state = CollectionState(self.multiworld)
+        for name in get_bootstrap_items(self.world):
+            state.collect(self.world.create_item(name), prevent_sweep=True)
+
+        starting_region = self.multiworld.get_region(
+            self.CANONICAL_NAME, self.player,
+        )
+        self.assertTrue(
+            starting_region.can_reach(state),
+            f"{self.CANONICAL_NAME} should be reachable with just "
+            f"bootstrap kit for starting_region={self.STARTING_REGION}",
+        )
+
+
+# Common option base — ``region_locking: all`` and ``lava_cave_access:
+# vanilla`` (so the Drill-Tunnel-chain region accesses can be granted
+# without also needing the LCA item to verify chain reachability).
+def _start_options(starting_region: str) -> dict[str, Any]:
+    return {
+        "region_locking": "all",
+        "starting_region": starting_region,
+        "lava_cave_access": "vanilla",
+    }
+
+
+class TestStartingRegionNativeForest(_StartingRegionTestMixin, DigimonWorldTestBase):
+    STARTING_REGION = "native_forest"
+    CANONICAL_NAME = "Native Forest"
+    options: ClassVar[dict[str, Any]] = _start_options(STARTING_REGION)
+
+
+class TestStartingRegionGearSavanna(_StartingRegionTestMixin, DigimonWorldTestBase):
+    STARTING_REGION = "gear_savanna"
+    CANONICAL_NAME = "Gear Savanna"
+    options: ClassVar[dict[str, Any]] = _start_options(STARTING_REGION)
+
+
+class TestStartingRegionAncientDino(_StartingRegionTestMixin, DigimonWorldTestBase):
+    STARTING_REGION = "ancient_dino_region"
+    CANONICAL_NAME = "Ancient Dino Region"
+    options: ClassVar[dict[str, Any]] = _start_options(STARTING_REGION)
+
+
+class TestStartingRegionFreezeland(_StartingRegionTestMixin, DigimonWorldTestBase):
+    STARTING_REGION = "freezeland"
+    CANONICAL_NAME = "Freezeland"
+    options: ClassVar[dict[str, Any]] = _start_options(STARTING_REGION)
+
+
+class TestStartingRegionMistyTrees(_StartingRegionTestMixin, DigimonWorldTestBase):
+    STARTING_REGION = "misty_trees"
+    CANONICAL_NAME = "Misty Trees"
+    options: ClassVar[dict[str, Any]] = _start_options(STARTING_REGION)
+
+
+class TestStartingRegionBeetleLand(_StartingRegionTestMixin, DigimonWorldTestBase):
+    STARTING_REGION = "beetle_land"
+    CANONICAL_NAME = "Beetle Land"
+    options: ClassVar[dict[str, Any]] = _start_options(STARTING_REGION)
+
+
+class TestStartingRegionGreatCanyon(_StartingRegionTestMixin, DigimonWorldTestBase):
+    STARTING_REGION = "great_canyon"
+    CANONICAL_NAME = "Great Canyon"
+    options: ClassVar[dict[str, Any]] = _start_options(STARTING_REGION)
+
+
+class TestStartingRegionFactorialTown(_StartingRegionTestMixin, DigimonWorldTestBase):
+    STARTING_REGION = "factorial_town"
+    CANONICAL_NAME = "Factorial Town"
+    options: ClassVar[dict[str, Any]] = _start_options(STARTING_REGION)
+
+
+class TestStartingRegionIgnoredUnderOff(DigimonWorldTestBase):
+    """When ``region_locking == off`` the StartingRegion option is
+    ignored — no precollected items, no bootstrap kit, the player walks
+    out of File City through Native Forest as normal."""
+
+    options: ClassVar[dict[str, Any]] = {
+        "region_locking": "off",
+        "starting_region": "freezeland",
+    }
+
+    def test_no_bootstrap_under_off(self) -> None:
+        from ..items import get_bootstrap_items
+        self.assertEqual(get_bootstrap_items(self.world), ())
+
+    def test_no_birdramon_in_precollected(self) -> None:
+        precollected_names = {
+            item.name for item in
+            self.multiworld.precollected_items[self.player]
+        }
+        self.assertNotIn("Birdramon Recruit", precollected_names)
+        self.assertNotIn(
+            "Birdramon Flight: Freezeland", precollected_names,
+        )
+
+
+class TestStartingRegionIgnoredUnderCustom(DigimonWorldTestBase):
+    """Same — under ``custom`` the StartingRegion option does not
+    bootstrap. Only the listed regions are locked; the start is
+    wherever the player can walk from File City."""
+
+    options: ClassVar[dict[str, Any]] = {
+        "region_locking": "custom",
+        "region_locking_list": {"Misty Trees"},
+        "starting_region": "gear_savanna",
+    }
+
+    def test_no_bootstrap_under_custom(self) -> None:
+        from ..items import get_bootstrap_items
+        self.assertEqual(get_bootstrap_items(self.world), ())

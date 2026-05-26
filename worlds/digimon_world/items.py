@@ -914,21 +914,43 @@ def get_bootstrap_items(world: DigimonWorldWorld) -> tuple[str, ...]:
     :func:`create_all_items` (which skips these from the pool to avoid
     double-shipping). Order doesn't matter; the caller treats it as a set.
 
-    For PR 2 the only contributor is ``region_locking: all`` mode,
-    where Native Forest Region Access is the default bootstrap (so the
-    player has somewhere to walk on a fresh save). PR 3's
-    ``starting_region`` option will extend this with a randomized kit.
+    Only fires when ``region_locking == all``. Under ``off`` and
+    ``custom``, the player walks out of File City through whatever
+    isn't locked and no bootstrap is needed.
+
+    Per-:class:`options.StartingRegion` kit:
+
+    * ``native_forest`` → ``("Native Forest Region Access",)`` —
+      vanilla-style start, walks File City → Native Forest.
+    * ``gear_savanna``, ``ancient_dino_region``, ``freezeland``,
+      ``misty_trees``, ``beetle_land`` → ``("Birdramon Recruit",
+      "Birdramon Flight: <region>", "<region> Region Access")`` —
+      fly in via Birdra-Messenger.
+    * ``great_canyon`` → ``("Birdramon Recruit", "Great Canyon Region
+      Access")`` — no separate Flight item ("G Canyon Top" auto-
+      unlocks on Birdramon Recruit, per :data:`worlds.digimon_world.data.addresses.BIRDRAMON_FLIGHT_RAM_BITS`).
+    * ``factorial_town`` → ``("Whamon Recruit", "Factorial Town
+      Region Access")`` — Whamon's ferry, asymmetric with Birdramon.
     """
 
-    from .options import RegionLocking, get_locked_regions
+    from .options import RegionLocking, get_starting_region_name
 
-    mode = int(world.options.region_locking.value)
-    if mode != RegionLocking.option_all:
+    if int(world.options.region_locking.value) != RegionLocking.option_all:
         return ()
-    locked = get_locked_regions(world.options)
-    if "Native Forest" not in locked:
-        return ()
-    return (region_access_item_name("Native Forest"),)
+
+    region = get_starting_region_name(world.options)
+    access = region_access_item_name(region)
+
+    if region == "Native Forest":
+        return (access,)
+    if region == "Great Canyon":
+        # G Canyon Top auto-unlocks on Birdramon Recruit; no Flight item.
+        return ("Birdramon Recruit", access)
+    if region == "Factorial Town":
+        # Whamon ferry, not Birdramon.
+        return ("Whamon Recruit", access)
+    # The remaining 5 Birdramon-flight destinations.
+    return ("Birdramon Recruit", f"Birdramon Flight: {region}", access)
 
 
 def create_item(world: DigimonWorldWorld, name: str) -> DigimonWorldItem:
@@ -955,25 +977,37 @@ def create_all_items(world: DigimonWorldWorld) -> None:
         skip_keys.add("Great Canyon Bridge")
 
     pool: list[Item] = []
-    pool.extend(world.create_item(name) for name in _KEY_ITEMS if name not in skip_keys)
-    # Region Access items — one per locked region under the
-    # ``region_locking`` option, MINUS items already pre-collected by
-    # :func:`get_bootstrap_items` (so we don't double-ship the bootstrap
-    # kit). Empty set under ``off``; full :data:`LOCKABLE_REGIONS` under
-    # ``all`` (minus bootstrap); the user's subset under ``custom``.
+    # Compute the bootstrap set once — anything in it is pre-collected
+    # (start_inventory) and must NOT also be shipped in the pool. The
+    # set may contain Region Access items, Birdramon Recruit, Birdramon
+    # Flight: <region> entries, and/or Whamon Recruit depending on the
+    # ``starting_region`` option (and only when ``region_locking == all``).
     from .options import get_locked_regions
     bootstrap = set(get_bootstrap_items(world))
+
+    pool.extend(world.create_item(name) for name in _KEY_ITEMS if name not in skip_keys)
+    # Region Access items — one per locked region under the
+    # ``region_locking`` option, MINUS bootstrap. Empty set under ``off``;
+    # full :data:`LOCKABLE_REGIONS` under ``all`` (minus bootstrap);
+    # the user's subset under ``custom``.
     for region in get_locked_regions(world.options):
         name = region_access_item_name(region)
         if name in bootstrap:
             continue
         pool.append(world.create_item(name))
-    # Recruit items are always shuffled into the multiworld pool. The
+    # Recruit items are always shuffled into the multiworld pool, except
+    # any that the bootstrap kit pre-collected (Birdramon / Whamon for
+    # the non-Native-Forest StartingRegion kits). The
     # ``recruit_randomization`` option was removed 2026-05-24 — its
     # "off" mode (self-locked recruits) was incompatible with Progressive
     # ladder items and other Phase 7+ randomization features.
-    pool.extend(world.create_item(name) for name in _RECRUIT_ITEMS)
-    pool.extend(world.create_item(name) for name in _BIRDRAMON_FLIGHT_ITEMS)
+    pool.extend(
+        world.create_item(name) for name in _RECRUIT_ITEMS if name not in bootstrap
+    )
+    pool.extend(
+        world.create_item(name) for name in _BIRDRAMON_FLIGHT_ITEMS
+        if name not in bootstrap
+    )
     pp_count = prosperity_point_count(int(world.options.prosperity_goal.value))
     pool.extend(
         world.create_item(PROSPERITY_POINT_NAME)

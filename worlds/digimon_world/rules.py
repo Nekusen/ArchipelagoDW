@@ -176,6 +176,16 @@ def _set_entrance_rules(world: DigimonWorldWorld) -> None:
             world, "File City", region,
             Has("Birdramon Recruit") & Has(flight_item),
         )
+    # G Canyon Top is the 6th Birdramon flight destination but auto-
+    # unlocks on Birdramon Recruit alone (no per-destination Flight
+    # item — its vanilla trigger 221 IS the Birdramon Recruit bit,
+    # see :data:`worlds.digimon_world.data.addresses.BIRDRAMON_FLIGHT_RAM_BITS`).
+    # This makes ``starting_region: great_canyon`` viable without a
+    # separate Flight item in the bootstrap kit.
+    _set_entrance_rule(
+        world, "File City", "Great Canyon",
+        Has("Birdramon Recruit"),
+    )
 
     # ------- Mt. Infinity → Tower (endgame) -------
     _set_entrance_rule(
