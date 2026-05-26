@@ -807,14 +807,39 @@ def _apply_pp_cutoffs(world: DigimonWorldWorld) -> None:
 
 def _set_completion_condition(world: DigimonWorldWorld) -> None:
     """Final Battle requires the configured Mt. Infinity prosperity
-    threshold (default 50). Redundant with the Tower entrance rule but
+    threshold (default 50) AND all 3 ``Progressive Item Shop`` copies.
+
+    The PP threshold is redundant with the Tower entrance rule but
     kept as the explicit goal gate. AS Decoder used to also be
     required, but it is a no-op DW1 item that gates nothing —
-    removed 2026-05-08."""
+    removed 2026-05-08.
+
+    The 3-copy ``Progressive Item Shop`` requirement is a **soft logic
+    gate** (same pattern as Region Access items): AP fill treats it as
+    required so progression items can't be placed past it, which means
+    fill will always route the 3 copies to reachable spots before
+    Final Battle. The in-game completion check (the client's
+    :meth:`worlds.digimon_world.client.DigimonWorldClient._check_goal`)
+    watches the Machinedramon-defeated bit / prosperity counter
+    directly — it does **not** verify the shop-item count, so a
+    determined player can still beat Machinedramon without the full
+    shop. The gate just encodes a difficulty floor for AP placement.
+
+    Each Progressive Item Shop copy unlocks a tier of in-city shop
+    NPCs (T1 = Betamon+Coelamon, T2 = Patamon+Monochromon, T3 =
+    Biyomon+Unimon+Piximon — see
+    :data:`worlds.digimon_world.items.PROGRESSIVE_BUNDLES`). Without
+    the full shop the endgame fights are intentionally hard in vanilla
+    DW1 (no late-game restoratives), so AP placement biases toward
+    having them available.
+    """
 
     mt_threshold = int(world.options.prosperity_goal.value)
     final_battle = world.get_location("Final Battle")
-    world.set_rule(final_battle, _pp(mt_threshold))
+    world.set_rule(
+        final_battle,
+        _pp(mt_threshold) & Has("Progressive Item Shop", count=3),
+    )
     world.set_completion_rule(Has("Victory"))
 
 
