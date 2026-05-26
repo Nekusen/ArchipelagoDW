@@ -1062,6 +1062,39 @@ class TestStartingRegionFreezeland(_StartingRegionTestMixin, DigimonWorldTestBas
     CANONICAL_NAME = "Freezeland"
     options: ClassVar[dict[str, Any]] = _start_options(STARTING_REGION)
 
+    def test_great_canyon_reachable_via_freezeland_walk(self) -> None:
+        """From a Freezeland start, the Freezeland -> Great Canyon
+        walking edge stays open under region_locking: all — gated only
+        on Great Canyon Region Access (the post-pass adds the access
+        AND on the incoming edge). Verifies the GC-flight scoping fix
+        didn't accidentally also gate this walking path.
+
+        Setup: bootstrap kit (Birdramon Recruit + Flight: Freezeland +
+        Freezeland Region Access) + Great Canyon Region Access added
+        manually, no other items. GC should become reachable.
+        """
+
+        from BaseClasses import CollectionState
+
+        from ..items import get_bootstrap_items
+        from ..regions import region_access_item_name
+
+        state = CollectionState(self.multiworld)
+        for name in get_bootstrap_items(self.world):
+            state.collect(self.world.create_item(name), prevent_sweep=True)
+        state.collect(
+            self.world.create_item(region_access_item_name("Great Canyon")),
+            prevent_sweep=True,
+        )
+
+        gc = self.multiworld.get_region("Great Canyon", self.player)
+        self.assertTrue(
+            gc.can_reach(state),
+            "Great Canyon should be reachable from a Freezeland start "
+            "after Great Canyon Region Access is delivered, via the "
+            "Freezeland -> Great Canyon walking edge.",
+        )
+
 
 class TestStartingRegionMistyTrees(_StartingRegionTestMixin, DigimonWorldTestBase):
     STARTING_REGION = "misty_trees"
