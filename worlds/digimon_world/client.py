@@ -2157,22 +2157,37 @@ class DigimonWorldClient:
         new_checks: list[int] = []
 
         # While the arena enforcer is active (player on arena screen),
-        # skip recruit-bit location polling. The enforcer is OR-ing
-        # bits into the recruit-block (200+X range) to make the in-game
-        # arena populate higher cup tiers, which would otherwise be
-        # read here as "Digimon X just got recruited" -> false location
-        # fire. Vanilla DW1 never recruits a Digimon on screens 208/223,
-        # so we can't miss any real recruit event during the pause.
-        # ``self._arena_active`` is set fresh by
+        # suppress polling of ANY AP location whose RAM bit lives in
+        # the recruit-block range (0x001BDFE6..0x001BDFED). The enforcer
+        # is OR-ing bits into that range to make the in-game arena
+        # populate higher cup tiers; any location polling a bit in
+        # there would fire a false check. This covers:
+        #
+        #  * The obvious recruit-name locations (Greymon, MetalGreymon,
+        #    ...) since their RAM bits sit in the recruit-block.
+        #  * ``Blue Flute Pickup`` -- not a recruit by name, but it
+        #    polls Seadramon's recruit bit (byte 0x001BDFE7 bit 2)
+        #    because vanilla DW1 ties the Blue Flute pickup cutscene
+        #    to Seadramon's "befriended" flag. Confirmed safe to
+        #    suppress on arena screens (the Blue Flute cutscene only
+        #    fires at Greatlake, never at the arena).
+        #
+        # Vanilla DW1 never sets any recruit-block bit on the arena
+        # screens 208/223, so we can't miss a real event during the
+        # pause. ``self._arena_active`` is set fresh by
         # :meth:`_reconcile_arena_enforcer` on every tick (driven by
         # the in-RAM magic byte) so save+reload and reconnect both
         # observe the correct state.
-        recruit_names = (
-            set(RECRUIT_RAM_BITS) if self._arena_active else set()
+        recruit_block_lo = ARENA_ENFORCER_RECRUIT_BLOCK_BASE
+        recruit_block_hi = (
+            ARENA_ENFORCER_RECRUIT_BLOCK_BASE
+            + ARENA_ENFORCER_RECRUIT_BLOCK_SIZE
         )
+        suppress_recruit_block = self._arena_active
 
         for location_name, (offset, bit_index) in LOCATION_RAM_BITS.items():
-            if location_name in recruit_names:
+            if (suppress_recruit_block
+                    and recruit_block_lo <= offset < recruit_block_hi):
                 continue
             location_id = self._location_name_to_id.get(location_name)
             if location_id is None or location_id in ctx.locations_checked:

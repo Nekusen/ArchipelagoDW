@@ -113,11 +113,7 @@ bizhawk_client_component = Component(
     component_type=Type.CLIENT,
     func=_launch_bizhawk_client,
     file_identifier=SuffixIdentifier(".apdw1"),
-    description=(
-        "Open the Digimon World 1 client backed by BizHawk + the "
-        "in-tree Lua connector. This is the default — Open Patch on "
-        "any .apdw1 routes here."
-    ),
+    description="DW1 client for BizHawk. Default for Open Patch.",
 )
 
 duckstation_client_component = Component(
@@ -130,24 +126,14 @@ duckstation_client_component = Component(
     # wins), so leaving this empty keeps the BizHawk client as the
     # default Open Patch target. Duckstation users launch this
     # button manually.
-    description=(
-        "Open the Digimon World 1 client backed by Duckstation via "
-        "process memory hooking. Launch this AFTER you have started "
-        "Duckstation and loaded the patched ISO. Patch the ISO first "
-        "via Open Patch or the 'Patch ROM only' button."
-    ),
+    description="DW1 client for Duckstation. Open after launching Duckstation with the patched ISO.",
 )
 
 patch_only_component = Component(
     "Digimon World: Patch ROM only",
     component_type=Type.MISC,
     func=_patch_only,
-    description=(
-        "Apply a Digimon World 1 patch (.apdw1) to your base ISO and "
-        "write the patched ISO to disk. Does not start a client — use "
-        "this if you want to play offline, test the patcher, or load "
-        "the patched ISO in an emulator other than BizHawk/Duckstation."
-    ),
+    description="Patch an .apdw1 to a playable ISO without starting a client.",
 )
 
 components.append(bizhawk_client_component)
