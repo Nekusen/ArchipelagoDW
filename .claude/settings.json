@@ -106,7 +106,11 @@
       "Bash(python -m pytest test/general/ -q --tb=short -x)",
       "Bash(gh search *)",
       "WebFetch(domain:api.github.com)",
-      "WebFetch(domain:repo.retrodeck.net)"
+      "WebFetch(domain:repo.retrodeck.net)",
+      "Bash(python -m pytest worlds/digimon_world/test/ -q --tb=short --deselect worlds/digimon_world/test/test_stub_logic.py::TestRegionLockingAll::test_fill)",
+      "Bash(python -m pytest \"worlds/digimon_world/test/test_client.py::TestClientRegistration::test_apdw1_suffix_registered_with_unified_component\" --tb=short)",
+      "Bash(python -m pytest worlds/digimon_world/test/test_client.py -q --tb=short)",
+      "Bash(rm AP_*.apdw1 && ls AP_*.apdw1 2>&1 | head -1)"
     ],
     "additionalDirectories": [
       "\\tmp",

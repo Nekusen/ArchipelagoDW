@@ -1,16 +1,19 @@
-"""Launcher Components for the Digimon World 1 client.
+"""Launcher Components for the Digimon World 1 clients.
 
-Registers two buttons with Archipelago's Launcher:
+Three Launcher buttons:
 
-1. **Digimon World Client** — the unified client (BizHawk + Duckstation
-   auto-detect). Claims ``.apdw1`` for "Open Patch".
-2. **Digimon World: Patch ROM only** — patches an ``.apdw1`` to a
-   playable ISO and exits without starting an AP client. Useful for
-   solo testing or for users who want to run the patched ISO on a
-   different emulator without going through the multiworld client.
-   Reached only from the Launcher's own button list (no ``.apdw1``
-   suffix association, so "Open Patch" always routes to the unified
-   client).
+1. **Digimon World Client (BizHawk)** — the BizHawk-based client.
+   Type.CLIENT, claims ``.apdw1`` for "Open Patch", uses the in-tree
+   Lua connector.
+2. **Digimon World Client (Duckstation)** — the Duckstation-based
+   client. Type.CLIENT, but with NO suffix association so "Open
+   Patch" never routes here — the user launches this manually from
+   the Launcher's button list and points it at a DuckStation that's
+   already running the patched ISO.
+3. **Digimon World: Patch ROM only** — patches an ``.apdw1`` to a
+   playable ISO and exits without starting any AP client. Type.MISC.
+   Useful for solo testing or for running the patched ISO on
+   emulators outside the two supported clients.
 """
 
 from __future__ import annotations
@@ -29,12 +32,35 @@ from worlds.LauncherComponents import (
 logger = logging.getLogger("Client")
 
 
-def _launch_unified_client(*args: str) -> None:
-    """Spawn the unified DW1 client in a subprocess via the Launcher's
-    standard helper."""
+# ---------------------------------------------------------------------------
+# Component launchers
+# ---------------------------------------------------------------------------
+
+
+def _launch_bizhawk_client(*args: str) -> None:
+    """Spawn the BizHawk-based DW1 client."""
 
     from .context import launch
-    launch_component(launch, name="DigimonWorldClient", args=args)
+    from .adapters import BizHawkAdapter
+
+    launch_component(
+        launch,
+        name="DigimonWorldClient",
+        args=(BizHawkAdapter, "BizHawk", "DigimonWorldClient", *args),
+    )
+
+
+def _launch_duckstation_client(*args: str) -> None:
+    """Spawn the Duckstation-based DW1 client."""
+
+    from .context import launch
+    from .adapters import DuckstationAdapter
+
+    launch_component(
+        launch,
+        name="DigimonWorldClientDuckstation",
+        args=(DuckstationAdapter, "Duckstation", "DigimonWorldClientDuckstation", *args),
+    )
 
 
 def _patch_only(*args: str) -> None:
@@ -72,20 +98,43 @@ def _patch_only(*args: str) -> None:
         f"Patched ISO written to:\n\n{os.path.abspath(output_file)}\n\n"
         "Load it in any PS1 emulator (BizHawk, Duckstation, PCSX-Redux, "
         "real hardware via ODE, etc.). For multiworld play, also start "
-        "the Digimon World Client and connect to your server.",
+        "the matching Digimon World Client and connect to your server.",
     )
 
 
-unified_client_component = Component(
-    "Digimon World Client",
+# ---------------------------------------------------------------------------
+# Component registrations
+# ---------------------------------------------------------------------------
+
+
+bizhawk_client_component = Component(
+    "Digimon World Client (BizHawk)",
     "DigimonWorldClient",
     component_type=Type.CLIENT,
-    func=_launch_unified_client,
+    func=_launch_bizhawk_client,
     file_identifier=SuffixIdentifier(".apdw1"),
     description=(
-        "Open the unified Digimon World 1 client. Auto-detects whether "
-        "BizHawk (Lua connector) or Duckstation (PINE) is running and "
-        "uses whichever appears first."
+        "Open the Digimon World 1 client backed by BizHawk + the "
+        "in-tree Lua connector. This is the default — Open Patch on "
+        "any .apdw1 routes here."
+    ),
+)
+
+duckstation_client_component = Component(
+    "Digimon World Client (Duckstation)",
+    "DigimonWorldClientDuckstation",
+    component_type=Type.CLIENT,
+    func=_launch_duckstation_client,
+    # No file_identifier on purpose: Open Patch picks the first
+    # component whose SuffixIdentifier claims .apdw1 (first-match
+    # wins), so leaving this empty keeps the BizHawk client as the
+    # default Open Patch target. Duckstation users launch this
+    # button manually.
+    description=(
+        "Open the Digimon World 1 client backed by Duckstation via "
+        "process memory hooking. Launch this AFTER you have started "
+        "Duckstation and loaded the patched ISO. Patch the ISO first "
+        "via Open Patch or the 'Patch ROM only' button."
     ),
 )
 
@@ -101,5 +150,6 @@ patch_only_component = Component(
     ),
 )
 
-components.append(unified_client_component)
+components.append(bizhawk_client_component)
+components.append(duckstation_client_component)
 components.append(patch_only_component)

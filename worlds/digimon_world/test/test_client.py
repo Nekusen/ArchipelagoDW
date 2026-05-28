@@ -91,17 +91,21 @@ class TestClientRegistration(DigimonWorldTestBase):
         self.assertEqual(DigimonWorldClient.system, "PSX")
         self.assertEqual(DigimonWorldClient.patch_suffix, ".apdw1")
 
-    def test_apdw1_suffix_registered_with_unified_component(self) -> None:
-        """``.apdw1`` is now claimed by our own unified-client
-        component (registered in :mod:`worlds.digimon_world.launcher`),
-        not by ``worlds._bizhawk``'s :class:`SuffixIdentifier`. The
-        unified client auto-detects whichever emulator the user has
-        running (BizHawk via Lua connector, Duckstation via PINE)."""
+    def test_apdw1_suffix_registered_with_bizhawk_component(self) -> None:
+        """``.apdw1`` is claimed by our own BizHawk client component
+        (registered in :mod:`worlds.digimon_world.launcher`), not by
+        ``worlds._bizhawk``'s :class:`SuffixIdentifier`. Open Patch
+        routes to the BizHawk client; the Duckstation client is a
+        separate Launcher button with no suffix association."""
 
         from worlds.LauncherComponents import SuffixIdentifier
-        from ..launcher import unified_client_component
-        self.assertIsInstance(unified_client_component.file_identifier, SuffixIdentifier)
-        self.assertIn(".apdw1", unified_client_component.file_identifier.suffixes)
+        from ..launcher import bizhawk_client_component, duckstation_client_component
+        self.assertIsInstance(bizhawk_client_component.file_identifier, SuffixIdentifier)
+        self.assertIn(".apdw1", bizhawk_client_component.file_identifier.suffixes)
+        # Duckstation client must NOT claim .apdw1 — first-match-wins
+        # in Launcher.open_patch means a duplicate claim would steal
+        # the route from BizHawk depending on registration order.
+        self.assertIsNone(duckstation_client_component.file_identifier)
 
 
 # =============================================================================

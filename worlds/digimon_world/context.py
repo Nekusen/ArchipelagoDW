@@ -1,17 +1,16 @@
-"""Unified DW1 client context.
+"""Adapter-agnostic DW1 client context.
 
-Replaces the previous ``worlds._bizhawk.context.BizHawkClientContext``
-usage with a slimmer :class:`DigimonWorldClientContext` that holds an
-:class:`~.adapters.EmulatorAdapter` instead of being hard-wired to
-BizHawk's transport. The game watcher loop here is the DW1-specific
-adaptation of ``worlds._bizhawk.context._game_watcher`` — same
-high-level shape (connect → identify game → call handler), but the
-"identify" step delegates to a single :class:`DigimonWorldClient`
-instead of BizHawk's pluggable :class:`AutoBizHawkClientRegister`
-machinery (we only ever ship one handler for one game).
+This module hosts the :class:`CommonContext` subclass and the game
+watcher loop that every DW1 client (BizHawk-based or Duckstation-
+based) shares. The transport differs per client; everything else
+— GUI shell, server protocol handling, slot data, game-watcher cadence
+— is identical.
 
-The watcher races every connection cycle through both adapters and
-uses whichever connects first.
+Each client process picks *one* :class:`EmulatorAdapter` at startup
+and passes it to :func:`launch`. The context binds it to ``ctx.emu``
+(and ``ctx.bizhawk_ctx`` as a source-compat alias for
+:mod:`worlds.digimon_world.client`'s legacy call shape) and the
+watcher loop never thinks about more than one transport at a time.
 """
 
 from __future__ import annotations
@@ -19,7 +18,7 @@ from __future__ import annotations
 import asyncio
 import enum
 import logging
-from typing import Any
+from typing import Any, Callable
 
 from CommonClient import (
     ClientCommandProcessor,
@@ -32,12 +31,9 @@ from CommonClient import (
 import Utils
 
 from .adapters import (
-    BizHawkAdapter,
     EmulatorAdapter,
     NotConnectedError,
-    PineAdapter,
     RequestFailedError,
-    race_connect,
 )
 
 logger = logging.getLogger("Client")
@@ -47,9 +43,9 @@ logger = logging.getLogger("Client")
 # before forcing a poll. Same value the BizHawk context uses.
 WATCHER_TIMEOUT = 0.5
 
-# How long to wait between failed connection-race rounds. Two
-# disconnected adapters racing in a tight loop would peg the event
-# loop, so we sleep briefly between rounds.
+# How long to wait between failed connect attempts. We don't want a
+# tight loop slamming the emulator with reconnect attempts if it's not
+# up yet.
 RECONNECT_DELAY = 1.0
 
 
@@ -66,32 +62,32 @@ class DigimonWorldCommandProcessor(ClientCommandProcessor):
 
         ctx = self.ctx
         assert isinstance(ctx, DigimonWorldClientContext)
-        if ctx.emu is None:
-            ap_logger.info("Emulator: not connected")
+        if ctx.emu is None or not ctx.emu.is_connected():
+            ap_logger.info(f"Emulator ({ctx.adapter_label}): not connected")
             return
         ap_logger.info(f"Emulator: connected via {ctx.emu.name}")
 
 
 class DigimonWorldClientContext(CommonContext):
-    """:class:`CommonContext` specialised for DW1's unified client.
+    """:class:`CommonContext` specialised for DW1.
 
-    Owns the active :class:`EmulatorAdapter`. The handler (the
-    :class:`DigimonWorldClient` class in :mod:`.client`) reaches RAM
-    through ``ctx.emu``; it never imports the BizHawk transport
-    directly.
+    Owns one :class:`EmulatorAdapter` for the lifetime of the process.
+    The handler (the :class:`DigimonWorldClient` class in
+    :mod:`.client`) reaches RAM through ``ctx.emu``.
     """
 
     command_processor = DigimonWorldCommandProcessor
 
-    # Filled in by the watcher loop once an adapter has connected.
-    emu: EmulatorAdapter | None
-    # Source-compat alias for :attr:`emu`. The legacy client code calls
-    # ``bizhawk.read(ctx.bizhawk_ctx, reads)`` etc.; the compat shim in
+    # The single adapter this process uses. Set at construction time.
+    emu: EmulatorAdapter
+    # Source-compat alias for :attr:`emu`. Legacy client code calls
+    # ``bizhawk.read(ctx.bizhawk_ctx, reads)``; the compat shim in
     # :mod:`.client` forwards that to ``ctx.bizhawk_ctx.read(reads)``,
-    # so ``bizhawk_ctx`` simply needs to *be* the active adapter.
-    bizhawk_ctx: EmulatorAdapter | None
-    # All adapters we'll race on each reconnect cycle.
-    available_adapters: list[EmulatorAdapter]
+    # so ``bizhawk_ctx`` just *is* the active adapter.
+    bizhawk_ctx: EmulatorAdapter
+    # Human-readable label used in log lines and the GUI window
+    # title, e.g. ``"BizHawk"`` or ``"Duckstation"``.
+    adapter_label: str
     # AP auth bookkeeping (mirrors the BizHawk context).
     auth_status: AuthStatus
     password_requested: bool
@@ -103,11 +99,17 @@ class DigimonWorldClientContext(CommonContext):
     # Wired through to the watcher loop.
     watcher_timeout: float
 
-    def __init__(self, server_address: str | None, password: str | None) -> None:
+    def __init__(
+        self,
+        server_address: str | None,
+        password: str | None,
+        adapter: EmulatorAdapter,
+        adapter_label: str,
+    ) -> None:
         super().__init__(server_address, password)
-        self.emu = None
-        self.bizhawk_ctx = None
-        self.available_adapters = [BizHawkAdapter(), PineAdapter()]
+        self.emu = adapter
+        self.bizhawk_ctx = adapter
+        self.adapter_label = adapter_label
         self.auth_status = AuthStatus.NOT_AUTHENTICATED
         self.password_requested = False
         self.server_seed_name = None
@@ -118,7 +120,7 @@ class DigimonWorldClientContext(CommonContext):
 
     def make_gui(self):
         ui = super().make_gui()
-        ui.base_title = "Archipelago Digimon World Client"
+        ui.base_title = f"Archipelago Digimon World Client ({self.adapter_label})"
         return ui
 
     def on_package(self, cmd: str, args: dict) -> None:
@@ -134,8 +136,10 @@ class DigimonWorldClientContext(CommonContext):
     async def server_auth(self, password_requested: bool = False) -> None:
         self.password_requested = password_requested
 
-        if self.emu is None or not self.emu.is_connected():
-            ap_logger.info("Awaiting connection to an emulator before authenticating")
+        if not self.emu.is_connected():
+            ap_logger.info(
+                f"Awaiting connection to {self.adapter_label} before authenticating"
+            )
             return
 
         if self.client_handler is None:
@@ -163,10 +167,9 @@ class DigimonWorldClientContext(CommonContext):
 async def _game_watcher(ctx: DigimonWorldClientContext) -> None:
     """Connect → validate ROM → poll game state, on a loop.
 
-    The loop is structurally close to
-    :func:`worlds._bizhawk.context._game_watcher` but delegates to
-    :class:`EmulatorAdapter` for transport and to a single
-    :class:`DigimonWorldClient` instance for game-specific work.
+    Each tick: ensure the adapter is connected, ping it, optionally
+    re-validate the ROM, then call the game-specific handler. Lost
+    connections are caught and the loop reconnects automatically.
     """
 
     from .client import DigimonWorldClient
@@ -185,41 +188,31 @@ async def _game_watcher(ctx: DigimonWorldClientContext) -> None:
         ctx.watcher_event.clear()
 
         # ----- Connection phase -----------------------------------------
-        if ctx.emu is None or not ctx.emu.is_connected():
-            ctx.emu = None
-            ctx.bizhawk_ctx = None
+        if not ctx.emu.is_connected():
             showed_connected = False
 
             if not showed_connecting:
-                ap_logger.info("Waiting for BizHawk or Duckstation...")
+                ap_logger.info(f"Waiting for {ctx.adapter_label}...")
                 showed_connecting = True
 
-            # Race both adapters concurrently with an interruptible
-            # exit-event wait, so closing the client doesn't have to
-            # block on a connect timeout.
-            race_task = asyncio.create_task(
-                race_connect(ctx.available_adapters), name="RaceConnect",
-            )
+            connect_task = asyncio.create_task(ctx.emu.connect(), name="EmuConnect")
             exit_task = asyncio.create_task(ctx.exit_event.wait(), name="ExitWait")
             await asyncio.wait(
-                [race_task, exit_task],
+                [connect_task, exit_task],
                 return_when=asyncio.FIRST_COMPLETED,
             )
 
             if exit_task.done():
-                race_task.cancel()
+                connect_task.cancel()
                 return
 
-            winner = await race_task
-            if winner is None:
-                # Nobody answered — sleep briefly, then retry.
+            if not connect_task.result():
+                # Not up yet — sleep briefly, then retry.
                 await asyncio.sleep(RECONNECT_DELAY)
                 continue
 
-            ctx.emu = winner
-            ctx.bizhawk_ctx = winner
             showed_connecting = False
-            ap_logger.info(f"Connected via {ctx.emu.name}")
+            ap_logger.info(f"Connected to {ctx.adapter_label}")
             showed_invalid_rom = False
 
         # ----- Per-tick keep-alive + handler -----------------------------
@@ -228,11 +221,11 @@ async def _game_watcher(ctx: DigimonWorldClientContext) -> None:
 
             if not showed_connected:
                 showed_connected = True
-                ap_logger.info(f"Emulator handshake OK ({ctx.emu.name})")
+                ap_logger.info(f"Emulator handshake OK ({ctx.adapter_label})")
 
-            # ROM-hash change detection (BizHawk only — Duckstation has
-            # no PINE hash command). The check is skipped when the
-            # adapter returns ``None``.
+            # ROM-hash change detection. The BizHawk adapter implements
+            # this; Duckstation returns ``None`` (PINE-style hash isn't
+            # exposed). Skipped when the adapter returns ``None``.
             rom_hash = await ctx.emu.get_hash()
             if rom_hash is not None:
                 if ctx.rom_hash is not None and ctx.rom_hash != rom_hash:
@@ -246,17 +239,18 @@ async def _game_watcher(ctx: DigimonWorldClientContext) -> None:
                 ctx.rom_hash = rom_hash
 
             # validate_rom claims the connection on first contact. If
-            # it refuses (e.g. wrong game loaded, RAM not initialised
-            # yet) we just keep polling — the user may still be at the
+            # it refuses (wrong game loaded, RAM not initialised yet)
+            # we just keep polling — the user may still be at the
             # BIOS splash and will land on a valid save shortly.
             if ctx.client_handler is None:
                 ok = await handler.validate_rom(ctx)
                 if not ok:
                     if not showed_invalid_rom:
                         ap_logger.info(
-                            "Couldn't validate the running ROM yet. "
-                            "Load the patched Digimon World 1 ISO and "
-                            "boot to the title screen / a save."
+                            f"Couldn't validate the running ROM yet. "
+                            f"Load the patched Digimon World 1 ISO in "
+                            f"{ctx.adapter_label} and boot to the title "
+                            f"screen / a save."
                         )
                         showed_invalid_rom = True
                     continue
@@ -265,16 +259,13 @@ async def _game_watcher(ctx: DigimonWorldClientContext) -> None:
                 ap_logger.info("Running handler for Digimon World")
 
         except RequestFailedError as exc:
-            ap_logger.info(f"Lost connection to {ctx.emu.name}: {exc}")
+            ap_logger.info(f"Lost connection to {ctx.adapter_label}: {exc}")
             try:
                 await ctx.emu.disconnect()
             except Exception:
                 pass
-            ctx.emu = None
-            ctx.bizhawk_ctx = None
             continue
         except NotConnectedError:
-            ctx.emu = None
             continue
 
         # Server auth
@@ -288,20 +279,32 @@ async def _game_watcher(ctx: DigimonWorldClientContext) -> None:
         try:
             await ctx.client_handler.game_watcher(ctx)
         except RequestFailedError as exc:
-            ap_logger.info(f"Lost connection to {ctx.emu.name}: {exc}")
+            ap_logger.info(f"Lost connection to {ctx.adapter_label}: {exc}")
             try:
                 await ctx.emu.disconnect()
             except Exception:
                 pass
-            ctx.emu = None
 
 
-def launch(*launch_args: str) -> None:
-    """Entry point used by :mod:`worlds.digimon_world.launcher`.
+def launch(
+    adapter_factory: Callable[[], EmulatorAdapter],
+    adapter_label: str,
+    logging_name: str,
+    *launch_args: str,
+) -> None:
+    """Generic launch entry point used by both DW1 client variants.
 
-    Mirrors ``worlds._bizhawk.context.launch`` so the existing patch
-    flow (Open Patch → patch ROM → start client) keeps working with
-    the same call-shape the Launcher already uses.
+    ``adapter_factory`` is a zero-arg callable returning the
+    :class:`EmulatorAdapter` to use for this process. The top-level
+    launcher shims (:file:`DigimonWorldClient.py` for BizHawk,
+    :file:`DigimonWorldClientDuckstation.py` for Duckstation) call
+    this with their respective factories.
+
+    ``adapter_label`` is the human-readable name shown in the GUI
+    title and log messages (``"BizHawk"``, ``"Duckstation"``).
+
+    ``logging_name`` is what the framework uses for the log file name
+    (``"DigimonWorldClient"`` / ``"DigimonWorldClientDuckstation"``).
     """
 
     import Patch
@@ -323,7 +326,10 @@ def launch(*launch_args: str) -> None:
                 logger.exception(exc)
                 Utils.messagebox("Error Patching Game", str(exc), True)
 
-        ctx = DigimonWorldClientContext(args.connect, args.password)
+        adapter = adapter_factory()
+        ctx = DigimonWorldClientContext(
+            args.connect, args.password, adapter, adapter_label,
+        )
         ctx.server_task = asyncio.create_task(server_loop(ctx), name="ServerLoop")
 
         if gui_enabled:
@@ -339,7 +345,7 @@ def launch(*launch_args: str) -> None:
         await ctx.exit_event.wait()
         await ctx.shutdown()
 
-    Utils.init_logging("DigimonWorldClient", exception_logger="Client")
+    Utils.init_logging(logging_name, exception_logger="Client")
     import colorama
     colorama.just_fix_windows_console()
     asyncio.run(main())
