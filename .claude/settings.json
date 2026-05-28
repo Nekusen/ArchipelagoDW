@@ -97,10 +97,15 @@
       "Bash(python -m pytest test/general/ -k \"test_basics or test_implemented or test_create or test_id\" --no-header -q)",
       "Bash(awk 'NR>=14649 && /== Script ID 145 ==/ {start=1} start && NR < 14649+50 {print NR, $0} NR > 14649+50 {exit}' references/digimon_world_randomizer/script/DW1Script.txt)",
       "Bash(python -m pytest worlds/digimon_world/test/ --no-header)",
-      "Bash(python -m pytest worlds/digimon_world/test/ -q --deselect worlds/digimon_world/test/test_client.py::TestChestDispatch::test_dispatch_size)"
+      "Bash(python -m pytest worlds/digimon_world/test/ -q --deselect worlds/digimon_world/test/test_client.py::TestChestDispatch::test_dispatch_size)",
+      "Bash(python -m pytest \"worlds/digimon_world/test/test_stub_logic.py::TestRegionLockingAll::test_fill\" --tb=short)",
+      "Bash(grep -v '\\\\.apdw1$')",
+      "Bash(grep '\\\\.apdw1$')",
+      "Bash(rm AP_*.apdw1 && ls AP_*.apdw1 2>&1 | head -3)"
     ],
     "additionalDirectories": [
-      "\\tmp"
+      "\\tmp",
+      "C:\\opt\\dev\\AP\\ArchipelagoDW"
     ]
   }
 }

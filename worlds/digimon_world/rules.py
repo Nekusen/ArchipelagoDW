@@ -96,6 +96,8 @@ def set_all_rules(world: DigimonWorldWorld) -> None:
     _set_fishing_rules(world)
     _set_nanimon_quest_rules(world)
     _set_arena_cup_rules(world)
+    _set_ogremon_quest_chest_rules(world)
+    _set_chest_rules(world)
     _apply_pp_cutoffs(world)
     _set_completion_condition(world)
 
@@ -441,33 +443,86 @@ def _leomon_extra(_world: DigimonWorldWorld):
 #
 # Under region locking each of these stops can be locked independently,
 # so all three are required as explicit ``CanReachRegion`` rules.
-def _ogremon_extra(_world: DigimonWorldWorld):
+#
+# Additionally requires :func:`_ogremon_quest_extra` (Tropical Jungle
+# reach) — Battle 1 starts when Yuramon's dialogue updates, and
+# Yuramon will not update until the player has physically walked the
+# Tropical Jungle bridge trigger that opens the Great Canyon Bridge
+# in vanilla. The GC Bridge AP item alone is not enough: Yuramon
+# observes the in-TJ trigger, not the bridge bit itself. Live-confirmed
+# by the user 2026-05-27 in seed AP_48937026802597073788.
+def _ogremon_extra(world: DigimonWorldWorld):
     return (
         CanReachRegion("Great Canyon")
         & CanReachRegion("Secret Beach Cave")
         & CanReachRegion("Drill Tunnel")
+        & _ogremon_quest_extra(world)
     )
 
 
-# Whamon's recruit chain requires Ogremon defeated at Ogre Fortress
-# (Battle 2 — Great Canyon sub-area), then traveling to his cave from
+# Whamon's recruit chain requires Ogremon Battles 1+2 at Ogre Fortress
+# (which in turn require Yuramon's dialogue update — see
+# :func:`_ogremon_quest_extra`), then traveling to his cave from
 # Freezeland (Battle 3). Reaching Freezeland via the right chain
 # already requires Great Canyon, but the **Birdramon Flight:
 # Freezeland** bypass would skip Great Canyon, leaving Battles 1+2
-# unreachable. Force Great Canyon explicitly.
-def _whamon_extra(_world: DigimonWorldWorld):
-    return CanReachRegion("Great Canyon")
+# unreachable. Force Great Canyon explicitly, and AND in the Yuramon
+# Tropical Jungle dependency.
+def _whamon_extra(world: DigimonWorldWorld):
+    return CanReachRegion("Great Canyon") & _ogremon_quest_extra(world)
 
 
-# Shellmon's recruit chain: defeat Ogremon at Ogre Fortress (Battle 2,
-# Great Canyon sub-area), then go to Freezeland SW to find Shellmon
-# and talk. Shellmon's home region is Great Canyon (the cry-for-help
-# triggers there), but the actual recruit happens in Freezeland.
-# Under region locking, Great Canyon is no longer implicit via Freezeland
-# (Freezeland is also reachable via Birdramon flight, which bypasses GC),
-# so it needs to be explicit.
-def _shellmon_extra(_world: DigimonWorldWorld):
-    return CanReachRegion("Great Canyon") & CanReachRegion("Freezeland")
+# Shellmon's recruit chain: complete Ogremon Battles 1+2 at Ogre
+# Fortress (Yuramon dependency — see :func:`_ogremon_quest_extra`),
+# then go to Freezeland SW to find Shellmon and talk. Shellmon's home
+# region is Great Canyon (the cry-for-help triggers there), but the
+# actual recruit happens in Freezeland. Under region locking, Great
+# Canyon is no longer implicit via Freezeland (Freezeland is also
+# reachable via Birdramon flight, which bypasses GC), so it needs to
+# be explicit.
+def _shellmon_extra(world: DigimonWorldWorld):
+    return (
+        CanReachRegion("Great Canyon")
+        & CanReachRegion("Freezeland")
+        & _ogremon_quest_extra(world)
+    )
+
+
+# Shared Ogremon-quest gate: Yuramon's dialogue in Tropical Jungle only
+# advances after the player has physically walked the Tropical Jungle
+# bridge trigger. The GC Bridge AP-item delivery in shuffled mode flips
+# the bridge bit but does NOT advance Yuramon, who is gated on the
+# in-Tropical-Jungle event. In AP terms: the Ogremon quest chain
+# requires reaching Tropical Jungle by ANY means
+# (``CanReachRegion("Tropical Jungle")``), which in shuffled mode
+# implies ``Has("Tropical Jungle Bridge")`` and in vanilla mode
+# implies either the bridge or Birdramon Flight to Ancient Dino
+# Region (free reverse edge to TJ). Used by every location whose
+# in-game spawn / dialog depends on Yuramon advancing:
+#
+#   * Recruits: Ogremon, Shellmon, Whamon
+#   * Ogre Fortress chests (slots 20, 21, 22, 24, 25, 26, 34)
+#   * Great Canyon Chest 1 (slot 17) — only spawns after Ogremon B1+B2
+#   * Nanimon Quest: Ogre Fortress
+def _ogremon_quest_extra(_world: DigimonWorldWorld):
+    return CanReachRegion("Tropical Jungle")
+
+
+# AP location names whose in-game spawn/dialog depends on the Ogremon
+# quest chain (see :func:`_ogremon_quest_extra`). Attached as a per-
+# location rule by :func:`_set_ogremon_quest_chest_rules` so the chests
+# / Nanimon site stay region-anchored to Great Canyon while still
+# requiring the Yuramon prerequisite.
+_OGREMON_QUEST_CHEST_LOCATIONS: tuple[str, ...] = (
+    "Chest: Great Canyon 1",
+    "Chest: Ogre Fortress 1",
+    "Chest: Ogre Fortress 2",
+    "Chest: Ogre Fortress 3",
+    "Chest: Ogre Fortress 4",
+    "Chest: Ogre Fortress 5",
+    "Chest: Ogre Fortress 6",
+    "Chest: Ogre Fortress 7",
+)
 
 
 # Ninjamon's recruit spawn is in Native Forest, but reaching that
@@ -619,6 +674,68 @@ def _set_recruit_rules(world: DigimonWorldWorld) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Ogremon-quest per-location rules (chests + Nanimon site)
+# ---------------------------------------------------------------------------
+
+def _set_ogremon_quest_chest_rules(world: DigimonWorldWorld) -> None:
+    """Attach the Yuramon-Tropical-Jungle prereq to Ogremon-quest AP
+    locations that are NOT recruits.
+
+    Per user testing 2026-05-27, the AP locations whose in-game spawn
+    is gated on Yuramon's dialogue update (Ogremon Battles 1+2 chain)
+    are:
+
+    * The 7 Ogre Fortress chests (slots 20, 21, 22, 24, 25, 26, 34).
+    * Great Canyon Chest 1 (slot 17) — only spawns after Battles 1+2.
+    * Nanimon Quest: Ogre Fortress — the Nanimon site is inside the
+      fortress, gated on the same Ogremon-quest progression.
+
+    The three recruit AP locations (Ogremon, Shellmon, Whamon) get the
+    same gate via :data:`_RECRUIT_EXTRA_RULES` (they each call
+    :func:`_ogremon_quest_extra`). Keeping the helper centralised so
+    the two paths stay in lockstep.
+    """
+
+    rule = _ogremon_quest_extra(world)
+    for loc_name in (*_OGREMON_QUEST_CHEST_LOCATIONS,
+                     "Nanimon Quest: Ogre Fortress"):
+        try:
+            location = world.get_location(loc_name)
+        except KeyError:
+            continue  # chest randomization disabled, or option-skipped
+        world.set_rule(location, rule)
+
+
+# ---------------------------------------------------------------------------
+# Per-chest rules (post-region access overrides)
+# ---------------------------------------------------------------------------
+
+def _set_chest_rules(world: DigimonWorldWorld) -> None:
+    """Per-chest access rules layered on top of region access.
+
+    Currently only one chest needs a per-location rule:
+
+    * **Chest: Secret Beach Cave** (slot 23) — requires Whamon Recruit.
+      The Secret Beach Cave region has two entry edges (File City +
+      Whamon Recruit, Freezeland free), and the Ogremon recruit chain
+      requires SBC reach via the Freezeland edge (since Whamon Recruit
+      is itself acquired in SBC). Per user testing 2026-05-27, the
+      chest in SBC is NOT accessible until Whamon is recruited — even
+      though the recruit fight happens inside SBC, the chest spawn
+      gates on the recruit being complete. Per-chest rule keeps the
+      region edges open for the Ogremon chain to satisfy.
+    """
+
+    if not int(world.options.chest_randomization.value):
+        return
+    try:
+        chest = world.get_location("Chest: Secret Beach Cave")
+    except KeyError:
+        return
+    world.set_rule(chest, Has("Whamon Recruit"))
+
+
+# ---------------------------------------------------------------------------
 # Completion condition
 # ---------------------------------------------------------------------------
 
@@ -695,9 +812,10 @@ def _set_nanimon_quest_rules(world: DigimonWorldWorld) -> None:
     been progressed (verified 2026-05-13 against the user's playthrough
     feedback):
 
-    * **Ogre Fortress**: covered by Great Canyon region access (which
-      transitively covers Freezeland for the Ogremon/Whamon chain).
-      No extra rule.
+    * **Ogre Fortress**: rule attached separately by
+      :func:`_set_ogremon_quest_chest_rules` — the Nanimon site shares
+      the Yuramon-Tropical-Jungle prereq with the Ogre Fortress chests
+      and the Ogremon-chain recruits.
     * **Ancient Dino Region**: covered by region access (Centarumon
       recruit fight is in Tropical Jungle, implicit by region reach).
       No extra rule.
@@ -762,40 +880,55 @@ def _set_nanimon_quest_rules(world: DigimonWorldWorld) -> None:
 # Arena Cup rules
 # ---------------------------------------------------------------------------
 
+_PROGRESSIVE_ARENA_NAME = "Progressive Arena"
+
+# Per-grade-tier requirement: number of Progressive Arena items needed
+# to unlock the cup's AP locations. Matches the client-side arena
+# enforcer's bit-set tiers (see ARENA_ENFORCER_* in addresses.py).
+_ARENA_TIER_PROGRESSIVE_COUNT: dict[str, int] = {
+    "Grade D": 1,  # T1 -- always available; client enforcer no-op for D
+    "Grade C": 2,  # T2 -- enforcer sets byte 1 + byte 6 of recruit block
+    "Grade B": 3,  # T3 -- enforcer sets all 8 bytes
+    "Grade A": 3,  # T3 -- same enforcer level; in-game requires winning B
+    "Grade S": 3,  # T3 -- same enforcer level; in-game requires winning A
+}
+
+
 def _set_arena_cup_rules(world: DigimonWorldWorld) -> None:
-    """PP-progress gating for the 5 arena grade-tier cups.
+    """Gate the 20 arena cup-win AP locations on ``Progressive Arena``
+    item count.
 
-    All 20 arena-cup locations (5 tiers x 4 checks) live in File City,
-    which is unconditionally reachable. The per-tier PP gate
-    (:data:`ARENA_CUP_TIERS` 4th element) is an AP-logic proxy for the
-    in-game difficulty -- DW1's cups are partner-stage/stats-gated
-    (Rookie partner can field Grade D; Champion for C/B; Ultimate for
-    A/S), which AP can't directly model, so we approximate via PP
-    progression.
+    Each Progressive Arena copy unlocks one more arena tier per the map
+    in :data:`_ARENA_TIER_PROGRESSIVE_COUNT`. The client-side enforcer
+    in :mod:`.client` then writes the recruit-block bits the in-game
+    arena needs to show that tier's cup; with sufficient bits in place,
+    the player can enter the cup in-game and the cup-win RAM bit flips
+    on victory, firing the AP location.
 
-    When a tier's PP gate exceeds the player's ``prosperity_goal``,
-    the 4 locations under it are flagged ``LocationProgressType.EXCLUDED``
-    so AP fill never places progression there. The locations still
-    exist and still fire on cup win -- the player just can't earn
-    progression by clearing them.
+    Grade A and Grade S share T3 in AP logic but vanilla DW1 requires
+    winning A before S becomes selectable -- that's player-action
+    sequential dependency, not an AP item gate. The user (2026-05-28)
+    confirmed via live testing that the 720+X / 200+X bit set alone is
+    enough to populate the schedule; the "win prior tier first"
+    requirement is enforced by DW1 itself.
+
+    When the ``arena_locations`` option is off (or set to ``exclude_s``
+    for Grade S), the corresponding cup-win AP locations were already
+    excluded from the multiworld by :func:`locations.create_all_locations`,
+    so this function safely skips any tier whose locations aren't
+    actually present.
     """
 
-    mt_threshold = int(world.options.prosperity_goal.value)
-
-    for tier, _bit, _trig, pp_gate in ARENA_CUP_TIERS:
+    for tier, _bit, _trig, _pp in ARENA_CUP_TIERS:
+        count = _ARENA_TIER_PROGRESSIVE_COUNT[tier]
         for i in range(1, 5):
-            loc = world.get_location(f"Arena Cup: {tier} {i}")
-            if pp_gate > mt_threshold:
-                # Tier's PP proxy is past the configured goal: keep the
-                # location in the pool but lock it to filler.
-                loc.progress_type = LocationProgressType.EXCLUDED
-                loc.item_rule = (
-                    lambda item: item.classification == ItemClassification.filler
-                )
-            elif pp_gate > 0:
-                world.set_rule(loc, _pp(pp_gate))
-    # Reference both addresses-side and locations-side tables so the
-    # imports above are exercised even when only one is consulted.
+            loc_name = f"Arena Cup: {tier} {i}"
+            try:
+                loc = world.get_location(loc_name)
+            except KeyError:
+                continue   # tier excluded by arena_locations option
+            world.set_rule(loc, Has(_PROGRESSIVE_ARENA_NAME, count=count))
+    # Keep the addresses-side and locations-side tables exercised.
     assert len(ARENA_CUP_NAMES) == len(ARENA_CUP_TIERS) * 4
 
 

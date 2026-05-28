@@ -12,6 +12,8 @@ the same way:
 * ``69_056_xxx`` — recycle shop slots (7, opt-in via :class:`worlds.digimon_world.options.RecycleShopLocations`)
 * ``69_057_xxx`` — merit shop slots (14, opt-in via :class:`worlds.digimon_world.options.MeritShopLocations`)
 * ``69_058_xxx`` — fishing fish catches (6, opt-in via :class:`worlds.digimon_world.options.FishingLocations`)
+* ``69_059_xxx`` — Nanimon Quest sites (5, always on)
+* ``69_060_xxx`` — Arena Cup grade-tier wins (20 = 5 tiers x 4 checks, always on)
 
 Locked v1 MVP scope: chests + recruits + starter. NPC-gift "K Prosperity"
 locations are gone — prosperity is now a real AP item shipped in the
@@ -36,6 +38,8 @@ from typing import TYPE_CHECKING, Final, NamedTuple
 from BaseClasses import ItemClassification, Location, LocationProgressType
 
 from .data.addresses import (
+    ARENA_CUP_LOCATIONS_PER_TIER,
+    ARENA_CUP_TIERS,
     CARD_LOCATION_NIBBLES,
     FISHING_LOCATION_NAMES,
     MERIT_SHOP_LOCATION_NAMES,
@@ -90,7 +94,9 @@ _RECRUIT_REGIONS: Final[dict[str, str]] = {
     # Native Forest
     "Palmon":       "Native Forest",
     "Kunemon":      "Native Forest",
-    "Coelamon":     "Native Forest",
+    # Coelamon dropped 2026-05-24 — his recruit cutscene is bugged in
+    # the current build and the fix would be too costly. See
+    # addresses.py ``_AP_RECRUIT_EXCLUDED``.
     # Seadramon dropped 2026-05-09 (the cutscene IS the Blue Flute
     # pickup; he doesn't really do anything in town). See addresses.py
     # ``_AP_RECRUIT_EXCLUDED``. The cutscene now fires the
@@ -149,10 +155,15 @@ _RECRUIT_REGIONS: Final[dict[str, str]] = {
     # Giromon dropped 2026-05-09 — his Restaurant Jukebox effect
     # crashes the NTSC (US) build per the guide.
     "MetalMamemon": "Factorial Town",
-    # Mt. Infinity
-    "Devimon":      "Mt. Infinity",
-    "Megadramon":   "Mt. Infinity",
-    "MetalGreymon": "Mt. Infinity",
+    # Mt. Infinity recruits dropped 2026-05-27 — all three (Devimon,
+    # Megadramon, MetalGreymon) get their recruit bits set by the
+    # post-Machinedramon state machine, NOT by reachable natural-route
+    # encounters under the default Machinedramon goal. See addresses.py
+    # ``_AP_RECRUIT_EXCLUDED`` for the chronology evidence. Kept commented
+    # below for future post-game goal modes.
+    # "Devimon":      "Mt. Infinity",
+    # "Megadramon":   "Mt. Infinity",
+    # "MetalGreymon": "Mt. Infinity",
 }
 
 _RECRUIT_DW_IDS: Final[dict[str, int]] = {
@@ -182,8 +193,12 @@ RECRUIT_NAMES: Final[tuple[str, ...]] = tuple(_RECRUIT_REGIONS)
 # 2026-05-08), minus Seadramon (dropped 2026-05-09 — recruit cutscene
 # is the Blue Flute pickup), minus Nanimon and Giromon (dropped
 # 2026-05-09 — Nanimon never joins the city, Giromon's Jukebox crashes
-# the NTSC build). See addresses.py ``_AP_RECRUIT_EXCLUDED``.
-assert len(RECRUIT_NAMES) == 44, len(RECRUIT_NAMES)
+# the NTSC build), minus Coelamon (dropped 2026-05-24 — recruit cutscene
+# is bugged in the current build, fix deferred), minus all 3 Mt. Infinity
+# recruits Devimon/Megadramon/MetalGreymon (dropped 2026-05-27 — their
+# recruit bits get set post-Machinedramon, after the goal would have
+# already fired). See addresses.py ``_AP_RECRUIT_EXCLUDED``.
+assert len(RECRUIT_NAMES) == 40, len(RECRUIT_NAMES)
 
 
 # =============================================================================
@@ -198,7 +213,7 @@ RECRUIT_PP_REQUIREMENTS: Final[dict[str, int]] = {
     # 0 PP — most recruits (Agumon, Digitamamon dropped from pool entirely)
     "Palmon": 0,
     "Kunemon": 0,
-    "Coelamon": 0,
+    # Coelamon dropped 2026-05-24 — see _RECRUIT_REGIONS comment.
     # Seadramon dropped 2026-05-09 — see _RECRUIT_REGIONS comment.
     "Betamon": 0,
     "Vegiemon": 0,
@@ -250,9 +265,12 @@ RECRUIT_PP_REQUIREMENTS: Final[dict[str, int]] = {
     # "Airdramon": 50,  # dropped 2026-05-08
     "Etemon": 50,
     "Ninjamon": 50,
-    "Devimon": 50,
-    "Megadramon": 50,
-    "MetalGreymon": 50,
+    # Mt. Infinity recruits dropped 2026-05-27 — see _RECRUIT_REGIONS
+    # comment. PP gates kept commented out for the future post-game
+    # goal mode.
+    # "Devimon": 50,
+    # "Megadramon": 50,
+    # "MetalGreymon": 50,
 }
 
 
@@ -295,8 +313,11 @@ _CHEST_BY_SLOT: Final[dict[int, tuple[str, str | None]]] = {
     6:  ("Chest: Grey Lord's Mansion 8",  "Grey Lord's Mansion"),
     7:  ("Chest: Grey Lord's Mansion 9",  "Grey Lord's Mansion"),
     8:  ("Chest: Ice Sanctuary 1",        "Freezeland"),
-    9:  ("Chest: Lava Cave 5",            "Meramon Tunnel"),
-    10: ("Chest: Lava Cave 6",            "Meramon Tunnel"),
+    # Slots 9 and 10 (Lava Cave 5 / 6) were removed 2026-05-24 — the
+    # in-game chests do not exist in any reachable area (suspected
+    # debug / cut content). Slot numbers are preserved as gaps so the
+    # wire-format IDs (69_001_008 / 69_001_009) stay reserved and the
+    # remaining chests keep their stable IDs.
     11: ("Chest: Ice Sanctuary 2",        "Freezeland"),
     12: ("Chest: Ice Sanctuary 3",        "Freezeland"),
     13: ("Chest: Ice Sanctuary 4",        "Freezeland"),
@@ -353,8 +374,10 @@ _CHEST_BY_SLOT: Final[dict[int, tuple[str, str | None]]] = {
     64: ("Chest: Factorial Town 4",       "Factorial Town"),
     65: ("Chest: Factorial Town 5",       "Factorial Town"),
 }
-assert len(_CHEST_BY_SLOT) == 65
-assert len({name for name, _ in _CHEST_BY_SLOT.values()}) == 65, "duplicate chest names"
+# 63 = 65 - 2 (slots 9, 10 = Lava Cave 5, 6 removed 2026-05-24; chests
+# don't exist in any reachable area).
+assert len(_CHEST_BY_SLOT) == 63
+assert len({name for name, _ in _CHEST_BY_SLOT.values()}) == 63, "duplicate chest names"
 
 # Confirmed chests live in their actual in-game region so AP region
 # access drives the per-chest reachability rule (e.g. a chest in
@@ -371,7 +394,7 @@ _CHEST_LOCATIONS: Final[dict[str, LocationEntry]] = {
 }
 
 CHEST_NAMES: Final[tuple[str, ...]] = tuple(_CHEST_LOCATIONS)
-assert len(CHEST_NAMES) == 65, len(CHEST_NAMES)
+assert len(CHEST_NAMES) == 63, len(CHEST_NAMES)
 
 # Regions whose chests are only reachable post-game (after Machinedramon
 # defeat). Their chests are flagged ``LocationProgressType.EXCLUDED`` so
@@ -580,6 +603,38 @@ assert len(_NANIMON_QUEST_LOCATIONS) == 5, len(_NANIMON_QUEST_LOCATIONS)
 
 
 # =============================================================================
+# Arena Cup locations (20 = 5 tiers x 4 checks, always on)
+# =============================================================================
+# DW1's Battle Arena (south File City) runs 5 grade-tier tournaments
+# (Grade D / C / B / A / S — Rookie / Champion / Champion+ / Ultimate /
+# Strongest). Each cup win gates 4 AP location checks via the cup's
+# allocated trigger bit (885..889; see
+# :data:`worlds.digimon_world.data.addresses.ARENA_CUP_TIERS`). The
+# patcher rewrites the in-game prize ``giveItem`` opcodes in Script
+# 214 § Section_51 to ``setTrigger N`` instead -- the vanilla prize
+# never enters the player's inventory; AP delivers 4 items per cup
+# from the seed pool instead.
+#
+# All 20 locations live in the ``File City`` region (the arena's
+# physical home). PP-based access rules per tier are layered in
+# :mod:`.rules` -- they're an AP-logic proxy for the actual in-game
+# difficulty (which scales with partner stage/stats; not directly
+# modellable in AP).
+
+_ARENA_CUP_LOCATIONS: Final[dict[str, LocationEntry]] = {
+    f"Arena Cup: {tier} {i}": LocationEntry(
+        69_060_000 + tier_index * ARENA_CUP_LOCATIONS_PER_TIER + (i - 1),
+        "File City",
+    )
+    for tier_index, (tier, _bit, _trig, _pp) in enumerate(ARENA_CUP_TIERS)
+    for i in range(1, ARENA_CUP_LOCATIONS_PER_TIER + 1)
+}
+assert len(_ARENA_CUP_LOCATIONS) == 20, len(_ARENA_CUP_LOCATIONS)
+
+ARENA_CUP_NAMES: Final[tuple[str, ...]] = tuple(_ARENA_CUP_LOCATIONS)
+
+
+# =============================================================================
 # Final assembled location table
 # =============================================================================
 
@@ -594,6 +649,7 @@ _LOCATION_TABLE: Final[dict[str, LocationEntry]] = {
     **_MERIT_SHOP_LOCATIONS,
     **_FISHING_LOCATIONS,
     **_NANIMON_QUEST_LOCATIONS,
+    **_ARENA_CUP_LOCATIONS,
 }
 
 LOCATION_NAME_TO_ID: Final[dict[str, int]] = {
@@ -610,6 +666,7 @@ LOCATION_NAME_GROUPS: Final[dict[str, set[str]]] = {
     "Merit Shop": set(_MERIT_SHOP_LOCATIONS),
     "Fishing": set(_FISHING_LOCATIONS),
     "Nanimon Quest": set(_NANIMON_QUEST_LOCATIONS),
+    "Arena Cup": set(_ARENA_CUP_LOCATIONS),
 }
 
 
@@ -650,6 +707,16 @@ def create_all_locations(world: DigimonWorldWorld) -> None:
     # items and don't fire AP checks.
     if not int(world.options.chest_randomization.value):
         skip_locations.update(_CHEST_LOCATIONS)
+    # ArenaLocations: opt-in Choice (off / exclude_s / all), default off.
+    # 'off' skips all 20 cup-win AP locations. 'exclude_s' skips the 4
+    # Grade S locations (16 remain). 'all' keeps all 20. Per-tier access
+    # rules are applied in rules.py (gated on Progressive Arena count).
+    _arena_opt = int(world.options.arena_locations.value)
+    if _arena_opt == 0:  # off
+        skip_locations.update(_ARENA_CUP_LOCATIONS)
+    elif _arena_opt == 1:  # exclude_s
+        skip_locations.update(n for n in _ARENA_CUP_LOCATIONS
+                              if n.startswith("Arena Cup: Grade S"))
 
     by_region: dict[str, dict[str, int | None]] = {}
     for name, entry in _LOCATION_TABLE.items():

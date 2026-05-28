@@ -61,6 +61,8 @@ from worlds.Files import APPatchExtension, APProcedurePatch, APTokenMixin, APTok
 from .data import edc
 from .data.addresses import (
     AP_CHEST_SENTINEL_ITEM_ID,
+    ARENA_CUP_NEUTER_VALUES,
+    ARENA_CUP_PATCH_SITES,
     CHEST_NAME_TO_ROM_OFFSETS,
     ROM_ANIM_ID_FORMAT,
     ROM_AP_ITEM_ENTRY_BYTES,
@@ -142,6 +144,7 @@ from .data.addresses import (
     ROM_FRIG_KEY_GIVEITEM_OFFSETS,
     ROM_GEAR_GIVEITEM_NEUTER_VALUE,
     ROM_GEAR_GIVEITEM_OFFSETS,
+    ROM_ARENA_SECTION_51_BASES,
     ROM_LEOMONSTONE_GIVEITEM_NEUTER_VALUE,
     ROM_LEOMONSTONE_GIVEITEM_OFFSETS,
     MERIT_SHOP_DISPATCH,
@@ -702,7 +705,27 @@ def _write_recruit_trigger_redirect_tokens(
 
 
 def _write_settrigger_wrapper_tokens(patch: DigimonWorldProcedurePatch) -> None:
-    """Install the setTrigger filter wrapper for the recruit split.
+    """**DEPRECATED 2026-05-28 -- NOT CALLED BY THE ACTIVE PATCHER.**
+
+    Do NOT reason about this function as if it were live. It is not in
+    :meth:`DigimonWorldProcedurePatch.patch`'s call list and the active
+    recruit-bit strategy does not depend on a setTrigger wrapper.
+
+    The current active strategy: ``_write_recruit_trigger_redirect_tokens``
+    rewrites bytecode-level ``trigger(200+X)`` references to
+    ``trigger(720+X)`` directly via the per-Digimon offset table
+    :data:`ROM_RECRUITMENT`. No MIPS-level wrapper is installed.
+
+    Multiple debugging sessions have mistaken this function for live
+    code and gone down dead-end investigations. Treat as historical
+    reference for an earlier design attempt; safe to delete in a
+    future cleanup pass.
+
+    Original design notes follow.
+
+    ---
+
+    Install the setTrigger filter wrapper for the recruit split.
 
     Two parts:
 
@@ -822,7 +845,28 @@ def _write_chest_item_tokens(
 
 
 def _write_changemap_wrapper_tokens(patch: DigimonWorldProcedurePatch) -> None:
-    """Install the changeMap wrapper for race-free city/field bit sync.
+    """**DEPRECATED 2026-05-28 -- NOT CALLED BY THE ACTIVE PATCHER.**
+
+    Do NOT reason about this function as if it were live. It is not in
+    :meth:`DigimonWorldProcedurePatch.patch`'s call list. The active
+    recruit-bit redirect happens at bytecode patch time via
+    ``_write_recruit_trigger_redirect_tokens``; there is no AP_BITS_MIRROR
+    propagation step at screen transition time.
+
+    Multiple debugging sessions have read this function and assumed
+    AP_BITS_MIRROR (at RAM ``0x801BDFF0``) is part of the live wire-
+    up -- it is not. The arena enforcer (2026-05-28) has since
+    repurposed that RAM region for its own snapshot slot
+    (:data:`ARENA_ENFORCER_SNAPSHOT_BASE`), confirming the wrapper is
+    not in play.
+
+    Safe to delete in a future cleanup pass.
+
+    Original design notes follow.
+
+    ---
+
+    Install the changeMap wrapper for race-free city/field bit sync.
 
     Three writes:
 
@@ -911,7 +955,28 @@ def _write_field_spawn_trigger_patches(patch: DigimonWorldProcedurePatch) -> Non
 
 
 def _write_istriggerset_wrapper_tokens(patch: DigimonWorldProcedurePatch) -> None:
-    """Install the isTriggerSet wrapper that redirects recruit-bit reads.
+    """**DEPRECATED 2026-05-28 -- NOT CALLED BY THE ACTIVE PATCHER.**
+
+    Do NOT reason about this function as if it were live. It is not in
+    :meth:`DigimonWorldProcedurePatch.patch`'s call list. Compiled-C
+    callers of vanilla ``isTriggerSet`` are NOT redirected via a MIPS
+    wrapper. The active recruit-bit strategy redirects at bytecode
+    level only (``_write_recruit_trigger_redirect_tokens``), and the
+    arena edge case is handled by a client-side enforcer
+    (:meth:`DigimonWorldClient._reconcile_arena_enforcer`).
+
+    Multiple debugging sessions have walked through this function and
+    assumed ``AP_BITS_MIRROR`` (at RAM ``0x801BDFF0``) is populated and
+    read at runtime -- it is not. The mirror was a previous design
+    that did not ship.
+
+    Safe to delete in a future cleanup pass.
+
+    Original design notes follow.
+
+    ---
+
+    Install the isTriggerSet wrapper that redirects recruit-bit reads.
 
     Two writes:
 
@@ -1174,6 +1239,37 @@ def _write_rain_plant_neuter_tokens(patch: DigimonWorldProcedurePatch) -> None:
 
     for offset in ROM_RAIN_PLANT_GIVEITEM_OFFSETS:
         patch.write_token(APTokenTypes.WRITE, offset, ROM_RAIN_PLANT_GIVEITEM_NEUTER_VALUE)
+
+
+def _write_arena_cup_neuter_tokens(patch: DigimonWorldProcedurePatch) -> None:
+    """Replace each cup's vanilla prize ``giveItem`` in Script 214
+    Section_51 with ``setTrigger N`` so the 5 grade-tier cup wins
+    (Grade D/C/B/A/S) fire AP location checks.
+
+    Same shape as the key-item neuters: 4-byte in-place opcode swap,
+    idempotent. The patcher iterates over every ROM copy of Section_51
+    declared in :data:`ROM_ARENA_SECTION_51_BASES`; for each copy and
+    each of the 14 patch sites in :data:`ARENA_CUP_PATCH_SITES`, it
+    writes the cup's ``setTrigger N`` (4 bytes) over the vanilla
+    ``giveItem`` opcode at ``base + script_relative_offset``.
+
+    Grade S has 3 random prize sub-branches (Metal Part / Fatal Bone /
+    Mega Hand on ``pstat(110) ∈ {0, 1, 2}``); all 3 sub-branches'
+    giveItem sites share trigger 889 since any of them firing means
+    Grade S was won.
+
+    When :data:`ROM_ARENA_SECTION_51_BASES` is empty (the locator
+    hasn't been run yet) this function is a no-op — generation still
+    succeeds, but cup wins won't fire AP locations in-game.
+    """
+
+    for section_base in ROM_ARENA_SECTION_51_BASES:
+        for trigger_id, script_offset in ARENA_CUP_PATCH_SITES:
+            patch.write_token(
+                APTokenTypes.WRITE,
+                section_base + script_offset,
+                ARENA_CUP_NEUTER_VALUES[trigger_id],
+            )
 
 
 def _write_gear_neuter_tokens(patch: DigimonWorldProcedurePatch) -> None:
@@ -2123,6 +2219,7 @@ def write_patch(world: DigimonWorldWorld, output_directory: str) -> None:
     _write_rain_plant_neuter_tokens(patch)  # always-on; single-site giveItem -> setTrigger
     _write_blue_flute_neuter_tokens(patch)  # always-on; same shape as Mansion/Frig/Gear
     _write_leomonstone_neuter_tokens(patch)  # always-on; 7 sites across 3 ROM copies + orphan
+    _write_arena_cup_neuter_tokens(patch)  # always-on; 14 sites x N ROM copies (no-op until ROM_ARENA_SECTION_51_BASES is filled in)
     _write_merit_shop_wrapper_tokens(patch)  # always-on; engine-hook for Merit-Shop purchases
     if int(world.options.lava_cave_access.value) != 0:  # 0 = vanilla
         _write_lava_cave_gate_tokens(patch)

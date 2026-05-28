@@ -139,8 +139,14 @@ class TestChestDispatch(DigimonWorldTestBase):
             )
 
     def test_no_recruit_chest_collision(self) -> None:
+        # Arena cup locations intentionally share RAM bits: 4 AP
+        # locations gate on each cup-tier trigger so a single cup win
+        # fires 4 checks. The client polls per-location-name, so
+        # collisions within ARENA_CUP_LOCATION_RAM_BITS are fine.
         seen: dict[tuple[int, int], str] = {}
         for name, key in LOCATION_RAM_BITS.items():
+            if name.startswith("Arena Cup: "):
+                continue
             if key in seen:
                 self.fail(f"{name} collides with {seen[key]} at {key}")
             seen[key] = name
@@ -168,11 +174,12 @@ class TestChestDispatch(DigimonWorldTestBase):
         # ITEM_DESC_PTR region (contiguous with vanilla ITEM_PARA);
         # slots 144..148 live in the Cave6 ext segment via the
         # merit-scan teleport wrapper.
-        # 45 recruits (50 vanilla - 5 dropped: Airdramon, Seadramon,
-        # Nanimon, Giromon, Coelamon).
+        # 42 recruits (50 vanilla - 8 dropped: Airdramon, Seadramon,
+        # Nanimon, Giromon, Coelamon, Devimon, Megadramon, MetalGreymon).
         # 63 chests (65 - 2 Lava Cave 5/6 dropped 2026-05-24).
+        # 20 arena cup checks (5 grade tiers x 4 per tier).
         self.assertEqual(
-            len(LOCATION_RAM_BITS), 45 + 63 + 8 + 10 + 7 + 14 + 5,
+            len(LOCATION_RAM_BITS), 42 + 63 + 8 + 10 + 7 + 14 + 5 + 20,
         )
 
 
@@ -372,64 +379,33 @@ class TestItemsReceivedCounter(DigimonWorldTestBase):
 # =============================================================================
 
 
-_DW1_SIG = b"MAYO01\x00\x00\x00\x00"
-
-
 class TestValidateRom(DigimonWorldTestBase):
     options: ClassVar[dict[str, Any]] = {}
 
-    def _validate(
-        self,
-        signature: bytes | None = _DW1_SIG,
-        prosperity: bytes | None = bytes([42]),
-    ) -> bool:
-        """Drive ``validate_rom`` with arbitrary mocked read results.
-
-        ``validate_rom`` issues a single batched read for both the
-        signature and the prosperity byte; the fake returns whichever
-        bytes the test wants per slot.
-        """
-
+    def _validate_with_response(self, response: bytes | None) -> bool:
         client = DigimonWorldClient()
         ctx = _FakeClientCtx()
 
         async def fake_read(_bizhawk_ctx: Any, _requests: list[Any]) -> list[bytes]:
-            return [
-                signature if signature is not None else b"",
-                prosperity if prosperity is not None else b"",
-            ]
+            return [response if response is not None else b""]
 
         with mock.patch.object(client_module.bizhawk, "read", fake_read):
             return _run(client.validate_rom(ctx))
 
     def test_accepts_typical_save(self) -> None:
-        self.assertTrue(self._validate(prosperity=bytes([42])))
+        self.assertTrue(self._validate_with_response(bytes([42])))
 
     def test_accepts_fresh_save(self) -> None:
-        self.assertTrue(self._validate(prosperity=bytes([0])))
+        self.assertTrue(self._validate_with_response(bytes([0])))
 
     def test_accepts_max_prosperity(self) -> None:
-        self.assertTrue(self._validate(prosperity=bytes([100])))
+        self.assertTrue(self._validate_with_response(bytes([100])))
 
     def test_rejects_out_of_range(self) -> None:
-        self.assertFalse(self._validate(prosperity=bytes([200])))
+        self.assertFalse(self._validate_with_response(bytes([200])))
 
-    def test_rejects_empty_prosperity(self) -> None:
-        self.assertFalse(self._validate(prosperity=b""))
-
-    def test_rejects_missing_signature(self) -> None:
-        # Bytes at the MAP_ENTRIES offset are all zeroes — DW1 hasn't
-        # loaded a save yet, or BizHawk is on a different game.
-        self.assertFalse(self._validate(signature=b"\x00" * len(_DW1_SIG)))
-
-    def test_rejects_wrong_signature(self) -> None:
-        # Simulates connecting to a non-DW1 PSX game (e.g. SOTN), where
-        # the bytes at the MAP_ENTRIES offset hold whatever that game
-        # has in RAM. Even if the byte at RAM_PROSPERITY_POINTS happens
-        # to be in 0..100, the signature mismatch must reject the
-        # connection — otherwise our handler claims a session for the
-        # wrong game (regression guard for 2026-05-24 report).
-        self.assertFalse(self._validate(signature=b"SOTN\x00\x00\x00\x00\x00\x00"))
+    def test_rejects_empty_response(self) -> None:
+        self.assertFalse(self._validate_with_response(b""))
 
     def test_rejects_request_failure(self) -> None:
         client = DigimonWorldClient()
@@ -617,21 +593,25 @@ class TestManifestRecruitTableShape(DigimonWorldTestBase):
     options: ClassVar[dict[str, Any]] = {}
 
     def test_all_recruit_names_have_recruit_bits(self) -> None:
-        # RECRUIT_NAMES (43) is a subset of RECRUIT_RAM_BITS (50 —
+        # RECRUIT_NAMES (40) is a subset of RECRUIT_RAM_BITS (50 —
         # vanilla recruit bit-block). Excluded from RECRUIT_NAMES:
         # Agumon (force-recruited bank NPC), Digitamamon (post-game
         # optional), Airdramon (dropped 2026-05-08), Seadramon
         # (dropped 2026-05-09 — recruit cutscene IS Blue Flute
         # pickup), Nanimon (dropped 2026-05-09 — never joins city),
         # Giromon (dropped 2026-05-09 — Jukebox crashes NTSC build),
-        # Coelamon (dropped 2026-05-24 — cutscene bugged, fix deferred).
-        # See addresses.py ``_AP_RECRUIT_EXCLUDED``.
+        # Coelamon (dropped 2026-05-24 — cutscene bugged, fix deferred),
+        # Devimon / Megadramon / MetalGreymon (dropped 2026-05-27 —
+        # all three Mt. Infinity recruit bits get set post-Machinedramon,
+        # after the goal would already have fired). See addresses.py
+        # ``_AP_RECRUIT_EXCLUDED``.
         for recruit_name in RECRUIT_NAMES:
             self.assertIn(recruit_name, RECRUIT_RAM_BITS)
         self.assertEqual(len(RECRUIT_RAM_BITS), 50)
-        self.assertEqual(len(RECRUIT_NAMES), 43)
+        self.assertEqual(len(RECRUIT_NAMES), 40)
         for excluded in ("Agumon", "Digitamamon", "Airdramon",
-                         "Seadramon", "Nanimon", "Giromon", "Coelamon"):
+                         "Seadramon", "Nanimon", "Giromon", "Coelamon",
+                         "Devimon", "Megadramon", "MetalGreymon"):
             self.assertNotIn(excluded, RECRUIT_NAMES)
         self.assertIn("Greymon", RECRUIT_NAMES)
         self.assertIn("Agumon", RECRUIT_RAM_BITS)

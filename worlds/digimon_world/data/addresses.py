@@ -557,6 +557,153 @@ for _trigger_id, _expected_bit in (
         f"but constant says {_expected_bit}"
     )
 
+# ----- Arena cup-win location triggers (always on) --------------------------
+#
+# Script 214 Section_51 is the post-arena-match handler. On a cup win
+# (entry condition ``pstat(255) == 3``) it dispatches on ``pstat(3)`` to
+# one of N cup branches and hands out the vanilla prize via ``giveItem``.
+# The 5 grade-tier cups occupy ``pstat(3) ∈ {0, 1, 2, 3, 4}`` (Grade D
+# Rookie / Grade C Champion / Grade B Champion+ / Grade A Ultimate /
+# Grade S Strongest). The patcher swaps each cup's ``giveItem`` opcode
+# (primary + inventory-overflow bank-fallback copy) with ``setTrigger N``
+# at the AP-allocated trigger below; the client polls the bit and fires
+# the cup's 4 AP locations.
+#
+# Free-bit derivation: gap between Birdramon flight (880-884, bits 0-4
+# of 0x001BE03B) and Vending (890-901, starting at bit 2 of 0x001BE03C).
+# Triggers 885-889 occupy the 5-bit gap.
+#
+#   885 -> Grade D (Rookie)
+#   886 -> Grade C (Champion)
+#   887 -> Grade B (Champion+)
+#   888 -> Grade A (Ultimate)
+#   889 -> Grade S (Strongest)
+#
+# Each cup-win bit gates 4 AP locations (per-cup payout = 4 items). All
+# 4 share the same trigger and fire on the same RAM transition; AP
+# server-side dedup ignores duplicates.
+ARENA_CUP_GRADE_D_BIT: Final[tuple[int, int]] = (0x001BE03B, 5)
+ARENA_CUP_GRADE_D_TRIGGER_ID: Final = 885
+
+ARENA_CUP_GRADE_C_BIT: Final[tuple[int, int]] = (0x001BE03B, 6)
+ARENA_CUP_GRADE_C_TRIGGER_ID: Final = 886
+
+ARENA_CUP_GRADE_B_BIT: Final[tuple[int, int]] = (0x001BE03B, 7)
+ARENA_CUP_GRADE_B_TRIGGER_ID: Final = 887
+
+ARENA_CUP_GRADE_A_BIT: Final[tuple[int, int]] = (0x001BE03C, 0)
+ARENA_CUP_GRADE_A_TRIGGER_ID: Final = 888
+
+ARENA_CUP_GRADE_S_BIT: Final[tuple[int, int]] = (0x001BE03C, 1)
+ARENA_CUP_GRADE_S_TRIGGER_ID: Final = 889
+
+# Per-cup tier + RAM bit + trigger + a PP-progress proxy used by rules.py
+# to gate higher-tier cups behind progression milestones. The proxy is
+# purely an AP-logic heuristic (the in-game cups are stat- and stage-
+# gated, which AP cannot directly model) -- it correlates with how far
+# the player typically is when each tier becomes winnable.
+ARENA_CUP_TIERS: Final[tuple[tuple[str, tuple[int, int], int, int], ...]] = (
+    ("Grade D", ARENA_CUP_GRADE_D_BIT, ARENA_CUP_GRADE_D_TRIGGER_ID,  0),
+    ("Grade C", ARENA_CUP_GRADE_C_BIT, ARENA_CUP_GRADE_C_TRIGGER_ID,  0),
+    ("Grade B", ARENA_CUP_GRADE_B_BIT, ARENA_CUP_GRADE_B_TRIGGER_ID, 15),
+    ("Grade A", ARENA_CUP_GRADE_A_BIT, ARENA_CUP_GRADE_A_TRIGGER_ID, 30),
+    ("Grade S", ARENA_CUP_GRADE_S_BIT, ARENA_CUP_GRADE_S_TRIGGER_ID, 45),
+)
+
+# 4 AP locations per cup -- the user-specified per-cup payout. All 4
+# share the cup's trigger bit; the player gets 4 items on each cup win.
+ARENA_CUP_LOCATIONS_PER_TIER: Final = 4
+
+ARENA_CUP_LOCATION_RAM_BITS: Final[dict[str, tuple[int, int]]] = {
+    f"Arena Cup: {tier} {i}": bit
+    for tier, bit, _trig, _pp in ARENA_CUP_TIERS
+    for i in range(1, ARENA_CUP_LOCATIONS_PER_TIER + 1)
+}
+assert len(ARENA_CUP_LOCATION_RAM_BITS) == (
+    len(ARENA_CUP_TIERS) * ARENA_CUP_LOCATIONS_PER_TIER
+), "arena cup location/RAM bit count mismatch"
+# Sanity: every cup trigger must derive to its declared byte/bit via
+# `(0x001BDFCD + N/8, N%8)`.
+for _trigger_id, _expected_bit in (
+    (ARENA_CUP_GRADE_D_TRIGGER_ID, ARENA_CUP_GRADE_D_BIT),
+    (ARENA_CUP_GRADE_C_TRIGGER_ID, ARENA_CUP_GRADE_C_BIT),
+    (ARENA_CUP_GRADE_B_TRIGGER_ID, ARENA_CUP_GRADE_B_BIT),
+    (ARENA_CUP_GRADE_A_TRIGGER_ID, ARENA_CUP_GRADE_A_BIT),
+    (ARENA_CUP_GRADE_S_TRIGGER_ID, ARENA_CUP_GRADE_S_BIT),
+):
+    _byte = 0x001BDFCD + _trigger_id // 8
+    _bit = _trigger_id % 8
+    assert (_byte, _bit) == _expected_bit, (
+        f"arena trigger {_trigger_id} derives to ({_byte:#x}, {_bit}) "
+        f"but constant says {_expected_bit}"
+    )
+
+# ----- Arena enforcer (client-side, applied on arena lobby screens) --------
+#
+# DW1 gates higher-tier arena cups on which Digimon are in the city's
+# recruit-block (200+X range, byte 0x001BDFE6..0x001BDFED). The
+# recruit-bit redirect strategy works for City visibility but the
+# arena's cup-tier population logic reads the 200+X bytes directly
+# (likely in compiled SLUS code that no easy bytecode patch touches).
+#
+# Workaround: on arena screens (ROOM13=208, ROOM19=223), the AP client
+# enforces the 200+X bits based on how many ``Progressive Arena`` items
+# the player has received. On leaving those screens it restores the
+# bits to their pre-enforcer values. AP recruit-bit polling is skipped
+# while on arena screens (vanilla DW1 never recruits a Digimon on
+# screens 208/223, so no real recruit events can be missed).
+#
+# Tier mapping (cumulative — tier 2 also has tier 1's bits, etc.):
+#   T1: nothing extra (Grade D is always available)
+#   T2: bytes 1 and 6 of the recruit block (triggers 208..215 + 248..255)
+#   T3: every byte 0..7 (full 200..263 range)
+#
+# Per the user's live testing 2026-05-28: T2 unlocks Grade C, T3 unlocks
+# Grade B / A / S.
+ARENA_ENFORCER_SCREENS: Final[frozenset[int]] = frozenset({
+    208,  # ROOM13 — arena interior
+    223,  # ROOM19 — arena lobby (with the static Greymon / Penguinmon NPCs)
+})
+ARENA_ENFORCER_RECRUIT_BLOCK_BASE: Final = 0x001BDFE6
+ARENA_ENFORCER_RECRUIT_BLOCK_SIZE: Final = 8
+# Per-tier byte offsets (within the recruit-block) the enforcer sets to
+# 0xFF. The enforcer ORs in these bytes; it does NOT clear bits outside
+# them (the snapshot/restore on screen exit handles cleanup).
+ARENA_ENFORCER_TIER_2_BYTE_OFFSETS: Final[tuple[int, ...]] = (1, 6)
+ARENA_ENFORCER_TIER_3_BYTE_OFFSETS: Final[tuple[int, ...]] = (0, 1, 2, 3, 4, 5, 6, 7)
+
+# Persistent snapshot slot. The enforcer mutates the recruit-block while
+# the player is on an arena screen; on exit it restores the pre-mutation
+# values. If we stored the snapshot only in the Python client, two edge
+# cases would corrupt the recruit-block:
+#
+#  * Save game inside arena -> close game -> reopen -> leave arena.
+#    The save file persists the mutated recruit-block bytes; the Python
+#    snapshot is gone; restore-on-exit would re-write the *mutated*
+#    bytes back, permanently locking the bits set.
+#  * Client disconnects mid-arena, player walks out while offline,
+#    client reconnects outside the arena. Without persistence, the
+#    enforcer can't tell "we mutated bytes and the player left during
+#    disconnect" from "normal state, no mutation happened" -- the
+#    polluted bytes stay set and `_check_locations` then fires false
+#    recruit AP location checks.
+#
+# Persisting the snapshot in PSX RAM survives both:
+#  * Save files include this RAM region, so reload restores the
+#    snapshot bytes plus the magic flag.
+#  * Disconnect leaves PSX RAM untouched; reconnect sees the magic
+#    and handles the restore on the next tick.
+#
+# Located in the formerly-AP_BITS_MIRROR (deprecated, see user direction
+# 2026-05-28) region, which the active client never writes to. Magic
+# byte is the next byte (formerly RAM_PERMANENT_BEATEN_SCRATCH_BASE,
+# also declared but unused in the active client). Vanilla DW1 leaves
+# both regions untouched.
+ARENA_ENFORCER_SNAPSHOT_BASE: Final = 0x001BDFF0
+ARENA_ENFORCER_SNAPSHOT_SIZE: Final = 8     # same width as recruit-block
+ARENA_ENFORCER_MAGIC_ADDR: Final = 0x001BDFF8
+ARENA_ENFORCER_MAGIC_VALUE: Final = 0xA5    # snapshot held; clear = no snapshot
+
 # **LAVA_CAVE_ACCESS_FLAG** — trigger 145, AP-controlled. Set when the AP
 # delivers the ``Lava Cave Access`` item; read by the patched boulder
 # script (Script ID 30, Section_5, script offset 484) to decide whether
@@ -3292,6 +3439,99 @@ ROM_LEOMONSTONE_GIVEITEM_NEUTER_VALUE: Final = bytes((
     LEOMONSTONE_LOCATION_TRIGGER_ID & 0xFF,
     (LEOMONSTONE_LOCATION_TRIGGER_ID >> 8) & 0xFF,
 ))
+
+
+# =============================================================================
+# Arena cup giveItem neuter (always-on, opt-in for the moment via empty
+# Section_51 base table -- see ROM_ARENA_SECTION_51_BASES below).
+# =============================================================================
+#
+# Patch 14 ``giveItem`` call sites in Script 214 Section_51 -- 2 per
+# grade tier (primary prize delivery + inventory-full bank fallback)
+# plus 4 extras for Grade S's 3 random prize sub-branches. Each site
+# becomes ``setTrigger N`` where N is the cup's allocated trigger
+# (885..889; see ``ARENA_CUP_*_TRIGGER_ID`` near the top of this file
+# for the trigger -> tier mapping).
+#
+# Pattern matches the existing key-item neuters
+# (``_write_leomonstone_neuter_tokens`` etc.): 4-byte in-place opcode
+# swap, idempotent.
+#
+# Script-relative offsets per cup-tier come from
+# ``references/digimon_world_randomizer/script/DW1Script.txt`` (Script
+# ID 214 § Section_51, ``pstat(3) == 0..4`` dispatch chain).
+
+# (trigger_id, script_relative_offset) per patch site. The .bin offset
+# is computed at patch time as ``base + offset`` for each ROM copy in
+# :data:`ROM_ARENA_SECTION_51_BASES`.
+ARENA_CUP_PATCH_SITES: Final[tuple[tuple[int, int], ...]] = (
+    # Grade D (trigger 885, prize Double Floppy / item 7)
+    (ARENA_CUP_GRADE_D_TRIGGER_ID,  476),  # primary
+    (ARENA_CUP_GRADE_D_TRIGGER_ID,  554),  # inv-overflow bank fallback
+    # Grade C (trigger 886, prize Three Sirloins / item 40 x 3)
+    (ARENA_CUP_GRADE_C_TRIGGER_ID,  742),
+    (ARENA_CUP_GRADE_C_TRIGGER_ID,  820),
+    # Grade B (trigger 887, prize Restore Floppy / item 11)
+    (ARENA_CUP_GRADE_B_TRIGGER_ID, 1006),
+    (ARENA_CUP_GRADE_B_TRIGGER_ID, 1084),
+    # Grade A (trigger 888, prize Flaming Mane / item 80)
+    (ARENA_CUP_GRADE_A_TRIGGER_ID, 1378),
+    (ARENA_CUP_GRADE_A_TRIGGER_ID, 1456),
+    # Grade S (trigger 889, 3 random prize sub-branches). The 304-byte
+    # offset shift between FB-primary (2008) and FB-bank (2390 instead
+    # of the disassembly's 2086) reflects an extra block of bytecode
+    # present in the USA SLUS-01032 build but absent from the
+    # randomizer's reference disassembly. Verified empirically against
+    # `Digimon World (USA).bin` 2026-05-26.
+    (ARENA_CUP_GRADE_S_TRIGGER_ID, 1748),  # Metal Part primary
+    (ARENA_CUP_GRADE_S_TRIGGER_ID, 1826),  # Metal Part bank
+    (ARENA_CUP_GRADE_S_TRIGGER_ID, 2008),  # Fatal Bone primary
+    (ARENA_CUP_GRADE_S_TRIGGER_ID, 2390),  # Fatal Bone bank
+    (ARENA_CUP_GRADE_S_TRIGGER_ID, 2568),  # Mega Hand primary
+    (ARENA_CUP_GRADE_S_TRIGGER_ID, 2646),  # Mega Hand bank
+)
+assert len(ARENA_CUP_PATCH_SITES) == 14
+
+# ROM copies of Script 214's Section_51 base offset in the .bin.
+# Populate by running:
+#
+#     python -m worlds.digimon_world.tools.dw1_scan_arena_script PATH/TO/DW1.BIN
+#
+# The scanner verifies each candidate by reproducing all 14 patch sites
+# from a single base; only confirmed bases are reported. DW1 sometimes
+# carries multiple ROM copies of a single script (vending has 2 of
+# most); paste every confirmed base here.
+#
+# Section_51's .bin offset is NOT computable from the disassembly
+# anchor 0xb6800 alone -- it depends on where the script pack lands in
+# the BIN's sector layout. The scan is the canonical source of truth.
+#
+# When this tuple is empty the patcher skips arena patching (the
+# Section_51 giveItem opcodes stay vanilla and cup wins never fire AP
+# locations); ``test_arena_cup_locations`` still validates the
+# Python-side wiring.
+ROM_ARENA_SECTION_51_BASES: Final[tuple[int, ...]] = (
+    0x140A6DF8,  # SLUS-01032 USA build; verified by tools/dw1_scan_arena_script.py 2026-05-26
+)
+
+# Replacement bytecode for each cup tier: ``setTrigger N`` = 4 bytes
+# ``(0x1C, 0x00, N_low, N_high)``. Same encoding as the key-item
+# neuters above.
+ARENA_CUP_NEUTER_VALUES: Final[dict[int, bytes]] = {
+    trigger_id: bytes((
+        VENDING_OPCODE_SETTRIGGER, 0x00,
+        trigger_id & 0xFF,
+        (trigger_id >> 8) & 0xFF,
+    ))
+    for trigger_id in (
+        ARENA_CUP_GRADE_D_TRIGGER_ID,
+        ARENA_CUP_GRADE_C_TRIGGER_ID,
+        ARENA_CUP_GRADE_B_TRIGGER_ID,
+        ARENA_CUP_GRADE_A_TRIGGER_ID,
+        ARENA_CUP_GRADE_S_TRIGGER_ID,
+    )
+}
+assert all(len(v) == 4 for v in ARENA_CUP_NEUTER_VALUES.values())
 
 
 # =============================================================================

@@ -420,10 +420,41 @@ class TestChestRandomizationOff(DigimonWorldTestBase):
 # =============================================================================
 
 
-class TestArenaCupLocations(DigimonWorldTestBase):
-    """Cup-win AP locations: 20 entries (5 tiers x 4 checks)."""
+class TestArenaCupLocationsOff(DigimonWorldTestBase):
+    """Default (``arena_locations: off``) -- the 20 cup AP locations
+    must NOT exist in the multiworld."""
 
     options: ClassVar[dict[str, Any]] = {}
+
+    def test_arena_cup_locations_skipped(self) -> None:
+        from .. import locations as loc_module
+
+        for cup_name in loc_module.ARENA_CUP_NAMES:
+            with self.assertRaises(KeyError):
+                self.multiworld.get_location(cup_name, self.player)
+
+
+class TestArenaCupLocationsExcludeS(DigimonWorldTestBase):
+    """``arena_locations: exclude_s`` -- 16 cup locations (D/C/B/A only)."""
+
+    options: ClassVar[dict[str, Any]] = {"arena_locations": "exclude_s"}
+
+    def test_arena_cup_grades_d_to_a_exist(self) -> None:
+        from .. import locations as loc_module
+
+        for cup_name in loc_module.ARENA_CUP_NAMES:
+            if cup_name.startswith("Arena Cup: Grade S"):
+                with self.assertRaises(KeyError):
+                    self.multiworld.get_location(cup_name, self.player)
+            else:
+                loc = self.multiworld.get_location(cup_name, self.player)
+                self.assertIsNotNone(loc.address)
+
+
+class TestArenaCupLocations(DigimonWorldTestBase):
+    """``arena_locations: all`` -- all 20 cup AP locations present."""
+
+    options: ClassVar[dict[str, Any]] = {"arena_locations": "all"}
 
     def test_arena_cup_name_count(self) -> None:
         from .. import locations as loc_module
@@ -437,6 +468,20 @@ class TestArenaCupLocations(DigimonWorldTestBase):
             loc = self.multiworld.get_location(cup_name, self.player)
             self.assertIsNotNone(loc.address, f"{cup_name} should be id-bearing")
             self.assertEqual(loc.parent_region.name, "File City")
+
+    def test_arena_cup_gated_on_progressive_arena(self) -> None:
+        """Grade D requires 1 Progressive Arena, C requires 2, B/A/S require 3."""
+
+        for tier, required_count in [
+            ("Grade D", 1), ("Grade C", 2),
+            ("Grade B", 3), ("Grade A", 3), ("Grade S", 3),
+        ]:
+            for i in range(1, 5):
+                self.assertAccessDependency(
+                    [f"Arena Cup: {tier} {i}"],
+                    [["Progressive Arena"] * required_count],
+                    only_check_listed=True,
+                )
 
     def test_arena_cup_shares_bit_per_tier(self) -> None:
         """Each tier's 4 locations share exactly one (byte, bit) pair."""
@@ -600,8 +645,11 @@ class TestProsperityGoalLow(DigimonWorldTestBase):
     def test_unreachable_recruits_marked_excluded(self) -> None:
         from BaseClasses import LocationProgressType
 
-        for unreachable in ("Etemon", "Ninjamon", "Devimon",
-                            "Megadramon", "MetalGreymon",
+        # Devimon, Megadramon, MetalGreymon dropped from the AP recruit
+        # pool 2026-05-27 as post-game (see addresses.py
+        # ``_AP_RECRUIT_EXCLUDED``); they no longer exist as AP
+        # locations at any threshold, so they can't be EXCLUDED.
+        for unreachable in ("Etemon", "Ninjamon",
                             "Leomon", "Vademon", "SkullGreymon"):
             loc = self.multiworld.get_location(unreachable, self.player)
             self.assertEqual(

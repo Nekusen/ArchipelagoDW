@@ -87,4 +87,4 @@ class TestChestGrants(DigimonWorldTestBase):
         for grant in grants.values():
             self.assertFalse(grant.vanilla_grant)
             self.assertEqual(grant.item_byte, AP_CHEST_SENTINEL_ITEM_ID)
-        self.assertEqual(len(grants), 65)
+        self.assertEqual(len(grants), 63)

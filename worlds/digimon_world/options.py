@@ -564,6 +564,41 @@ class MeritShopLocations(Toggle):
     display_name = "Merit Shop Locations"
 
 
+class ArenaLocations(Choice):
+    """Add the 5 Battle Arena cup-tier wins as AP locations.
+
+    DW1's Battle Arena (south File City) runs 5 grade-tier tournaments
+    (Grade D / C / B / A / S). With this option, each cup win fires
+    multiple AP location checks (4 per cup). The cups themselves are
+    gated by the ``Progressive Arena`` ladder item (3 tiers):
+
+    * Grade D requires 1x Progressive Arena.
+    * Grade C requires 2x Progressive Arena.
+    * Grade B / A / S require 3x Progressive Arena.
+
+    When AP-delivered, Progressive Arena drives a client-side enforcer
+    that flips the in-game recruit-block bits the arena reads to
+    decide which cup tiers can run. The enforcer only fires while the
+    player is on an arena screen (ROOM13 / ROOM19), and recruit-bit AP
+    location detection is paused on those screens so the enforcer's
+    writes can't fire false location checks.
+
+    Values:
+
+    * ``off`` (default): no arena AP locations.
+    * ``exclude_s``: 16 AP locations (Grades D / C / B / A only). Grade S
+      requires winning the previous 4 cups in order, which is a long
+      grind some players prefer to skip.
+    * ``all``: 20 AP locations (every cup tier).
+    """
+
+    display_name = "Arena Locations"
+    option_off = 0
+    option_exclude_s = 1
+    option_all = 2
+    default = 0
+
+
 class GroundItemRandomization(DefaultOnToggle):
     """Shuffle the items that randomly spawn on field maps.
 
@@ -801,6 +836,7 @@ class DigimonWorldOptions(PerGameCommonOptions):
     recycle_shop_locations: RecycleShopLocations
     merit_shop_locations: MeritShopLocations
     fishing_locations: FishingLocations
+    arena_locations: ArenaLocations
     technique_rewards: TechniqueRewards
     god_mode: GodMode
 

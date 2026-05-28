@@ -520,15 +520,22 @@ PROGRESSIVE_BUNDLES: Final[dict[str, tuple[tuple[str, ...], ...]]] = {
         ("Vademon", "Digitamamon"),               # T3: late + post-game
     ),
     "Progressive Arena": (
-        ("Greymon",),                             # T1: creates the Arena
-        ("SkullGreymon", "Penguinmon"),           # T2
-        # T3 was meant to be Gekomon + MetalMamemon, but Gekomon's
-        # in-game recruit-bit hasn't been mapped (he joins the Arena
-        # only, not the city, so RECRUIT_RAM_BITS doesn't have him
-        # yet). For now T3 = MetalMamemon alone; revisit when Arena
-        # has AP locations behind it. TODO(2026-05-09): add Gekomon.
-        ("MetalMamemon",),                        # T3
-        ("Megadramon", "MetalGreymon"),           # T4: late-game arena
+        # 3-tier ladder. Per the user's live testing 2026-05-28, the
+        # arena cup-tier visibility responds to specific 200+X recruit-
+        # block bits, which the client-side arena enforcer
+        # (see :data:`worlds.digimon_world.data.addresses.ARENA_ENFORCER_*`)
+        # sets while the player is on an arena screen. The Digimon listed
+        # per tier still ship their normal recruit-bit (720+X) delivery
+        # so they appear as File City NPCs as before; the new role is
+        # gating the cup-tier AP locations and driving the enforcer.
+        #
+        # AP location gating in rules.py:
+        #   Grade D AP locations -> Has("Progressive Arena", 1)
+        #   Grade C AP locations -> Has("Progressive Arena", 2)
+        #   Grade B/A/S AP locs  -> Has("Progressive Arena", 3)
+        ("Greymon",),                                                  # T1: creates the Arena -> Grade D
+        ("SkullGreymon", "Penguinmon"),                                # T2: Champion contestants -> Grade C
+        ("MetalMamemon", "Megadramon", "MetalGreymon"),                # T3: Ultimates -> Grade B/A/S
     ),
     "Progressive Green Gym": (
         ("Kabuterimon",),                         # T1

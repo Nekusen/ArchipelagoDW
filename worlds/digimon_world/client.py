@@ -90,6 +90,16 @@ from .data.addresses import (
     ITEM_PARA_MERIT_VALUE_OFFSET,
     FAST_DRIMOGEMON_TUNNEL_STATE_TARGET,
     KEYCHAIN_INVENTORY_PER_ITEM,
+    ARENA_CUP_LOCATION_RAM_BITS,
+    ARENA_ENFORCER_MAGIC_ADDR,
+    ARENA_ENFORCER_MAGIC_VALUE,
+    ARENA_ENFORCER_RECRUIT_BLOCK_BASE,
+    ARENA_ENFORCER_RECRUIT_BLOCK_SIZE,
+    ARENA_ENFORCER_SCREENS,
+    ARENA_ENFORCER_SNAPSHOT_BASE,
+    ARENA_ENFORCER_SNAPSHOT_SIZE,
+    ARENA_ENFORCER_TIER_2_BYTE_OFFSETS,
+    ARENA_ENFORCER_TIER_3_BYTE_OFFSETS,
     KEYCHAIN_MAX_COPIES,
     KEYITEM_DELIVERY_RAM_BITS,
     KEYITEM_LOCATION_RAM_BITS,
@@ -185,35 +195,21 @@ logger = logging.getLogger("Client")
 
 DOMAIN_MAIN_RAM = "MainRAM"
 
-# Plausible-range bound for RAM_PROSPERITY_POINTS used as a secondary
-# sanity check in validate_rom. DW1's prosperity counter saturates at
-# 100 in normal play; an uninitialized save slot reads 0; anything >
-# 100 means we are not on a running DW1.
+# Plausible-range bound for RAM_PROSPERITY_POINTS used by validate_rom.
+# DW1's prosperity counter saturates at 100 in normal play; an
+# uninitialized save slot reads 0; anything > 100 means we are not
+# looking at a running DW1 (almost certainly a different game).
+#
+# Note (2026-05-27): a stricter MAP_ENTRIES signature check was added
+# 2026-05-24 to stop the DW1 handler from falsely claiming non-DW1 PSX
+# sessions (e.g. SOTN), but it broke the "Open Patch" auto-launch flow:
+# during the BIOS splash MainRAM is zeroed, the signature mismatches,
+# the handler refuses to claim, and the AP server connection hangs in
+# "waiting forever" state without ever auto-recovering. The strict
+# check has been reverted; the SOTN false-claim regression is
+# temporarily accepted until a clean per-seed hash check can be
+# plumbed through from the patcher.
 _PROSPERITY_VALIDATION_CEILING = 100
-
-# DW1-specific ROM signature used by validate_rom to distinguish a
-# running DW1 from other PSX games on Nymashock.
-#
-# The vanilla DW1 USA build populates ``MAP_ENTRIES[255]`` at
-# RAM ``0x801292D4`` (MainRAM offset ``0x001292D4``) with 10-byte
-# null-padded ASCII filenames (see the ``SCREEN_FILENAMES`` comment in
-# ``data/addresses.py``). The first entry is screen 0 = ``MAYO01``
-# (Native Forest first room), which gives us a 6-character ASCII
-# signature followed by 4 null bytes. The 10-byte sequence is unique
-# enough that no other PSX game would coincidentally have it at the
-# same RAM offset.
-#
-# Until the player has loaded a DW1 save, this region is zeroed, so
-# validate_rom correctly reports "not DW1" while BizHawk is on the
-# BIOS / title screen / a different game.
-#
-# Without this check, the old validate_rom only required the byte at
-# RAM_PROSPERITY_POINTS to be in 0..100, which any PSX RAM at that
-# offset trivially satisfies — and the DW1 handler would mistakenly
-# claim a BizHawk session connected to, e.g., SOTN, blocking that
-# game's own client from connecting (reported 2026-05-24).
-_DW1_SIGNATURE_ADDR: int = 0x001292D4
-_DW1_SIGNATURE_BYTES: bytes = b"MAYO01\x00\x00\x00\x00"
 
 
 # =============================================================================
@@ -376,6 +372,23 @@ _DROPPED_RECRUITS_BLACKLIST: frozenset[str] = frozenset({
     # Coelamon dropped 2026-05-24: recruit cutscene bugged in the
     # current build, fix deferred. No AP location.
     "Coelamon",
+    # 2026-05-27 — All three Mt. Infinity recruits dropped as post-game
+    # AP locations. Their recruit bits get set as part of the post-
+    # Machinedramon state machine, after the goal would have already
+    # fired under the default ``machinedramon`` goal. Per user's full-
+    # run test (seed AP_48937026802597073788): Megadramon + MetalGreymon
+    # co-fired with the SkullGreymon / Penguinmon / Greymon / MetalMamemon
+    # batch at 16:00:34, and Devimon fired in the larger catchup batch
+    # at 16:05:31 (38 items in one second — clearly post-Machinedramon
+    # state sync). Entries stay in :data:`RECRUIT_RAM_BITS` and the
+    # AP-item delivery pool (PROGRESSIVE_BUNDLES — Devimon in
+    # Progressive Secret Shop T2, Megadramon + MetalGreymon in
+    # Progressive Arena T3); only the AP locations are removed. If a
+    # post-game goal mode is added later, remove the three names below
+    # to re-enable polling.
+    "Devimon",
+    "Megadramon",
+    "MetalGreymon",
 })
 LOCATION_RAM_BITS: dict[str, tuple[int, int]] = {
     **DWAP_CHEST_RAM_BITS,
@@ -386,6 +399,7 @@ LOCATION_RAM_BITS: dict[str, tuple[int, int]] = {
     **RECYCLE_SHOP_LOCATION_RAM_BITS,
     **MERIT_SHOP_LOCATION_RAM_BITS,
     **NANIMON_QUEST_LOCATION_RAM_BITS,
+    **ARENA_CUP_LOCATION_RAM_BITS,
 }
 
 # Threshold-based detection (e.g. NPC-gift PP gates) is unused in v7 —
@@ -892,44 +906,53 @@ class DigimonWorldClient(BizHawkClient):
         # silently, so any fish already in inventory at connect time
         # does NOT fire the location.
         self._last_fish_counts: dict[int, int] | None = None
+        # Arena enforcer activity flag. The actual recruit-block
+        # snapshot lives in PSX RAM at
+        # :data:`ARENA_ENFORCER_SNAPSHOT_BASE` (gated by the magic byte
+        # at :data:`ARENA_ENFORCER_MAGIC_ADDR`) so it survives save+
+        # reload and client disconnects. This in-memory flag is just a
+        # derived "are we currently mutating the recruit-block?"
+        # signal: set True when the enforcer is actively running this
+        # tick, used by :meth:`_check_locations` to suppress recruit-
+        # bit AP location polling. Computed fresh in
+        # :meth:`_reconcile_arena_enforcer` each tick.
+        self._arena_active: bool = False
     # ------------------------------------------------------------------
     # validate_rom
     # ------------------------------------------------------------------
 
     async def validate_rom(self, ctx: BizHawkClientContext) -> bool:
-        """Accept the connection if BizHawk is on a running DW1 save.
+        """Accept the connection if BizHawk is on a plausible DW1 save.
 
-        Primary check: read 10 bytes at :data:`_DW1_SIGNATURE_ADDR`
-        and require them to equal :data:`_DW1_SIGNATURE_BYTES`
-        (``MAYO01`` padded with nulls — the first entry of DW1's
-        ``MAP_ENTRIES`` table). This signature is effectively unique
-        to a loaded DW1 save and rules out other PSX games sharing
-        the ``MainRAM`` domain (reported 2026-05-24: a friend running
-        SOTN saw the DW1 handler falsely claim their session because
-        the old validate_rom only checked a generic byte range).
+        v1 sanity check: read one byte at ``RAM_PROSPERITY_POINTS`` and
+        require it to be in 0..100. The PSX BIOS leaves this address
+        untouched, so a failed read or an out-of-range value usually
+        means we are not looking at a running PSX game (or are looking
+        at the wrong PSX game). The user is responsible for loading
+        the seed-matched ROM — that check is Phase 4 v2.
 
-        Secondary check: read one byte at ``RAM_PROSPERITY_POINTS``
-        and require it to be in 0..100. Cheap redundancy on top of
-        the signature.
+        Note (2026-05-27): a stricter MAP_ENTRIES signature check was
+        added 2026-05-24 to fix the SOTN false-claim bug but broke the
+        "Open Patch" auto-launch flow (during BIOS splash the signature
+        mismatched, the handler refused to claim, the AP server
+        connection hung indefinitely without ever auto-recovering).
+        The strict check has been reverted; the SOTN false-claim
+        regression is temporarily accepted until a per-seed hash check
+        (BizHawk's ``get_hash()`` compared against a hash embedded in
+        the ``.apdw1`` metadata) can be plumbed through.
         """
 
         try:
-            blocks = await bizhawk.read(
+            data = (await bizhawk.read(
                 ctx.bizhawk_ctx,
-                [
-                    (_DW1_SIGNATURE_ADDR, len(_DW1_SIGNATURE_BYTES), DOMAIN_MAIN_RAM),
-                    (RAM_PROSPERITY_POINTS, 1, DOMAIN_MAIN_RAM),
-                ],
-            )
+                [(RAM_PROSPERITY_POINTS, 1, DOMAIN_MAIN_RAM)],
+            ))[0]
         except bizhawk.RequestFailedError:
             return False
 
-        if len(blocks) != 2:
+        if not data:
             return False
-        signature, prosperity = blocks
-        if bytes(signature) != _DW1_SIGNATURE_BYTES:
-            return False
-        if not prosperity or prosperity[0] > _PROSPERITY_VALIDATION_CEILING:
+        if data[0] > _PROSPERITY_VALIDATION_CEILING:
             return False
 
         ctx.game = self.game
@@ -1007,6 +1030,11 @@ class DigimonWorldClient(BizHawkClient):
             )
 
         try:
+            # Run the arena enforcer FIRST -- it snapshots/restores
+            # recruit-block bytes and toggles the
+            # ``_arena_recruit_snapshot`` flag that ``_check_locations``
+            # reads to decide whether to suppress recruit-bit polling.
+            await self._reconcile_arena_enforcer(ctx)
             await self._check_locations(ctx)
             await self._deliver_items(ctx)
             await self._reconcile_recruits(ctx)
@@ -1497,6 +1525,142 @@ class DigimonWorldClient(BizHawkClient):
         if writes:
             await bizhawk.write(ctx.bizhawk_ctx, writes)
 
+    async def _reconcile_arena_enforcer(self, ctx: BizHawkClientContext) -> None:
+        """Drive arena cup-tier visibility from the ``Progressive Arena``
+        ladder count by writing recruit-block bits on arena screens.
+
+        DW1's arena reads the 200+X recruit-block bits directly (via a
+        code path the bytecode-redirect strategy doesn't cover) to
+        decide which cup tiers to populate. Per the user's live testing
+        2026-05-28:
+
+        * T2 (>= 2 Progressive Arena items): set bytes 1 + 6 of the
+          recruit-block to 0xFF -> Grade C becomes available in-game.
+        * T3 (>= 3 Progressive Arena items): set all 8 bytes -> Grade
+          B / A / S become available (the in-game ladder requires
+          winning the prior tier first, which DW1 enforces itself).
+
+        Persistence: the snapshot lives in PSX RAM at
+        :data:`ARENA_ENFORCER_SNAPSHOT_BASE` and is gated by a magic
+        byte at :data:`ARENA_ENFORCER_MAGIC_ADDR`. Save-quit-reload
+        and client disconnects both survive correctly: PSX RAM is part
+        of the save file and is untouched by disconnect, so the
+        snapshot bytes and magic flag are still there on resume. The
+        state machine driven by (on_arena, magic_set):
+
+        * on_arena, magic clear: just entered. Snapshot current
+          recruit-block, set magic, then apply enforcer.
+        * on_arena, magic set: already inside. Apply enforcer
+          (idempotent).
+        * NOT on_arena, magic set: just left (or reconnected after
+          walking out while disconnected). Restore from snapshot,
+          clear magic.
+        * NOT on_arena, magic clear: normal state, do nothing.
+
+        ``self._arena_active`` is set True whenever the enforcer is
+        actively writing this tick, so :meth:`_check_locations` can
+        suppress recruit-bit AP location polling and prevent the
+        enforcer's writes from firing false location checks.
+        """
+
+        # Batched read: screen + magic byte + recruit block (8) +
+        # snapshot block (8). One round-trip per tick.
+        try:
+            blocks = await bizhawk.read(
+                ctx.bizhawk_ctx,
+                [
+                    (CURRENT_SCREEN_ADDR, 1, DOMAIN_MAIN_RAM),
+                    (ARENA_ENFORCER_MAGIC_ADDR, 1, DOMAIN_MAIN_RAM),
+                    (ARENA_ENFORCER_RECRUIT_BLOCK_BASE,
+                     ARENA_ENFORCER_RECRUIT_BLOCK_SIZE, DOMAIN_MAIN_RAM),
+                    (ARENA_ENFORCER_SNAPSHOT_BASE,
+                     ARENA_ENFORCER_SNAPSHOT_SIZE, DOMAIN_MAIN_RAM),
+                ],
+            )
+        except bizhawk.RequestFailedError:
+            return
+        if (len(blocks) != 4
+                or len(blocks[0]) != 1
+                or len(blocks[1]) != 1
+                or len(blocks[2]) != ARENA_ENFORCER_RECRUIT_BLOCK_SIZE
+                or len(blocks[3]) != ARENA_ENFORCER_SNAPSHOT_SIZE):
+            return
+        screen_id = blocks[0][0]
+        magic = blocks[1][0]
+        recruit_block = blocks[2]
+        snapshot_block = blocks[3]
+        on_arena = screen_id in ARENA_ENFORCER_SCREENS
+        snapshot_held = (magic == ARENA_ENFORCER_MAGIC_VALUE)
+
+        if not on_arena:
+            self._arena_active = False
+            if not snapshot_held:
+                return   # normal state, nothing to do
+            # Just left (or reconnected outside arena after a mid-arena
+            # disconnect). Restore the recruit-block from the snapshot
+            # and clear the magic byte.
+            writes: list[RamWrite] = []
+            for i in range(ARENA_ENFORCER_RECRUIT_BLOCK_SIZE):
+                if recruit_block[i] != snapshot_block[i]:
+                    writes.append((
+                        ARENA_ENFORCER_RECRUIT_BLOCK_BASE + i,
+                        [snapshot_block[i]],
+                        DOMAIN_MAIN_RAM,
+                    ))
+            writes.append((ARENA_ENFORCER_MAGIC_ADDR, [0x00], DOMAIN_MAIN_RAM))
+            await bizhawk.write(ctx.bizhawk_ctx, writes)
+            return
+
+        # On an arena screen. Compute which byte offsets the enforcer
+        # should be holding at 0xFF for the current Progressive Arena
+        # tier.
+        progressive_arena_count = 0
+        for item in ctx.items_received:
+            item_name = ctx.item_names.lookup_in_game(item.item, ctx.game)
+            if item_name == "Progressive Arena":
+                progressive_arena_count += 1
+        if progressive_arena_count >= 3:
+            bytes_to_set: tuple[int, ...] = ARENA_ENFORCER_TIER_3_BYTE_OFFSETS
+        elif progressive_arena_count >= 2:
+            bytes_to_set = ARENA_ENFORCER_TIER_2_BYTE_OFFSETS
+        else:
+            bytes_to_set = ()
+
+        # Mark the enforcer active so _check_locations suppresses
+        # recruit-bit polling for this tick. We do this even when
+        # bytes_to_set is empty (T1) -- the player is on an arena
+        # screen and vanilla DW1 never fires a recruit cutscene here,
+        # so any recruit-bit transition during the tick is suspect.
+        self._arena_active = True
+
+        writes = []
+        if not snapshot_held:
+            # First tick inside arena. Snapshot the current recruit-
+            # block bytes and set the magic flag.
+            for i in range(ARENA_ENFORCER_RECRUIT_BLOCK_SIZE):
+                writes.append((
+                    ARENA_ENFORCER_SNAPSHOT_BASE + i,
+                    [recruit_block[i]],
+                    DOMAIN_MAIN_RAM,
+                ))
+            writes.append((
+                ARENA_ENFORCER_MAGIC_ADDR,
+                [ARENA_ENFORCER_MAGIC_VALUE],
+                DOMAIN_MAIN_RAM,
+            ))
+
+        # Apply enforcer writes (idempotent: only write bytes that
+        # aren't already 0xFF).
+        for off in bytes_to_set:
+            if recruit_block[off] != 0xFF:
+                writes.append((
+                    ARENA_ENFORCER_RECRUIT_BLOCK_BASE + off,
+                    [0xFF],
+                    DOMAIN_MAIN_RAM,
+                ))
+        if writes:
+            await bizhawk.write(ctx.bizhawk_ctx, writes)
+
     async def _enforce_agumon_recruited(self, ctx: BizHawkClientContext) -> None:
         """Pin Agumon's recruit-completion bit on every tick.
 
@@ -1927,7 +2091,24 @@ class DigimonWorldClient(BizHawkClient):
         assert self._location_name_to_id is not None
         new_checks: list[int] = []
 
+        # While the arena enforcer is active (player on arena screen),
+        # skip recruit-bit location polling. The enforcer is OR-ing
+        # bits into the recruit-block (200+X range) to make the in-game
+        # arena populate higher cup tiers, which would otherwise be
+        # read here as "Digimon X just got recruited" -> false location
+        # fire. Vanilla DW1 never recruits a Digimon on screens 208/223,
+        # so we can't miss any real recruit event during the pause.
+        # ``self._arena_active`` is set fresh by
+        # :meth:`_reconcile_arena_enforcer` on every tick (driven by
+        # the in-RAM magic byte) so save+reload and reconnect both
+        # observe the correct state.
+        recruit_names = (
+            set(RECRUIT_RAM_BITS) if self._arena_active else set()
+        )
+
         for location_name, (offset, bit_index) in LOCATION_RAM_BITS.items():
+            if location_name in recruit_names:
+                continue
             location_id = self._location_name_to_id.get(location_name)
             if location_id is None or location_id in ctx.locations_checked:
                 continue
