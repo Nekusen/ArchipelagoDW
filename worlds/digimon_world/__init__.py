@@ -7,18 +7,16 @@ Importing this module:
 * registers :class:`worlds.digimon_world.rom.DigimonWorldPatchExtension`
   with :class:`AutoPatchExtensionRegister`, plus declares
   ``.apdw1`` as the patch file ending;
-* registers :class:`worlds.digimon_world.client.DigimonWorldClient` with
-  :class:`worlds._bizhawk.client.AutoBizHawkClientRegister`, which also
-  appends ``.apdw1`` to the in-tree BizHawk Client component's
-  :class:`SuffixIdentifier`. The Launcher therefore opens any
-  ``.apdw1`` via the BizHawk Client component automatically; the world
-  package does **not** register a separate Component.
+* registers two Launcher Components for ``.apdw1`` via
+  :mod:`.launcher` — the unified DW1 client (auto-detects BizHawk or
+  Duckstation) and a "Patch ROM only" button for users who want a
+  randomised ISO without starting the multiworld client.
 
 See :mod:`.world` for the actual class and :doc:`/PLAN.md` for the
 phased plan. The address manifest at :mod:`.data.addresses` is consumed
 by :mod:`.rom` (Phase 3) and :mod:`.client` (Phase 4).
 """
 
-from . import client as client
+from . import launcher as launcher  # noqa: F401 — Component registration side-effect
 from . import rom as rom
 from .world import DigimonWorldWorld as DigimonWorldWorld

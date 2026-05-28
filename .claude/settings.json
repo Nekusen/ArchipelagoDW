@@ -101,7 +101,12 @@
       "Bash(python -m pytest \"worlds/digimon_world/test/test_stub_logic.py::TestRegionLockingAll::test_fill\" --tb=short)",
       "Bash(grep -v '\\\\.apdw1$')",
       "Bash(grep '\\\\.apdw1$')",
-      "Bash(rm AP_*.apdw1 && ls AP_*.apdw1 2>&1 | head -3)"
+      "Bash(rm AP_*.apdw1 && ls AP_*.apdw1 2>&1 | head -3)",
+      "Bash(python -m pytest worlds/digimon_world/test/ -q --tb=short)",
+      "Bash(python -m pytest test/general/ -q --tb=short -x)",
+      "Bash(gh search *)",
+      "WebFetch(domain:api.github.com)",
+      "WebFetch(domain:repo.retrodeck.net)"
     ],
     "additionalDirectories": [
       "\\tmp",

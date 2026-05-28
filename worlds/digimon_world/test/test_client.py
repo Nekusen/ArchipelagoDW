@@ -28,8 +28,6 @@ import asyncio
 from typing import Any, ClassVar
 from unittest import mock
 
-from worlds._bizhawk.client import AutoBizHawkClientRegister
-
 from .. import client as client_module
 from ..client import (
     DOMAIN_MAIN_RAM,
@@ -55,12 +53,17 @@ def _run(coro: Any) -> Any:
 
 
 class _FakeClientCtx:
-    """Stand-in for :class:`BizHawkClientContext`. Only the fields the
-    client actually touches are present."""
+    """Stand-in for :class:`DigimonWorldClientContext`. Only the fields
+    the client actually touches are present."""
 
     def __init__(self, *, server: Any = None, slot: int | None = 1,
                  finished_game: bool = False) -> None:
-        self.bizhawk_ctx = object()  # opaque — passed to mocked bizhawk.read/write
+        # ``bizhawk_ctx`` is the legacy compat alias for ``ctx.emu``
+        # (the active :class:`EmulatorAdapter`). Tests mock
+        # ``client_module.bizhawk.read``/``write``, so this object is
+        # opaque — never dereferenced.
+        self.bizhawk_ctx = object()
+        self.emu = self.bizhawk_ctx
         self.server = server if server is not None else object()
         self.slot = slot
         self.game: str = "Digimon World"
@@ -88,14 +91,17 @@ class TestClientRegistration(DigimonWorldTestBase):
         self.assertEqual(DigimonWorldClient.system, "PSX")
         self.assertEqual(DigimonWorldClient.patch_suffix, ".apdw1")
 
-    def test_client_registers_with_metaclass(self) -> None:
-        psx_handlers = AutoBizHawkClientRegister.game_handlers.get(("PSX",), {})
-        self.assertIn("Digimon World", psx_handlers)
-        self.assertIsInstance(psx_handlers["Digimon World"], DigimonWorldClient)
+    def test_apdw1_suffix_registered_with_unified_component(self) -> None:
+        """``.apdw1`` is now claimed by our own unified-client
+        component (registered in :mod:`worlds.digimon_world.launcher`),
+        not by ``worlds._bizhawk``'s :class:`SuffixIdentifier`. The
+        unified client auto-detects whichever emulator the user has
+        running (BizHawk via Lua connector, Duckstation via PINE)."""
 
-    def test_apdw1_suffix_is_in_bizhawk_component(self) -> None:
-        from worlds._bizhawk.client import component as bizhawk_component
-        self.assertIn(".apdw1", bizhawk_component.file_identifier.suffixes)
+        from worlds.LauncherComponents import SuffixIdentifier
+        from ..launcher import unified_client_component
+        self.assertIsInstance(unified_client_component.file_identifier, SuffixIdentifier)
+        self.assertIn(".apdw1", unified_client_component.file_identifier.suffixes)
 
 
 # =============================================================================

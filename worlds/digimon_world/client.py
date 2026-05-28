@@ -1,11 +1,18 @@
-"""Phase 4 v1 BizHawk client for the Digimon World 1 APWorld.
+"""Phase 4 v3 unified client for the Digimon World 1 APWorld.
 
-Architecture (locked Phase 0): BizHawk + Nymashock + APProcedurePatch +
-the **generic** Lua connector (``data/lua/connector_bizhawk_generic.lua``).
-This client subclasses :class:`worlds._bizhawk.client.BizHawkClient` so
-the in-tree BizHawk framework (auto-Lua injection, JSON-RPC transport,
-``MainRAM``-domain reads) does the heavy lifting. We just supply
-DW1-specific validation, polling, and write semantics.
+Architecture: APProcedurePatch ROMs (same patcher path) + an
+:class:`EmulatorAdapter` transport layer that auto-detects whichever
+emulator is up — currently BizHawk (Lua connector) and Duckstation
+(PINE IPC). The watcher loop and game logic in this file are
+emulator-agnostic; the transport sits on ``ctx.emu``.
+
+Source compatibility: this module historically called
+``await bizhawk.read(ctx.bizhawk_ctx, reads)`` everywhere. To keep the
+diff small, ``bizhawk`` is now a local shim that forwards through the
+active adapter — ``ctx.bizhawk_ctx`` is aliased to the
+:class:`EmulatorAdapter` by :class:`DigimonWorldClientContext`. New
+code should call ``ctx.emu.read(...)`` / ``ctx.emu.write(...)``
+directly; old code that still uses the legacy shape keeps working.
 
 What v1 of this client actually does
 ====================================
@@ -61,9 +68,9 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, ClassVar, NamedTuple
 
-import worlds._bizhawk as bizhawk
 from NetUtils import ClientStatus
-from worlds._bizhawk.client import BizHawkClient
+
+from . import adapters as _adapters
 
 from .data.addresses import (
     AGUMON_RECRUIT_BIT,
@@ -173,16 +180,54 @@ _REGION_ACCESS_ITEM_NAMES: frozenset[str] = frozenset(
 )
 
 if TYPE_CHECKING:
-    from worlds._bizhawk.context import BizHawkClientContext
+    from .context import DigimonWorldClientContext
 
 # Type for a single RAM write — what bizhawk.write expects.
 RamWrite = tuple[int, list[int], str]
 # An item delivery route reads RAM (to compute additive deltas) and
 # returns a list of writes to apply. Async because reads are async.
-ItemDeliverer = Callable[["BizHawkClientContext"], Awaitable[list[RamWrite]]]
+ItemDeliverer = Callable[["DigimonWorldClientContext"], Awaitable[list[RamWrite]]]
 
 
 logger = logging.getLogger("Client")
+
+
+# =============================================================================
+# bizhawk-compat shim
+# =============================================================================
+# Legacy call sites in this module use the BizHawk transport shape:
+#
+#     await bizhawk.read(ctx.bizhawk_ctx, reads)
+#     await bizhawk.write(ctx.bizhawk_ctx, writes)
+#
+# Now that the transport is pluggable, ``ctx.bizhawk_ctx`` is just an
+# alias for the active :class:`EmulatorAdapter` (set by
+# :class:`DigimonWorldClientContext`). The shim forwards the legacy
+# call shape onto the adapter's own ``read``/``write`` methods, and
+# re-exports the exception types that callers ``except`` on. Tests
+# import ``bizhawk`` from this module (``client_module.bizhawk``) for
+# patching — keep the public attribute name to preserve that contract.
+
+
+class _BizHawkCompat:
+    """Source-compat shim: routes the legacy ``bizhawk.read``/``write``
+    shape onto whichever :class:`EmulatorAdapter` is currently bound to
+    ``ctx.bizhawk_ctx``.
+    """
+
+    RequestFailedError = _adapters.RequestFailedError
+    NotConnectedError = _adapters.NotConnectedError
+
+    @staticmethod
+    async def read(adapter: _adapters.EmulatorAdapter, reads):  # type: ignore[no-untyped-def]
+        return await adapter.read(reads)
+
+    @staticmethod
+    async def write(adapter: _adapters.EmulatorAdapter, writes):  # type: ignore[no-untyped-def]
+        await adapter.write(writes)
+
+
+bizhawk = _BizHawkCompat()
 
 
 # =============================================================================
@@ -464,7 +509,7 @@ def _make_prosperity_deliverer() -> ItemDeliverer:
     cannot leak through. The deliverer just bumps the target value.
     """
 
-    async def deliver(ctx: BizHawkClientContext) -> list[RamWrite]:
+    async def deliver(ctx: DigimonWorldClientContext) -> list[RamWrite]:
         current = (await bizhawk.read(
             ctx.bizhawk_ctx, [(RAM_PROSPERITY_POINTS, 1, DOMAIN_MAIN_RAM)],
         ))[0]
@@ -500,7 +545,7 @@ def _make_recruit_deliverer(digimon_id: int) -> ItemDeliverer:
     )
     if row is None:
         # Defensive: should not happen for a well-formed recruit table.
-        async def deliver_noop(_ctx: BizHawkClientContext) -> list[RamWrite]:
+        async def deliver_noop(_ctx: DigimonWorldClientContext) -> list[RamWrite]:
             return []
         return deliver_noop
 
@@ -508,7 +553,7 @@ def _make_recruit_deliverer(digimon_id: int) -> ItemDeliverer:
     bit_index = row.beaten_bit
     bit_mask = 1 << bit_index
 
-    async def deliver(ctx: BizHawkClientContext) -> list[RamWrite]:
+    async def deliver(ctx: DigimonWorldClientContext) -> list[RamWrite]:
         current = (await bizhawk.read(
             ctx.bizhawk_ctx, [(byte_addr, 1, DOMAIN_MAIN_RAM)],
         ))[0]
@@ -534,7 +579,7 @@ def _make_keyitem_bit_deliverer(byte_addr: int, bit_index: int) -> ItemDeliverer
 
     bit_mask = 1 << bit_index
 
-    async def deliver(ctx: BizHawkClientContext) -> list[RamWrite]:
+    async def deliver(ctx: DigimonWorldClientContext) -> list[RamWrite]:
         current = (await bizhawk.read(
             ctx.bizhawk_ctx, [(byte_addr, 1, DOMAIN_MAIN_RAM)],
         ))[0]
@@ -566,7 +611,7 @@ def _make_technique_bit_deliverer(slot: int) -> ItemDeliverer:
     byte_addr, bit_index = tech_mastery_bit(slot)
     bit_mask = 1 << bit_index
 
-    async def deliver(ctx: BizHawkClientContext) -> list[RamWrite]:
+    async def deliver(ctx: DigimonWorldClientContext) -> list[RamWrite]:
         current = (await bizhawk.read(
             ctx.bizhawk_ctx, [(byte_addr, 1, DOMAIN_MAIN_RAM)],
         ))[0]
@@ -594,7 +639,7 @@ def _make_bank_deliverer(dw_code: int) -> ItemDeliverer:
         )
     address = RAM_ITEM_BANK_BASE + slot
 
-    async def deliver(ctx: BizHawkClientContext) -> list[RamWrite]:
+    async def deliver(ctx: DigimonWorldClientContext) -> list[RamWrite]:
         current = (await bizhawk.read(
             ctx.bizhawk_ctx, [(address, 1, DOMAIN_MAIN_RAM)],
         ))[0]
@@ -623,7 +668,7 @@ def _make_progressive_bundle_deliverer() -> ItemDeliverer:
     counter advance happens unconditionally in ``_deliver_items``.
     """
 
-    async def deliver(_ctx: BizHawkClientContext) -> list[RamWrite]:
+    async def deliver(_ctx: DigimonWorldClientContext) -> list[RamWrite]:
         return []
 
     return deliver
@@ -633,7 +678,7 @@ def _make_money_deliverer(amount: int) -> ItemDeliverer:
     """Return an :class:`ItemDeliverer` that adds ``amount`` to the
     bits counter (capped at :data:`_MONEY_CAP`)."""
 
-    async def deliver(ctx: BizHawkClientContext) -> list[RamWrite]:
+    async def deliver(ctx: DigimonWorldClientContext) -> list[RamWrite]:
         current = (await bizhawk.read(
             ctx.bizhawk_ctx, [(RAM_CURRENT_BITS, 4, DOMAIN_MAIN_RAM)],
         ))[0]
@@ -831,19 +876,39 @@ ITEMS_RECEIVED_COUNTER: tuple[int, int] | None = (
 # =============================================================================
 
 
-class DigimonWorldClient(BizHawkClient):
-    """v1 BizHawk client for Digimon World 1.
+class DigimonWorldClient:
+    """Unified DW1 client (BizHawk + Duckstation auto-detect).
+
+    No longer inherits from ``worlds._bizhawk.client.BizHawkClient``;
+    the unified watcher loop in :mod:`.context` instantiates exactly
+    one of these per session and calls ``validate_rom``/``game_watcher``
+    directly. The ``game`` / ``system`` / ``patch_suffix`` class
+    attributes are kept for identity/documentation and are still
+    asserted on by the test suite.
 
     Frame-rate impact: each ``game_watcher`` iteration does a single
     small MainRAM read (1 byte for ``validate_rom`` + 1 byte for goal
-    check, plus per-location reads when those tables fill in). On a
-    typical BizHawk install with the generic Lua connector this is well
-    inside the 60 fps budget.
+    check, plus per-location reads when those tables fill in).
     """
 
     game: ClassVar[str] = "Digimon World"
     system: ClassVar[str] = "PSX"
     patch_suffix: ClassVar[str] = ".apdw1"
+
+    # ------------------------------------------------------------------
+    # Default hooks (used to be inherited from BizHawkClient)
+    # ------------------------------------------------------------------
+
+    async def set_auth(self, ctx: "DigimonWorldClientContext") -> None:
+        """Optional hook to pre-fill ``ctx.auth`` before the
+        ``Connected`` packet. The default leaves it unset so the user
+        is prompted for slot name (Phase 4 v2 will read slot name from
+        a patcher-written RAM region)."""
+
+    def on_package(self, ctx: "DigimonWorldClientContext", cmd: str, args: dict) -> None:
+        """Optional hook for inbound server packets. v1 doesn't need
+        any per-packet handling beyond what
+        :meth:`DigimonWorldClientContext.on_package` already does."""
 
     def __init__(self) -> None:
         # Cache for AP-side lookups; populated lazily on first watcher
@@ -921,7 +986,7 @@ class DigimonWorldClient(BizHawkClient):
     # validate_rom
     # ------------------------------------------------------------------
 
-    async def validate_rom(self, ctx: BizHawkClientContext) -> bool:
+    async def validate_rom(self, ctx: DigimonWorldClientContext) -> bool:
         """Accept the connection if BizHawk is on a plausible DW1 save.
 
         v1 sanity check: read one byte at ``RAM_PROSPERITY_POINTS`` and
@@ -978,7 +1043,7 @@ class DigimonWorldClient(BizHawkClient):
     # game_watcher
     # ------------------------------------------------------------------
 
-    async def game_watcher(self, ctx: BizHawkClientContext) -> None:
+    async def game_watcher(self, ctx: DigimonWorldClientContext) -> None:
         if ctx.server is None or ctx.slot is None:
             return
         if self._location_name_to_id is None:
@@ -1066,7 +1131,7 @@ class DigimonWorldClient(BizHawkClient):
             # let the BizHawk framework reconnect on the next tick.
             return
 
-    async def _wipe_chest_sentinels(self, ctx: BizHawkClientContext) -> None:
+    async def _wipe_chest_sentinels(self, ctx: DigimonWorldClientContext) -> None:
         """Remove any AP chest-sentinel items (id 129) from the player's
         inventory.
 
@@ -1128,7 +1193,7 @@ class DigimonWorldClient(BizHawkClient):
         if writes:
             await bizhawk.write(ctx.bizhawk_ctx, writes)
 
-    async def _reconcile_recruits(self, ctx: BizHawkClientContext) -> None:
+    async def _reconcile_recruits(self, ctx: DigimonWorldClientContext) -> None:
         """Defensive enforcement: keep BEATEN_BLOCK bits set for any
         recruit AP has delivered, plus any Digimon bundled into a
         Progressive ladder item the player has received.
@@ -1220,7 +1285,7 @@ class DigimonWorldClient(BizHawkClient):
         if writes:
             await bizhawk.write(ctx.bizhawk_ctx, writes)
 
-    async def _reconcile_merit_shop_sentinel(self, ctx: BizHawkClientContext) -> None:
+    async def _reconcile_merit_shop_sentinel(self, ctx: DigimonWorldClientContext) -> None:
         """For each item in :data:`MERIT_SHOP_DISPATCH`, if its AP
         location trigger is set, ensure ITEM_PARA[item_id]'s
         ``meritValue`` field is bumped to the unaffordable post-purchase
@@ -1287,7 +1352,7 @@ class DigimonWorldClient(BizHawkClient):
             except bizhawk.RequestFailedError:
                 return
 
-    async def _reconcile_recycle_shop_array(self, ctx: BizHawkClientContext) -> None:
+    async def _reconcile_recycle_shop_array(self, ctx: DigimonWorldClientContext) -> None:
         """Rewrite the runtime recycle-shop item-list array when open.
 
         The recycle shop's vanilla [id, flag] * 7 array is reconstructed
@@ -1390,7 +1455,7 @@ class DigimonWorldClient(BizHawkClient):
         except bizhawk.RequestFailedError:
             return
 
-    async def _reconcile_keyitem_flags(self, ctx: BizHawkClientContext) -> None:
+    async def _reconcile_keyitem_flags(self, ctx: DigimonWorldClientContext) -> None:
         """Pin key-item trigger bits to AP-delivered state each tick.
 
         DW1 stores several "key items" as bits in the trigger array
@@ -1462,7 +1527,7 @@ class DigimonWorldClient(BizHawkClient):
         if writes:
             await bizhawk.write(ctx.bizhawk_ctx, writes)
 
-    async def _reconcile_technique_bits(self, ctx: BizHawkClientContext) -> None:
+    async def _reconcile_technique_bits(self, ctx: DigimonWorldClientContext) -> None:
         """Re-assert technique-mastery bits from AP-delivered items.
 
         The mastery bitmap (:data:`RAM_TECH_MASTERY_BASE`, 8 bytes
@@ -1525,7 +1590,7 @@ class DigimonWorldClient(BizHawkClient):
         if writes:
             await bizhawk.write(ctx.bizhawk_ctx, writes)
 
-    async def _reconcile_arena_enforcer(self, ctx: BizHawkClientContext) -> None:
+    async def _reconcile_arena_enforcer(self, ctx: DigimonWorldClientContext) -> None:
         """Drive arena cup-tier visibility from the ``Progressive Arena``
         ladder count by writing recruit-block bits on arena screens.
 
@@ -1661,7 +1726,7 @@ class DigimonWorldClient(BizHawkClient):
         if writes:
             await bizhawk.write(ctx.bizhawk_ctx, writes)
 
-    async def _enforce_agumon_recruited(self, ctx: BizHawkClientContext) -> None:
+    async def _enforce_agumon_recruited(self, ctx: DigimonWorldClientContext) -> None:
         """Pin Agumon's recruit-completion bit on every tick.
 
         Agumon is the in-city bank NPC and a key delivery mechanic;
@@ -1692,7 +1757,7 @@ class DigimonWorldClient(BizHawkClient):
             [(byte_addr, [current[0] | bit_mask], DOMAIN_MAIN_RAM)],
         )
 
-    async def _enforce_coelamon_beaten(self, ctx: BizHawkClientContext) -> None:
+    async def _enforce_coelamon_beaten(self, ctx: DigimonWorldClientContext) -> None:
         """Pin Coelamon's recruit-block bit on every tick.
 
         Coelamon's recruit cutscene is bugged and Coelamon was dropped
@@ -1720,7 +1785,7 @@ class DigimonWorldClient(BizHawkClient):
             [(byte_addr, [current[0] | bit_mask], DOMAIN_MAIN_RAM)],
         )
 
-    async def _enforce_fast_drimogemon(self, ctx: BizHawkClientContext) -> None:
+    async def _enforce_fast_drimogemon(self, ctx: DigimonWorldClientContext) -> None:
         """Collapse Drimogemon's 10-day dig wait to "already dug" state.
 
         Mirrors DWAP's ``EnsureWorldFlags`` for the Fast Drimogemon
@@ -1771,7 +1836,7 @@ class DigimonWorldClient(BizHawkClient):
         if writes:
             await bizhawk.write(ctx.bizhawk_ctx, writes)
 
-    async def _enforce_bridge_always_open(self, ctx: BizHawkClientContext) -> None:
+    async def _enforce_bridge_always_open(self, ctx: DigimonWorldClientContext) -> None:
         """Pin the Tropical Jungle bridge-fixed trigger bit.
 
         Mirrors :meth:`_enforce_agumon_recruited`: read the byte, OR in
@@ -1795,7 +1860,7 @@ class DigimonWorldClient(BizHawkClient):
             [(byte_addr, [current[0] | bit_mask], DOMAIN_MAIN_RAM)],
         )
 
-    async def _enforce_great_canyon_always_open(self, ctx: BizHawkClientContext) -> None:
+    async def _enforce_great_canyon_always_open(self, ctx: DigimonWorldClientContext) -> None:
         """Pin the Great Canyon bridge-unlocked trigger bit.
 
         Same shape as :meth:`_enforce_bridge_always_open`. The byte at
@@ -1818,7 +1883,7 @@ class DigimonWorldClient(BizHawkClient):
             [(byte_addr, [current[0] | bit_mask], DOMAIN_MAIN_RAM)],
         )
 
-    async def _enforce_easy_monochromon(self, ctx: BizHawkClientContext) -> None:
+    async def _enforce_easy_monochromon(self, ctx: DigimonWorldClientContext) -> None:
         """Auto-resolve the Monochromon meat-trade minigame.
 
         Mirrors DWAP's ``EnsureWorldFlags`` for the Easy Monochromon
@@ -1855,7 +1920,7 @@ class DigimonWorldClient(BizHawkClient):
             )],
         )
 
-    async def _enforce_stat_gain_multiplier(self, ctx: BizHawkClientContext) -> None:
+    async def _enforce_stat_gain_multiplier(self, ctx: DigimonWorldClientContext) -> None:
         """Pin DW1's stat-gain multiplier and stat cap.
 
         Mirrors DWAP's ``SetExpMultiplier`` for the Stat Gain Multiplier
@@ -1906,7 +1971,7 @@ class DigimonWorldClient(BizHawkClient):
         if writes:
             await bizhawk.write(ctx.bizhawk_ctx, writes)
 
-    async def _enforce_god_mode(self, ctx: BizHawkClientContext) -> None:
+    async def _enforce_god_mode(self, ctx: DigimonWorldClientContext) -> None:
         """Pin partner stats to max while the GodMode option is on.
 
         Writes ``999`` to Offense/Defense/Speed/Brain (each u16 LE) and
@@ -1974,7 +2039,7 @@ class DigimonWorldClient(BizHawkClient):
         if writes:
             await bizhawk.write(ctx.bizhawk_ctx, writes)
 
-    async def _enforce_prosperity(self, ctx: BizHawkClientContext) -> None:
+    async def _enforce_prosperity(self, ctx: DigimonWorldClientContext) -> None:
         """Pin the in-game prosperity byte to the AP-controlled value.
 
         AP is the single source of truth for prosperity in this world:
@@ -2006,7 +2071,7 @@ class DigimonWorldClient(BizHawkClient):
         )
 
     async def _reconcile_keychain_inventory(
-        self, ctx: BizHawkClientContext,
+        self, ctx: DigimonWorldClientContext,
     ) -> None:
         """Pin the in-game inventory size to the AP-controlled value.
 
@@ -2073,7 +2138,7 @@ class DigimonWorldClient(BizHawkClient):
             ))
         await bizhawk.write(ctx.bizhawk_ctx, writes)
 
-    async def _check_locations(self, ctx: BizHawkClientContext) -> None:
+    async def _check_locations(self, ctx: DigimonWorldClientContext) -> None:
         """Poll per-location RAM signals and send LocationChecks for new ones.
 
         Three detection styles:
@@ -2139,7 +2204,7 @@ class DigimonWorldClient(BizHawkClient):
                 ctx.locations_checked.add(location_id)
 
     async def _check_card_locations(
-        self, ctx: BizHawkClientContext, new_checks: list[int],
+        self, ctx: DigimonWorldClientContext, new_checks: list[int],
     ) -> None:
         """Append any newly-owned card AP locations to ``new_checks``.
 
@@ -2182,7 +2247,7 @@ class DigimonWorldClient(BizHawkClient):
                 new_checks.append(location_id)
 
     async def _check_fishing_locations(
-        self, ctx: BizHawkClientContext, new_checks: list[int],
+        self, ctx: DigimonWorldClientContext, new_checks: list[int],
     ) -> None:
         """Append any newly-caught-fish AP locations to ``new_checks``.
 
@@ -2268,7 +2333,7 @@ class DigimonWorldClient(BizHawkClient):
             if current[fish_id] > prev.get(fish_id, 0):
                 new_checks.append(location_id)
 
-    async def _deliver_items(self, ctx: BizHawkClientContext) -> None:
+    async def _deliver_items(self, ctx: DigimonWorldClientContext) -> None:
         """Apply the next pending item from ``ctx.items_received`` to RAM.
 
         Algorithm:
@@ -2390,7 +2455,7 @@ class DigimonWorldClient(BizHawkClient):
         write_list.extend(counter_advance)
         await bizhawk.write(ctx.bizhawk_ctx, write_list)
 
-    async def _check_goal(self, ctx: BizHawkClientContext) -> None:
+    async def _check_goal(self, ctx: DigimonWorldClientContext) -> None:
         """Fire ``StatusUpdate(GoalComplete)`` for the configured goal.
 
         * ``goal = machinedramon`` (slot_data ``goal == 0``): fires once
