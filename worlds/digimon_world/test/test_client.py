@@ -188,8 +188,9 @@ class TestChestDispatch(DigimonWorldTestBase):
         # Nanimon, Giromon, Coelamon, Devimon, Megadramon, MetalGreymon).
         # 63 chests (65 - 2 Lava Cave 5/6 dropped 2026-05-24).
         # 20 arena cup checks (5 grade tiers x 4 per tier).
+        # 1 boss-defeat event (Meteormon).
         self.assertEqual(
-            len(LOCATION_RAM_BITS), 42 + 63 + 8 + 10 + 7 + 14 + 5 + 20,
+            len(LOCATION_RAM_BITS), 42 + 63 + 8 + 10 + 7 + 14 + 5 + 20 + 1,
         )
 
 

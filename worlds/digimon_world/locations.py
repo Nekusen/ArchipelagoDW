@@ -14,6 +14,7 @@ the same way:
 * ``69_058_xxx`` — fishing fish catches (6, opt-in via :class:`worlds.digimon_world.options.FishingLocations`)
 * ``69_059_xxx`` — Nanimon Quest sites (5, always on)
 * ``69_060_xxx`` — Arena Cup grade-tier wins (20 = 5 tiers x 4 checks, always on)
+* ``69_061_xxx`` — Boss-defeat events (always on)
 
 Locked v1 MVP scope: chests + recruits + starter. NPC-gift "K Prosperity"
 locations are gone — prosperity is now a real AP item shipped in the
@@ -40,6 +41,7 @@ from BaseClasses import ItemClassification, Location, LocationProgressType
 from .data.addresses import (
     ARENA_CUP_LOCATIONS_PER_TIER,
     ARENA_CUP_TIERS,
+    BOSS_LOCATION_RAM_BITS,
     CARD_LOCATION_NIBBLES,
     FISHING_LOCATION_NAMES,
     MERIT_SHOP_LOCATION_NAMES,
@@ -635,6 +637,36 @@ ARENA_CUP_NAMES: Final[tuple[str, ...]] = tuple(_ARENA_CUP_LOCATIONS)
 
 
 # =============================================================================
+# Boss-defeat locations (always on)
+# =============================================================================
+# One AP location per mandatory-boss defeat flag. Each location polls a
+# single vanilla "boss defeated" trigger bit -- no ROM patch needed. The
+# location's reachability is enforced purely by its region assignment
+# (AP inherits the region's entrance rules).
+#
+# Region assignment must be the boss's in-game screen region:
+#
+#   Meteormon -- Ancient Dino Region (screen KODA07 / id 86)
+#
+# RAM-bit mapping lives in
+# :data:`addresses.BOSS_LOCATION_RAM_BITS`; the names below must match
+# exactly so the client's `_check_locations` can resolve location_name
+# -> id.
+
+_BOSS_REGIONS: Final[dict[str, str]] = {
+    "Meteormon Defeated": "Ancient Dino Region",
+}
+assert set(_BOSS_REGIONS) == set(BOSS_LOCATION_RAM_BITS), (
+    "Boss region table must match the RAM-bit table"
+)
+
+_BOSS_LOCATIONS: Final[dict[str, LocationEntry]] = {
+    name: LocationEntry(69_061_000 + i, region)
+    for i, (name, region) in enumerate(_BOSS_REGIONS.items())
+}
+
+
+# =============================================================================
 # Final assembled location table
 # =============================================================================
 
@@ -650,6 +682,7 @@ _LOCATION_TABLE: Final[dict[str, LocationEntry]] = {
     **_FISHING_LOCATIONS,
     **_NANIMON_QUEST_LOCATIONS,
     **_ARENA_CUP_LOCATIONS,
+    **_BOSS_LOCATIONS,
 }
 
 LOCATION_NAME_TO_ID: Final[dict[str, int]] = {
@@ -667,6 +700,7 @@ LOCATION_NAME_GROUPS: Final[dict[str, set[str]]] = {
     "Fishing": set(_FISHING_LOCATIONS),
     "Nanimon Quest": set(_NANIMON_QUEST_LOCATIONS),
     "Arena Cup": set(_ARENA_CUP_LOCATIONS),
+    "Bosses": set(_BOSS_LOCATIONS),
 }
 
 

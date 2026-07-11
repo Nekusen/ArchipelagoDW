@@ -112,7 +112,14 @@
       "Bash(python -m pytest worlds/digimon_world/test/test_client.py -q --tb=short)",
       "Bash(rm AP_*.apdw1 && ls AP_*.apdw1 2>&1 | head -1)",
       "Bash(python -m pytest worlds/digimon_world/test/ --tb=line -q)",
-      "Bash(grep -v 'apdw1$')"
+      "Bash(grep -v 'apdw1$')",
+      "Bash(python Launcher.py \"Build APWorlds\")",
+      "Bash(python -m pytest worlds/digimon_world/test/test_client.py worlds/digimon_world/test/test_stub_logic.py -x --tb=short)",
+      "Bash(sbc)",
+      "Bash(beach)",
+      "Bash(freezeland)",
+      "Bash(whamon)",
+      "Bash(region\")"
     ],
     "additionalDirectories": [
       "\\tmp",

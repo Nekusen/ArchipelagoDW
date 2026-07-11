@@ -557,6 +557,37 @@ for _trigger_id, _expected_bit in (
         f"but constant says {_expected_bit}"
     )
 
+# =============================================================================
+# Boss-defeat location bits (always on)
+# =============================================================================
+#
+# Story-event "boss defeated" flags set by vanilla cutscene scripts after
+# the player wins a mandatory boss encounter. The client polls each bit
+# as an AP location signal -- no ROM patch needed (the vanilla script
+# already calls ``setTrigger`` on cutscene completion).
+#
+# Meteormon (Script 82 Section_5, offset 002140): set after the post-
+# battle "Meteorite Tribe" cutscene resolves and the Meteormon entity
+# walks off-screen. The same trigger is read by Script 0 Section_86
+# (the KODA07 wild-spawn dispatcher) to suppress respawn.
+METEORMON_DEFEATED_TRIGGER_ID: Final = 313
+METEORMON_DEFEATED_BIT: Final[tuple[int, int]] = (0x001BDFF4, 1)
+
+BOSS_LOCATION_RAM_BITS: Final[dict[str, tuple[int, int]]] = {
+    "Meteormon Defeated": METEORMON_DEFEATED_BIT,
+}
+# Sanity: every boss-defeat trigger must derive to its declared byte/bit
+# via the setTrigger formula `(0x001BDFCD + N/8, N%8)`.
+for _trigger_id, _expected_bit in (
+    (METEORMON_DEFEATED_TRIGGER_ID, METEORMON_DEFEATED_BIT),
+):
+    _byte = 0x001BDFCD + _trigger_id // 8
+    _bit = _trigger_id % 8
+    assert (_byte, _bit) == _expected_bit, (
+        f"trigger {_trigger_id} derives to ({_byte:#x}, {_bit}) "
+        f"but constant says {_expected_bit}"
+    )
+
 # ----- Arena cup-win location triggers (always on) --------------------------
 #
 # Script 214 Section_51 is the post-arena-match handler. On a cup win

@@ -280,8 +280,12 @@ _EDGES: Final[tuple[tuple[str, str], ...]] = (
     ("Toy Town", "Misty Trees"),
     # Sub-area reverses (free — once you can enter, you can leave)
     ("Leomon Ancestor Cave", "Drill Tunnel"),
+    # Secret Beach Cave has only ONE reverse edge: File City via Whamon's
+    # ferry. The Freezeland → SBC forward edge is a one-way story warp;
+    # the player cannot walk back from SBC to Freezeland. Without this
+    # asymmetry, AP logic would treat ``Whamon Recruit`` as implying
+    # Freezeland access (File City → SBC → Freezeland), which is wrong.
     ("Secret Beach Cave", "File City"),
-    ("Secret Beach Cave", "Freezeland"),    # free reverse (Whamon ferries back)
     ("Back Dimension", "File City"),
     # Right chain reverses
     ("Tropical Jungle", "Native Forest"),
