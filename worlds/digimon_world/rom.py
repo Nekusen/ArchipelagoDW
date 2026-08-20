@@ -185,22 +185,18 @@ from .data.addresses import (
     ROM_MERIT_SCAN_BOUND_FORMAT,
     ROM_MERIT_SCAN_BOUND_OFFSET,
     ROM_MERIT_SCAN_BOUND_VALUE,
-    ROM_MERIT_SCAN_BASE_PATCH_OFFSET,
-    ROM_MERIT_SCAN_BASE_PATCH_BYTES,
-    ROM_MERIT_SCAN_TELEPORT_WRAPPER_BYTES,
-    CAVE6_MERIT_SCAN_TELEPORT_WRAPPER_OFFSET,
-    ROM_MERIT_NAME_PATCH_OFFSET,
-    ROM_MERIT_NAME_PATCH_BYTES,
-    ROM_MERIT_NAME_TELEPORT_WRAPPER_BYTES,
-    CAVE6_MERIT_NAME_TELEPORT_WRAPPER_OFFSET,
-    ROM_MERIT_ROW_PATCH_OFFSET,
-    ROM_MERIT_ROW_PATCH_BYTES,
-    ROM_MERIT_ROW_TELEPORT_WRAPPER_BYTES,
-    CAVE6_MERIT_ROW_TELEPORT_WRAPPER_OFFSET,
-    ROM_MERIT_DEDUCT_PATCH_OFFSET,
-    ROM_MERIT_DEDUCT_PATCH_BYTES,
-    ROM_MERIT_DEDUCT_TELEPORT_WRAPPER_BYTES,
-    CAVE6_MERIT_DEDUCT_TELEPORT_WRAPPER_OFFSET,
+    BOOT_SEED_HOOK_FORMAT,
+    BOOT_SEED_HOOK_PATCH_VALUE,
+    BOOT_SEED_HOOK_SITE_OFFSET,
+    EXT_ITEM_PARA_SEED_BIN_OFFSET,
+    EXT_ITEM_PARA_SEED_SIZE,
+    HEAP_CLAIM_WORD_BIN_OFFSET,
+    HEAP_CLAIM_WORD_FORMAT,
+    HEAP_CLAIM_WORD_PATCHED,
+    ITEM_PARA_BOOT_HOOK_BYTES,
+    ITEM_PARA_BOOT_HOOK_OFFSET,
+    ITEM_PARA_OVERLAY_WORD_PATCHES,
+    ITEM_PARA_READER_WORD_PATCHES,
     MERIT_AP_DESC_STRINGS_BIN_OFFSET,
     MERIT_SHOP_AP_ITEM_ID_BASE,
     MERIT_SHOP_AP_ITEM_ID_COUNT,
@@ -498,11 +494,12 @@ class DigimonWorldPatchExtension(APPatchExtension):
         see :func:`_assemble_procedure`.
 
         Reads the 128 vanilla u32 pointer entries from the **original
-        source ROM** (via :meth:`get_source_data_with_cache`, so we get
-        them pre-token-application even though ``apply_tokens`` has
-        already overwritten the same .bin region with extended
-        ITEM_PARA slots 128..148). Writes them as slots 0..127 of the
-        relocated 256-entry table at
+        source ROM** (via :meth:`get_source_data_with_cache` — a
+        convention kept from the era when ``apply_tokens`` overwrote
+        that .bin region with ext ITEM_PARA entries; ext entries now
+        live in the EXT_ITEM_PARA seed block, but reading the pristine
+        source stays correct and simpler). Writes them as slots 0..127
+        of the relocated 256-entry table at
         :data:`RELOC_ITEM_DESC_PTR_BIN_OFFSET`. Slots 128..134 are
         overwritten with kuseg pointers into the 7 recycle-shop AP
         description strings (region :data:`AP_DESC_STRINGS_RAM`); slots
@@ -1774,6 +1771,81 @@ def _write_vending_tokens(
     )
 
 
+def _write_item_para_relocation_tokens(patch: DigimonWorldProcedurePatch) -> None:
+    """Install the always-on ITEM_PARA 256-slot relocation.
+
+    Lab-validated design (``work/dw1_re/decomp/item_para_reloc/``): the
+    full ITEM_PARA table is rebuilt at boot inside the 8 KB region
+    vacated from the malloc3 arena. Five sets of writes, all
+    option-independent (the shop token writers later overlay their ext
+    entries into the seed block via
+    :func:`ext_item_para_slot_bin_offset`):
+
+    1. **Heap-claim word** at :data:`HEAP_CLAIM_WORD_BIN_OFFSET` —
+       moves the arena base one word so boot runs
+       ``InitHeap3(0x801C1B70, 0x2E390)``, vacating
+       0x801BFB70..0x801C1B70 (exactly 256 x 32 B).
+    2. **Boot seed hook body** at :data:`ITEM_PARA_BOOT_HOOK_OFFSET`
+       (Cave6, 148 B) — calls the displaced master-init callee, copies
+       vanilla+tokens ITEM_PARA (4 KB), zeros the upper 4 KB, copies
+       the EXT_ITEM_PARA seed block (960 B) over slots 128..157. The
+       copy happens at RUNTIME on every boot / soft reset — there is
+       no patch-apply-time table copy step.
+    3. **Jal redirect** at :data:`BOOT_SEED_HOOK_SITE_OFFSET` —
+       replaces master-init's first ``jal 0x800EEBDC`` with
+       ``jal ITEM_PARA_BOOT_HOOK_RAM``.
+    4. **Seed-block zero-fill** (960 B) at
+       :data:`EXT_ITEM_PARA_SEED_BIN_OFFSET` — unpopulated ext slots
+       decode as empty entries (meritValue 0). MUST be emitted before
+       the recycle/merit ext entry tokens (token order = insertion
+       order); :func:`write_patch` calls this writer first.
+    5. **31 reader sites, 62 words** — 24 SLUS lui/addiu pairs
+       (:data:`ITEM_PARA_READER_WORD_PATCHES`) and 7 overlay pairs
+       (:data:`ITEM_PARA_OVERLAY_WORD_PATCHES`, plain .bin-offset
+       tokens into BTL_REL.BIN / FISH_REL.BIN user data) re-based from
+       vanilla 0x801269DC to the relocated table.
+    """
+
+    # 1. Heap-claim word.
+    patch.write_token(
+        APTokenTypes.WRITE,
+        HEAP_CLAIM_WORD_BIN_OFFSET,
+        struct.pack(HEAP_CLAIM_WORD_FORMAT, HEAP_CLAIM_WORD_PATCHED),
+    )
+
+    # 2. Boot seed hook body (Cave6).
+    patch.write_token(
+        APTokenTypes.WRITE,
+        ITEM_PARA_BOOT_HOOK_OFFSET,
+        ITEM_PARA_BOOT_HOOK_BYTES,
+    )
+
+    # 3. Master-init first-jal redirect.
+    patch.write_token(
+        APTokenTypes.WRITE,
+        BOOT_SEED_HOOK_SITE_OFFSET,
+        struct.pack(BOOT_SEED_HOOK_FORMAT, BOOT_SEED_HOOK_PATCH_VALUE),
+    )
+
+    # 4. EXT_ITEM_PARA seed-block zero-fill (sector-aligned single
+    #    flat write; shop writers overlay entries afterwards).
+    patch.write_token(
+        APTokenTypes.WRITE,
+        EXT_ITEM_PARA_SEED_BIN_OFFSET,
+        b"\x00" * EXT_ITEM_PARA_SEED_SIZE,
+    )
+
+    # 5. Reader-site word patches (SLUS + overlays).
+    for bin_offset, patched_word, _vanilla_word in ITEM_PARA_READER_WORD_PATCHES:
+        patch.write_token(
+            APTokenTypes.WRITE, bin_offset, struct.pack("<I", patched_word),
+        )
+    for _fname, bin_offset, patched_word, _vanilla_word in ITEM_PARA_OVERLAY_WORD_PATCHES:
+        patch.write_token(
+            APTokenTypes.WRITE, bin_offset, struct.pack("<I", patched_word),
+        )
+
+
 def _write_recycle_shop_tokens(
     patch: DigimonWorldProcedurePatch,
     world: DigimonWorldWorld,
@@ -1782,10 +1854,13 @@ def _write_recycle_shop_tokens(
 
     Five sets of writes:
 
-    1. **Extended ITEM_PARA entries (slots 128..134)** at the freed
-       ITEM_DESC_PTR location. One 32-byte entry per AP shop slot,
-       carrying the multiworld-resolved AP item name (truncated to
-       14 chars) and the slot's vanilla money price.
+    1. **Extended ITEM_PARA entries (slots 128..134)** in the
+       EXT_ITEM_PARA seed block (via
+       :func:`ext_item_para_slot_bin_offset`; the always-on boot hook
+       copies the block into the relocated table at natural slot
+       positions). One 32-byte entry per AP shop slot, carrying the
+       multiworld-resolved AP item name (truncated to 14 chars) and
+       the slot's vanilla money price.
     2. **AP description strings** at :data:`AP_DESC_STRINGS_BIN_OFFSET`
        in Cave1. One 64-byte slot per shop entry, NUL-padded, holding
        ``"From <player>'s World"``. The relocated ITEM_DESC_PTR
@@ -1931,7 +2006,7 @@ def _write_merit_shop_locations_tokens(
 ) -> None:
     """Write all Merit Shop AP-randomization tokens for the seed.
 
-    Eight sets of writes (only when
+    Six sets of writes (only when
     :class:`worlds.digimon_world.options.MeritShopLocations` is on):
 
     1. **Extended ITEM_PARA entries (slots 135..148)** — one 32-byte
@@ -1940,11 +2015,11 @@ def _write_merit_shop_locations_tokens(
        the vanilla ``meritValue`` of the corresponding entry in
        :data:`MERIT_SHOP_VANILLA_ENTRIES` (so the merit-shop scan
        picks it up at the same displayed price). The helper
-       :func:`ext_item_para_slot_bin_offset` transparently routes
-       slots 135..143 to the freed ITEM_DESC_PTR region and slots
-       144..148 to :data:`CAVE6_ITEM_PARA_EXT_RAM`.
+       :func:`ext_item_para_slot_bin_offset` routes every ext slot to
+       the EXT_ITEM_PARA seed block, which the always-on boot hook
+       copies into the relocated table (slots at natural positions).
     2. **AP description strings** at
-       :data:`MERIT_AP_DESC_STRINGS_BIN_OFFSET`. 14 × 64-byte NUL-padded
+       :data:`MERIT_AP_DESC_STRINGS_BIN_OFFSET`. 14 x 64-byte NUL-padded
        slots holding ``"From <player>'s World"``. The relocated
        ITEM_DESC_PTR (built later by :meth:`relocate_item_desc_ptr`)
        references these.
@@ -1953,7 +2028,8 @@ def _write_merit_shop_locations_tokens(
        its ITEM_PARA entry so every vanilla merit-shop row disappears.
        Slot 117 (Amazing rod) is already zeroed by the always-on v1
        :func:`_write_merit_shop_wrapper_tokens`; this duplicate write
-       is idempotent.
+       is idempotent. (These land in the OLD table region — the boot
+       hook copies slots 0..127 from there, so they carry over.)
     4. **Extended wrapper bytes** at
        :data:`ROM_MERIT_SHOP_EXT_WRAPPER_OFFSET` — 572-byte MIPS
        sequence that dispatches 15 entries (slot 83 → trigger 903 +
@@ -1968,18 +2044,12 @@ def _write_merit_shop_locations_tokens(
     6. **Scan-loop bound patch** at
        :data:`ROM_MERIT_SCAN_BOUND_OFFSET` — single 4-byte rewrite
        changing ``sltiu $r1, $r5, 0x80`` to ``sltiu $r1, $r5, 0x95`` so
-       the merit-shop ITEM_PARA scan reaches slot 148.
-    7. **Merit-scan teleport wrapper bytes** at
-       :data:`CAVE6_MERIT_SCAN_TELEPORT_WRAPPER_OFFSET` — 64-byte MIPS
-       sequence that recomputes the scan's per-iteration ITEM_PARA
-       pointer, routing slot_id < 144 to vanilla ITEM_PARA + 0x18 and
-       slot_id >= 144 to :data:`CAVE6_ITEM_PARA_EXT_RAM` + 0x18.
-    8. **Scan-base inline patch** at
-       :data:`ROM_MERIT_SCAN_BASE_PATCH_OFFSET` — 12-byte rewrite
-       replacing the original 3-instruction
-       ``lui/addiu/addu`` pointer-computation sequence with
-       ``j teleport_wrapper; nop; nop``. The wrapper returns to PC
-       0x80107338 (the original ``lhu``).
+       the merit-shop ITEM_PARA scan reaches slot 148. With the
+       relocated contiguous table this is the ONLY scan change needed —
+       the Cave6 scan/name/row/deduct teleport wrappers of the retired
+       multi-segment architecture are gone (their reader sites are
+       re-based by the always-on
+       :func:`_write_item_para_relocation_tokens`).
 
     The 256-entry relocated ITEM_DESC_PTR table populates slots 135..148
     in the :meth:`DigimonWorldPatchExtension.relocate_item_desc_ptr`
@@ -2071,96 +2141,15 @@ def _write_merit_shop_locations_tokens(
         struct.pack(ROM_MERIT_SHOP_EXT_PATCH_FORMAT, ROM_MERIT_SHOP_EXT_PATCH_VALUE),
     )
 
-    # 6. Scan-loop bound patch.
+    # 6. Scan-loop bound patch. (The retired multi-segment
+    #    architecture's teleport-wrapper tokens — steps 7..14 of the
+    #    old writer — are gone: the always-on relocation's plain
+    #    reader-word patches cover the scan/name/row/deduct sites for
+    #    every slot in the contiguous relocated table.)
     patch.write_token(
         APTokenTypes.WRITE,
         ROM_MERIT_SCAN_BOUND_OFFSET,
         struct.pack(ROM_MERIT_SCAN_BOUND_FORMAT, ROM_MERIT_SCAN_BOUND_VALUE),
-    )
-
-    # 7. Merit-scan teleport wrapper bytes in Cave6.
-    patch.write_token(
-        APTokenTypes.WRITE,
-        CAVE6_MERIT_SCAN_TELEPORT_WRAPPER_OFFSET,
-        ROM_MERIT_SCAN_TELEPORT_WRAPPER_BYTES,
-    )
-
-    # 8. Inline scan-base patch (3 instructions) — `j teleport_wrapper; nop; nop`.
-    #    Replaces the original `lui/addiu/addu` pointer construction at
-    #    PC 0x8010732C..0x00107334 so the wrapper computes r10 for slots
-    #    144..148 in Cave6.
-    patch.write_token(
-        APTokenTypes.WRITE,
-        ROM_MERIT_SCAN_BASE_PATCH_OFFSET,
-        ROM_MERIT_SCAN_BASE_PATCH_BYTES,
-    )
-
-    # 9. Merit-name teleport wrapper bytes in Cave6. Independent from
-    #    the scan teleport: the merit-shop UI renders each row's name
-    #    via a separate codepath at PC 0x80101A4C that, unpatched, reads
-    #    ITEM_PARA[slot].name from vanilla base + slot*32 — for slot
-    #    144+ this falls in the per-item color table and the renderer
-    #    treats palette bytes as ASCII garbage.
-    patch.write_token(
-        APTokenTypes.WRITE,
-        CAVE6_MERIT_NAME_TELEPORT_WRAPPER_OFFSET,
-        ROM_MERIT_NAME_TELEPORT_WRAPPER_BYTES,
-    )
-
-    # 10. Inline name-renderer patch — same 3-instruction shape as
-    #     step 8 but pointed at the name teleport wrapper. Replaces
-    #     the lui/sll/addiu/addu pointer construction at PC 0x80101A4C.
-    patch.write_token(
-        APTokenTypes.WRITE,
-        ROM_MERIT_NAME_PATCH_OFFSET,
-        ROM_MERIT_NAME_PATCH_BYTES,
-    )
-
-    # 11. Merit-row teleport wrapper bytes in Cave6. This is the actual
-    #     merit-shop per-row display function that reads name + value +
-    #     meritValue all sharing r17 = slot*32. By patching only the
-    #     entry-point pointer setup, we redirect r17 to the Cave6 ext
-    #     offset for slot >= 144, and all three sibling reads downstream
-    #     automatically land in Cave6.
-    patch.write_token(
-        APTokenTypes.WRITE,
-        CAVE6_MERIT_ROW_TELEPORT_WRAPPER_OFFSET,
-        ROM_MERIT_ROW_TELEPORT_WRAPPER_BYTES,
-    )
-
-    # 12. Inline row-display patch — replaces 4 instructions at
-    #     PC 0x800FE7F4..0x000FE800 (lui/addiu/addu/addu) with
-    #     ``j row_teleport_wrapper; nop; nop; nop``. The preceding
-    #     ``sll r3, r2, 5`` at 0x000FE7F0 stays in place so the wrapper
-    #     enters with r2 = slot_id and r3 = slot*32 ready to use.
-    patch.write_token(
-        APTokenTypes.WRITE,
-        ROM_MERIT_ROW_PATCH_OFFSET,
-        ROM_MERIT_ROW_PATCH_BYTES,
-    )
-
-    # 13. Merit-deduct teleport wrapper bytes in Cave6. Separate from
-    #     scan/name/row teleports because the purchase pipeline reads
-    #     the slot's meritValue at PC 0x000FB018 via its own lui+addiu
-    #     pair; for slot >= 144 that lands in the per-item color table
-    #     and the merit-shop charges the player whatever palette byte
-    #     happens to be there (3000..6000 range in testing, sending
-    #     merit negative).
-    patch.write_token(
-        APTokenTypes.WRITE,
-        CAVE6_MERIT_DEDUCT_TELEPORT_WRAPPER_OFFSET,
-        ROM_MERIT_DEDUCT_TELEPORT_WRAPPER_BYTES,
-    )
-
-    # 14. Inline deduct patch — replaces 4 instructions at
-    #     PC 0x800FB018..0x000FB024 (lui/sll/addiu/addu) with
-    #     ``j deduct_teleport_wrapper; nop; nop; nop``. The wrapper
-    #     returns to PC 0x800FB028 (the original ``lhu`` that reads
-    #     the meritValue into r2).
-    patch.write_token(
-        APTokenTypes.WRITE,
-        ROM_MERIT_DEDUCT_PATCH_OFFSET,
-        ROM_MERIT_DEDUCT_PATCH_BYTES,
     )
 
 
@@ -2329,6 +2318,11 @@ def write_patch(world: DigimonWorldWorld, output_directory: str) -> None:
     _write_leomonstone_neuter_tokens(patch)  # always-on; 7 sites across 3 ROM copies + orphan
     _write_arena_cup_neuter_tokens(patch)  # always-on; 14 sites x N ROM copies (no-op until ROM_ARENA_SECTION_51_BASES is filled in)
     _write_merit_shop_wrapper_tokens(patch)  # always-on; engine-hook for Merit-Shop purchases
+    # ITEM_PARA 256-slot relocation — always-on (heap claim + boot seed
+    # hook + reader re-bases + seed zero-fill). Must run BEFORE the
+    # recycle/merit writers so their ext-entry tokens overwrite the
+    # seed zero-fill (token order = insertion order).
+    _write_item_para_relocation_tokens(patch)
     if int(world.options.lava_cave_access.value) != 0:  # 0 = vanilla
         _write_lava_cave_gate_tokens(patch)
     # Bridge shuffled-mode patches (option value 2 = shuffled).

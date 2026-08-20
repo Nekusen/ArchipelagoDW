@@ -323,9 +323,17 @@ class TestRecycleShopPatcherOff(DigimonWorldTestBase):
     def test_no_recycle_shop_tokens(self) -> None:
         self.assertNotIn(ROM_RECYCLE_SHOP_WRAPPER_OFFSET, self.observed_offsets)
         self.assertNotIn(ROM_RECYCLE_SHOP_PATCH_OFFSET, self.observed_offsets)
+        # No 32-byte ext ITEM_PARA entries. (Slot 128's offset equals
+        # the always-on relocation's 960-byte seed zero-fill token, so
+        # check write LENGTHS, not offset presence.)
         for slot in RECYCLE_SHOP_AP_ITEM_IDS:
-            self.assertNotIn(ext_item_para_slot_bin_offset(slot),
-                             self.observed_offsets)
+            slot_offset = ext_item_para_slot_bin_offset(slot)
+            entry_writes = [
+                data for _t, off, data in self.tokens
+                if off == slot_offset and len(data) == 32
+            ]
+            self.assertEqual(entry_writes, [],
+                             f"unexpected ext entry write for slot {slot}")
         for i in range(7):
             self.assertNotIn(
                 AP_DESC_STRINGS_BIN_OFFSET + i * AP_DESC_STRING_MAX_LEN,

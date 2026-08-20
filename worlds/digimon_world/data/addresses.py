@@ -3882,6 +3882,39 @@ RAM_ITEM_PARA: Final = 0x001269DC
 RAM_ITEM_PARA_KUSEG: Final = 0x80000000 | RAM_ITEM_PARA
 
 
+# --- ITEM_PARA 256-slot relocation — primary base (always-on) ---------------
+# The full 256-slot ITEM_PARA table is relocated at boot onto the 8 KB
+# region RAM 0x801BFB70..0x801C1B70 vacated from the malloc3 arena by a
+# one-word heap claim (lab-validated 2026-08-20, three PATCH_PROCESS
+# nets incl. a confirming disc boot; see
+# ``work/dw1_re/decomp/item_para_reloc/NOTES.md``). All machinery —
+# heap-claim word, boot seed hook, .bin-backed ext seed, 24 SLUS + 7
+# overlay reader-site patches — lives in the "ITEM_PARA 256-slot
+# relocation" section further down (it needs helpers defined later in
+# this module). The base constants are declared early because the
+# merit-shop wrapper builders below encode addresses inside the
+# relocated table.
+#
+# The region is EXACTLY 256 x 32 B: slots 0..127 are a boot-time copy
+# of vanilla-plus-tokens ITEM_PARA (apply_tokens keeps writing slots
+# 83/114/117 at the OLD .bin location; the hook copies them over),
+# slots 128..255 are the extended range (zeroed, then seeded from the
+# .bin-backed ext seed block in Cave6).
+ITEM_PARA_RELOC_SLOT_COUNT: Final = 256
+ITEM_PARA_RELOC_BASE_KUSEG: Final = 0x801BFB70
+# Bare MainRAM offset (no kuseg prefix) — client-side read convention.
+ITEM_PARA_RELOC_BASE: Final = ITEM_PARA_RELOC_BASE_KUSEG & 0x001FFFFF
+ITEM_PARA_RELOC_EXT_KUSEG: Final = (
+    ITEM_PARA_RELOC_BASE_KUSEG + 128 * ROM_ITEM_TABLE_ENTRY_SIZE            # 0x801C0B70
+)
+ITEM_PARA_RELOC_END_KUSEG: Final = (
+    ITEM_PARA_RELOC_BASE_KUSEG
+    + ITEM_PARA_RELOC_SLOT_COUNT * ROM_ITEM_TABLE_ENTRY_SIZE                # 0x801C1B70
+)
+assert ITEM_PARA_RELOC_EXT_KUSEG == 0x801C0B70, hex(ITEM_PARA_RELOC_EXT_KUSEG)
+assert ITEM_PARA_RELOC_END_KUSEG == 0x801C1B70, hex(ITEM_PARA_RELOC_END_KUSEG)
+
+
 # =============================================================================
 # Merit-Shop AP "AP Item Bought" sentinel slot (always-on)
 # =============================================================================
@@ -4316,11 +4349,11 @@ def _build_merit_shop_wrapper_bytes() -> bytes:
         mark_bought path (28 instrs, 112 B) — match jumps here:
             lw    $a0, 0x08($sp)   ; restore item_id (clobbered by setTrigger)
             sll   $t2, $a0, 5      ; t2 = item_id * 32
-            lui   $t1, 0x8012
-            addiu $t1, $t1, 0x69DC ; t1 = ITEM_PARA base
-            addu  $t2, $t2, $t1    ; t2 = ITEM_PARA + item_id*32 (dest)
-            lui   $t0, 0x8012
-            addiu $t0, $t0, 0x781C ; t0 = AP_SHOP_BOUGHT_SENTINEL_RAM (source)
+            lui   $t1, 0x801C
+            addiu $t1, $t1, 0xFB70 ; t1 = relocated ITEM_PARA base
+            addu  $t2, $t2, $t1    ; t2 = RELOC + item_id*32 (dest)
+            lui   $t0, 0x801C
+            addiu $t0, $t0, 0x09B0 ; t0 = RELOC slot 114 sentinel (source)
             (8 × {lw $t3, +N($t0); sw $t3, +N($t2)}  for N in {0,4,8,...,28})
             lw    $ra, 0x0C($sp)
             lw    $a1, 0x04($sp)
@@ -4339,11 +4372,16 @@ def _build_merit_shop_wrapper_bytes() -> bytes:
 
     SETTRIGGER_RAM = 0x801065C0
     GIVEITEM_RAM = 0x800C5240
-    # MIPS lui/addiu encoding needs the CPU-visible kuseg address; the
-    # bare RAM_ITEM_PARA / AP_SHOP_BOUGHT_SENTINEL_RAM constants are
-    # for client-side bizhawk.read calls (which use bare offsets).
-    ITEM_PARA_BASE = 0x80000000 | RAM_ITEM_PARA
-    SENTINEL_RAM = 0x80000000 | AP_SHOP_BOUGHT_SENTINEL_RAM
+    # ITEM_PARA relocation (always-on): the shop UI reads the RELOCATED
+    # table at ITEM_PARA_RELOC_BASE_KUSEG, so the sentinel memcpy must
+    # target it — a write to the old table would be invisible. The
+    # sentinel source is the relocated slot 114 (seeded at boot from
+    # the token-written old-table entry).
+    ITEM_PARA_BASE = ITEM_PARA_RELOC_BASE_KUSEG
+    SENTINEL_RAM = (
+        ITEM_PARA_RELOC_BASE_KUSEG
+        + AP_SHOP_BOUGHT_SENTINEL_ITEM_ID * ROM_ITEM_TABLE_ENTRY_SIZE       # 0x801C09B0
+    )
 
     n_entries = len(MERIT_SHOP_DISPATCH)
     # mark_bought RAM address = wrapper start + prologue (16) + per-entry
@@ -4356,8 +4394,8 @@ def _build_merit_shop_wrapper_bytes() -> bytes:
 
     # ITEM_PARA_BASE and SENTINEL_RAM are loaded via lui+addiu. We use
     # :func:`_decompose_kuseg` so the encoding works whether the low
-    # half needs sign-extension (e.g. relocated ITEM_PARA at
-    # 0x8009DBC8) or not (e.g. vanilla 0x801269DC).
+    # half needs sign-extension (relocated base 0x801BFB70: lo 0xFB70
+    # >= 0x8000 -> lui hi becomes 0x801C) or not (sentinel 0x801C09B0).
     item_para_hi, item_para_lo = _decompose_kuseg(ITEM_PARA_BASE)
     sentinel_hi, sentinel_lo = _decompose_kuseg(SENTINEL_RAM)
 
@@ -6884,15 +6922,24 @@ def _slus_ram_to_bin_offset(ram_addr: int) -> int:
 #   0x80095980..0x80095D80  RELOC_ITEM_DESC_PTR (1024 B, opt-in) <- this section
 #   0x80095D80..0x80095F40  AP_DESC_STRINGS (448 B, opt-in)       <-
 #   0x80095F40..0x80096BCC  tail, claimed piecemeal by later features:
-#     - merit-shop ext wrapper (0x80096380..0x800965BC) and the
-#       scan/name/row/deduct teleport wrappers ending at 0x800966C4
-#       (see the merit sections below)
+#     - icon clamp wrapper 0x80095F40..0x80095F5C + recycle init
+#       wrapper 0x80095F5C..0x80095FB8 (both opt-in), then a 72 B
+#       sector-alignment gap up to 0x80096000
+#     - merit AP desc strings 0x80096000..0x80096380 and merit-shop
+#       ext wrapper 0x80096380..0x800965BC (both opt-in)
+#     - ITEM_PARA boot seed hook 0x800965BC..0x80096650 (148 B,
+#       ALWAYS-ON — see the "ITEM_PARA 256-slot relocation" section;
+#       occupies the space of the retired merit scan/name teleport
+#       wrappers)
 #     - transition-gate wrapper + table 0x800966C4..0x800967F0
 #       (region-gate section at the bottom of this file), 16 B spare
 #       before the sector-148350 boundary at 0x80096800
-#     - Cave6 ITEM_PARA ext segment 0x80096800..0x80096BC0
-#     Remaining free: 0x800967F0..0x80096800 (16 B) and
-#     0x80096BC0..0x80096BCC (12 B).
+#     - EXT_ITEM_PARA seed block 0x80096800..0x80096BC0 (960 B = 30
+#       slots, ALWAYS-ON zero-fill + opt-in shop entries; reuses the
+#       footprint of the retired Cave6 ITEM_PARA ext segment)
+#     Remaining free: 0x80096650..0x800966C4 (116 B, formerly the
+#     retired merit row/deduct teleport wrappers),
+#     0x800967F0..0x80096800 (16 B) and 0x80096BC0..0x80096BCC (12 B).
 #
 # Recycle-shop usage adds 1472 bytes inside Cave6, well within the
 # remaining headroom. An assertion at the bottom of this block enforces
@@ -6981,41 +7028,39 @@ VANILLA_ITEM_DESC_PTR_BIN_OFFSET: Final = _table_byte_to_bin_flat(
 VANILLA_ITEM_DESC_PTR_ENTRIES: Final = ROM_ITEM_TABLE_ENTRY_COUNT          # 128
 
 
-# --- Extended ITEM_PARA region ----------------------------------------------
-# The freed bytes at the original ITEM_DESC_PTR location become extended
-# ITEM_PARA slots 128..255. We populate slots 128..134; slots 135..255
-# stay whatever the vanilla data happened to be (we don't depend on them).
-EXT_ITEM_PARA_RAM: Final = VANILLA_ITEM_DESC_PTR_RAM                       # 0x801279DC
-EXT_ITEM_PARA_BIN_OFFSET: Final = VANILLA_ITEM_DESC_PTR_BIN_OFFSET
+# --- Extended ITEM_PARA slots (relocated-table seed) ------------------------
+# With the always-on 256-slot relocation, extended slots 128..255 live
+# at their natural positions inside the relocated table
+# (RAM :data:`ITEM_PARA_RELOC_EXT_KUSEG` +). The relocated region is
+# NOT .bin-backed, so the patcher stages ext entries in the .bin-backed
+# EXT_ITEM_PARA seed block in Cave6 (:data:`EXT_ITEM_PARA_SEED_RAM`,
+# defined in the relocation section below); the boot hook copies the
+# seed into the relocated table on every boot / soft reset. The freed
+# ITEM_DESC_PTR region at 0x801279DC and the retired Cave6 ext segment
+# are no longer ext-slot storage.
 
 
 def ext_item_para_slot_bin_offset(slot: int) -> int:
     """Sector-aware .bin offset of extended ITEM_PARA slot ``slot``.
 
-    Two contiguous segments are supported:
-
-    * **slots 128..143** — freed ITEM_DESC_PTR region (vanilla
-      ITEM_PARA's natural extension; 16 slots). Reached by the
-      vanilla scan loop just by bumping its bound past 128.
-    * **slots 144..173** — :data:`CAVE6_ITEM_PARA_EXT_RAM` (Cave6 ext
-      segment; 30 slots). Reached by the merit-shop scan loop after
-      patching it to teleport via
-      :data:`CAVE6_MERIT_SCAN_TELEPORT_WRAPPER_RAM`.
-
-    Slots 144..173 in the Cave6 segment are NOT contiguous with vanilla
-    ITEM_PARA in RAM, but any consumer of this helper is just resolving
-    a .bin offset to write a slot's 32-byte entry — the segment-routing
-    is handled here transparently.
+    Single contiguous segment: every ext slot in
+    ``128..EXT_ITEM_PARA_SEED_SLOT_LAST`` maps to its 32-byte entry in
+    the EXT_ITEM_PARA seed block (:data:`EXT_ITEM_PARA_SEED_BIN_OFFSET`
+    ``+ (slot - 128) * 32``). The boot hook copies the whole seed block
+    to :data:`ITEM_PARA_RELOC_EXT_KUSEG`, so a write here lands at the
+    slot's natural position in the relocated table at runtime. The seed
+    block is sector-aligned and 960 B < 2048 B, so the flat add never
+    crosses a Mode2/2352 user-data boundary.
     """
 
-    if 128 <= slot < CAVE6_ITEM_PARA_EXT_SLOT_BASE:
-        return _table_byte_to_bin_flat(slot * ROM_ITEM_TABLE_ENTRY_SIZE)
-    if CAVE6_ITEM_PARA_EXT_SLOT_BASE <= slot <= CAVE6_ITEM_PARA_EXT_SLOT_LAST:
-        cave6_byte_offset = (slot - CAVE6_ITEM_PARA_EXT_SLOT_BASE) * ROM_ITEM_TABLE_ENTRY_SIZE
-        return CAVE6_ITEM_PARA_EXT_BIN_OFFSET + cave6_byte_offset
+    if EXT_ITEM_PARA_SEED_SLOT_BASE <= slot <= EXT_ITEM_PARA_SEED_SLOT_LAST:
+        seed_byte_offset = (
+            (slot - EXT_ITEM_PARA_SEED_SLOT_BASE) * ROM_ITEM_TABLE_ENTRY_SIZE
+        )
+        return EXT_ITEM_PARA_SEED_BIN_OFFSET + seed_byte_offset
     raise ValueError(
         f"Extended ITEM_PARA slot {slot} out of supported range "
-        f"[128, {CAVE6_ITEM_PARA_EXT_SLOT_LAST + 1})"
+        f"[{EXT_ITEM_PARA_SEED_SLOT_BASE}, {EXT_ITEM_PARA_SEED_SLOT_LAST + 1})"
     )
 
 
@@ -7543,33 +7588,29 @@ ROM_RECYCLE_SHOP_INIT_PATCH_VALUE: Final = (
 
 # --- AP slot / trigger / location allocations -------------------------------
 #
-# **Hard ceiling**: the freed ITEM_DESC_PTR region at vanilla RAM
-# ``0x801279DC..0x80127BDC`` is 512 bytes = exactly 16 ITEM_PARA slots
-# (128..143). Beyond slot 143, RAM ``0x80127BDC`` hosts an item-color /
-# palette-index table read by ``setItemTexture`` at ``0x000E5E80..
-# 0x000E5E8C`` (verified 2026-05-13 against references/DW1-Code/SLUS.asm).
-# Writing extended ITEM_PARA entries past slot 143 corrupts that table —
-# the merit-shop ``mark_bought`` memcpy at runtime then doubles the
-# damage with every purchase, causing the post-purchase refresh to
-# freeze the game. Recycle shop uses 7 of the 16 (128..134); merit shop
-# uses the remaining 9 (135..143).
+# With the always-on 256-slot relocation, ext slots 128..255 all live
+# contiguously inside the relocated table — the historical hard ceiling
+# at slot 143 (the item-color table at RAM 0x80127BDC that capped the
+# freed-ITEM_DESC_PTR era, verified 2026-05-13) no longer applies. The
+# staging ceiling is the .bin-backed EXT_ITEM_PARA seed block: 30 slots
+# (128..157). Recycle shop uses 128..134; merit shop uses 135..148;
+# 149..157 are headroom for future shops.
 MERIT_SHOP_AP_ITEM_ID_BASE: Final = 135
 MERIT_SHOP_AP_ITEM_ID_COUNT: Final = 14
 MERIT_SHOP_AP_ITEM_IDS: Final = tuple(
     MERIT_SHOP_AP_ITEM_ID_BASE + i
     for i in range(MERIT_SHOP_AP_ITEM_ID_COUNT)
 )
-# Highest used extended slot (148 = 135 + 13). Slots 135..143 live in
-# the freed ITEM_DESC_PTR region (contiguous with vanilla ITEM_PARA);
-# slots 144..148 live in the Cave6 ext segment reached via the
-# merit-scan teleport wrapper. The scan-loop bound patch below uses
+# Highest used extended slot (148 = 135 + 13). All 14 slots live at
+# their natural positions in the relocated table, staged via the
+# EXT_ITEM_PARA seed block. The scan-loop bound patch below uses
 # 149 (= 148 + 1) so the scan reaches up through slot 148.
 MERIT_SHOP_AP_ITEM_ID_LAST: Final = (
     MERIT_SHOP_AP_ITEM_ID_BASE + MERIT_SHOP_AP_ITEM_ID_COUNT - 1            # 148
 )
 # Sanity: must come after recycle shop's range (128..134) and stay
-# inside the unified extended-slot range supported by ext_item_para_slot_bin_offset
-# (freed ITEM_DESC_PTR for 128..143 + Cave6 ext for 144..173).
+# inside the single ext-slot segment supported by
+# ext_item_para_slot_bin_offset (seed slots 128..157).
 assert MERIT_SHOP_AP_ITEM_ID_BASE == RECYCLE_SHOP_AP_ITEM_ID_BASE + RECYCLE_SHOP_AP_ITEM_ID_COUNT, (
     f"merit-shop slot base 0x{MERIT_SHOP_AP_ITEM_ID_BASE:X} should follow "
     f"recycle-shop end 0x{RECYCLE_SHOP_AP_ITEM_ID_BASE + RECYCLE_SHOP_AP_ITEM_ID_COUNT:X}"
@@ -7615,9 +7656,9 @@ assert max(_MERIT_TRIG_BYTES) < RAM_MERAMON_TUNNEL_DRIMOGEMON_STATE, (
 #    ``MERIT_SHOP_VANILLA_ENTRIES[i][2]`` so the shop shows the same
 #    merit cost the vanilla row would have.
 #
-# All 14 entries become AP slots: slots 135..143 sit in the freed
-# ITEM_DESC_PTR region (contiguous with vanilla); slots 144..148 sit in
-# the Cave6 ext segment, reached via the merit-scan teleport wrapper.
+# All 14 entries become AP slots 135..148 at their natural positions
+# in the relocated 256-slot table (staged via the EXT_ITEM_PARA seed
+# block, copied in at boot).
 #
 # Format: ``(slot_id, name_for_docs, vanilla_merit_value)``. The order
 # is by slot_id ascending, matching the merit shop's display order
@@ -7632,11 +7673,11 @@ MERIT_SHOP_VANILLA_ENTRIES: Final[tuple[tuple[int, str, int], ...]] = (
     (0x1B, "HP Chip",       800),  # value=9999   -> Merit Shop #7
     (0x1C, "MP Chip",       800),  # value=9999   -> Merit Shop #8
     (0x54, "Rainbowhorn",   500),  # value=5000   -> Merit Shop #9
-    (0x5B, "Waterbottle",   500),  # value=5000   -> Merit Shop #10  (Cave6 ext slot 144)
-    (0x5D, "Red Shell",     500),  # value=5000   -> Merit Shop #11  (Cave6 ext slot 145)
-    (0x5E, "Hard Scale",    500),  # value=5000   -> Merit Shop #12  (Cave6 ext slot 146)
-    (0x60, "Ice crystal",   500),  # value=5000   -> Merit Shop #13  (Cave6 ext slot 147)
-    (0x75, "Amazing rod",   300),  # value=3000   -> Merit Shop #14  (Cave6 ext slot 148)
+    (0x5B, "Waterbottle",   500),  # value=5000   -> Merit Shop #10  (ext slot 144)
+    (0x5D, "Red Shell",     500),  # value=5000   -> Merit Shop #11  (ext slot 145)
+    (0x5E, "Hard Scale",    500),  # value=5000   -> Merit Shop #12  (ext slot 146)
+    (0x60, "Ice crystal",   500),  # value=5000   -> Merit Shop #13  (ext slot 147)
+    (0x75, "Amazing rod",   300),  # value=3000   -> Merit Shop #14  (ext slot 148)
 )
 assert len(MERIT_SHOP_VANILLA_ENTRIES) == MERIT_SHOP_AP_ITEM_ID_COUNT, (
     len(MERIT_SHOP_VANILLA_ENTRIES), MERIT_SHOP_AP_ITEM_ID_COUNT,
@@ -7764,8 +7805,16 @@ def _build_merit_shop_ext_wrapper_bytes() -> bytes:
 
     SETTRIGGER_RAM = 0x801065C0
     GIVEITEM_RAM = 0x800C5240
-    ITEM_PARA_BASE = 0x80000000 | RAM_ITEM_PARA
-    SENTINEL_RAM = 0x80000000 | AP_SHOP_BOUGHT_SENTINEL_RAM
+    # ITEM_PARA relocation (always-on): mark_bought targets the
+    # RELOCATED table — see the v1 builder's comment. For ext slots
+    # 135..148 the destination RELOC + slot*32 is a plain data slot
+    # inside the 8 KB table (the old architecture's color-table /
+    # desc-ptr clobber hazard is gone).
+    ITEM_PARA_BASE = ITEM_PARA_RELOC_BASE_KUSEG
+    SENTINEL_RAM = (
+        ITEM_PARA_RELOC_BASE_KUSEG
+        + AP_SHOP_BOUGHT_SENTINEL_ITEM_ID * ROM_ITEM_TABLE_ENTRY_SIZE       # 0x801C09B0
+    )
 
     n_entries = len(MERIT_SHOP_EXT_DISPATCH)
     # mark_bought RAM address = wrapper start + prologue (16) +
@@ -7776,9 +7825,8 @@ def _build_merit_shop_ext_wrapper_bytes() -> bytes:
     j_giveitem = 0x08000000 | ((GIVEITEM_RAM >> 2) & 0x03FFFFFF)
     jal_settrigger = 0x0C000000 | ((SETTRIGGER_RAM >> 2) & 0x03FFFFFF)
 
-    # Sign-extension-aware decomposition; works for both vanilla
-    # (0x801269DC, low half 0x69DC < 0x8000) and relocated
-    # (0x8009DBC8, low half 0xDBC8 >= 0x8000) bases.
+    # Sign-extension-aware decomposition; the relocated base 0x801BFB70
+    # has low half 0xFB70 >= 0x8000, so the lui hi becomes 0x801C.
     item_para_hi, item_para_lo = _decompose_kuseg(ITEM_PARA_BASE)
     sentinel_hi, sentinel_lo = _decompose_kuseg(SENTINEL_RAM)
 
@@ -7955,741 +8003,433 @@ _verify_merit_shop_ext_wrapper_bytecode()
 
 
 # =============================================================================
-# Cave6 ITEM_PARA extension segment (slots 144..173)
+# ITEM_PARA 256-slot relocation (always-on)
 # =============================================================================
 #
-# Lifts the 16-slot extended-ITEM_PARA ceiling by adding a SECOND
-# extension segment in Cave6, just past the merit-shop EXT wrapper.
-# Reached via the merit-scan teleport wrapper below.
+# Successor of BOTH the Path A wholesale relocation (reverted — history
+# note below) and the Cave6 multi-segment ext architecture (retired
+# 2026-08-21 by this section: the Cave6 ext segment at 0x80096800 and
+# the merit scan/name/row/deduct teleport wrappers are gone; the seed
+# block below reuses the ext segment's footprint, and the boot seed
+# hook reuses the scan/name teleport wrappers' footprint).
 #
-# **Why not extend the existing freed-ITEM_DESC_PTR region?** The freed
-# region at 0x801279DC..0x80127BDC is exactly 512 bytes (slots 128..143).
-# Slot 144 would start at 0x80127BDC where the per-item color table
-# lives — clobbering it crashes the merit-shop refresh after any
-# purchase. See the block comment near MERIT_SHOP_AP_ITEM_ID_BASE.
+# Lab-validated 2026-08-20 through all three PATCH_PROCESS nets
+# including a confirming build booted from disc into real gameplay:
+# ``work/dw1_re/decomp/item_para_reloc/NOTES.md``, spec builder
+# ``work/dw1_re/patches/item_para_reloc_spec.py``, allocator invariants
+# in ``work/dw1_re/decomp/_scan_flavor_a_region/HEAP_CLAIM_DESIGN.md``
+# and ``work/dw1_re/decomp/heap3/NOTES.md``.
 #
-# **Why not relocate ITEM_PARA wholesale (Path A)?** Path A tried that
-# and froze the arena because the chosen "free" SLUS-exec region held
-# function-pointer constants stored as raw u32 in the 0x80137000
-# dispatch struct array. See the Path A revert block below.
+# Design (three always-on pieces):
 #
-# **This approach (Cave6 multi-segment)**: keep slots 0..143 where they
-# are (vanilla ITEM_PARA + naturally-contiguous freed-DESC region), and
-# put slots 144..173 in Cave6. The merit-shop scan loop is patched to
-# **teleport** its iteration pointer when slot_id reaches 144 — instead
-# of reading garbage from the color table, it jumps to the Cave6 ext
-# base. See :data:`CAVE6_MERIT_SCAN_TELEPORT_WRAPPER_RAM`.
+# 1. **Heap claim (1 word)** — the end-of-bss configuration word at RAM
+#    0x80113AB4 moves the malloc3 arena base from 0x801BFB64 to
+#    0x801C1B64. Boot then runs ``InitHeap3(0x801C1B70, 0x2E390)``; the
+#    arena sentinel at 0x801EFEF8 is unchanged. The vacated region
+#    0x801BFB70..0x801C1B70 is EXACTLY 256 x 32 B — the relocated table
+#    fills it with zero spare bytes.
+# 2. **Boot seed hook** — the claimed region is not .bin-backed, so a
+#    Cave6 wrapper seeds it at boot. We hijack master-init
+#    FUN_800EE800's FIRST call (``jal 0x800EEBDC`` at RAM 0x800EE80C,
+#    delay-slot nop; verified in the .bin). The wrapper makes its own
+#    stack frame, calls the displaced callee (which tail-jumps
+#    ``InitHeap3`` — captured boot ra 0x800EE814 confirms), then runs
+#    three tight loops: copy vanilla+tokens ITEM_PARA (4 KB from
+#    0x801269DC — apply_tokens keeps writing slots 83/114/117 at the
+#    old location, so the copies carry the AP entries), zero the upper
+#    4 KB (slots 128..255), and copy the EXT_ITEM_PARA seed block
+#    (960 B from Cave6) over slots 128..157. The zero loop's last
+#    store ends at 0x801C1B6C — it never touches the new arena base
+#    block header at 0x801C1B70. Re-runs on every disc boot / soft
+#    reset (idempotent; the table is runtime-read-only except the
+#    merit wrappers' mark_bought sentinel copy).
+# 3. **Reader patches (31 sites, 62 words)** — every lui+addiu pair in
+#    the game that constructs the vanilla ITEM_PARA address 0x801269DC
+#    (+field) is re-based to the relocated table: 24 SLUS sites and 7
+#    overlay sites (1 in BTL_REL.BIN — the battle-results "#C1 dropped
+#    #C7" item-name render; 6 in FISH_REL.BIN — fishing/bait UI).
+#    Census (lab, 2026-08-20): exhaustive scan of the SLUS and ALL 16
+#    extracted overlays for lui+addiu / lui+loadstore pairs AND
+#    embedded u32 pointer constants into the table range — SLUS =
+#    exactly these 24, embedded pointer constants = ZERO anywhere,
+#    overlays = exactly these 7 (SHOP_REL is clean; shop machinery
+#    lives in the SLUS). All re-based targets fall in the lui
+#    sign-extension window, so every patched lui hi-half is 0x801C and
+#    every patched addiu low half is 0xFB70 + field. Overlays reload
+#    from disc per activation, so the 7 overlay sites are patched at
+#    their .bin file offsets.
 #
-# **Layout inside Cave6** (sector 148351, ud-bytes 0..2047):
-#
-#   0x80096800..0x80096BC0   ITEM_PARA ext segment (30 slots × 32 B)
-#   0x80096BC0..0x80096BCC   tail (12 B, unused)
-#
-# Why 0x80096800 specifically: Mode2/2352 sector boundary. Cave6's first
-# sector ends at 0x80096800; placing the segment AT that boundary keeps
-# it inside one sector — :func:`apply_tokens` does flat writes and
-# crossing sector boundaries corrupts the next sector header (see the
-# MERIT_AP_DESC_STRINGS_RAM block comment for the prior incident).
-# 30 slots × 32 B = 960 B fits in the 2048-byte sector ud-region with
-# 1088 B to spare for future shops.
-#
-# **Slot allocation**:
-#   - Slots 144..148: Merit Shop AP slots 10..14 (this commit).
-#   - Slots 149..173: reserved for future shops (File City regular
-#     shop, Secret shops, etc.).
-#
-# **Sector-boundary alignment**: each individual 32-byte slot write
-# stays inside the sector since 32 << 2048. Future shops can write to
-# any slot in 144..173 via :func:`ext_item_para_slot_bin_offset`.
+# What this buys: ext slots 128..255 live contiguously at natural
+# positions in ONE table — the merit scan-loop bound extends over them
+# directly, ext_item_para_slot_bin_offset is a single-segment
+# computation into the seed block, and the four Cave6 teleport
+# wrappers plus their inline patch sites are retired.
 
-CAVE6_ITEM_PARA_EXT_RAM: Final = 0x80096800
-CAVE6_ITEM_PARA_EXT_SLOT_BASE: Final = 144
-CAVE6_ITEM_PARA_EXT_SLOT_COUNT: Final = 30
-CAVE6_ITEM_PARA_EXT_SLOT_LAST: Final = (
-    CAVE6_ITEM_PARA_EXT_SLOT_BASE + CAVE6_ITEM_PARA_EXT_SLOT_COUNT - 1       # 173
-)
-CAVE6_ITEM_PARA_EXT_SIZE: Final = (
-    CAVE6_ITEM_PARA_EXT_SLOT_COUNT * ROM_ITEM_TABLE_ENTRY_SIZE               # 960
-)
-CAVE6_ITEM_PARA_EXT_BIN_OFFSET: Final = _slus_ram_to_bin_offset(
-    CAVE6_ITEM_PARA_EXT_RAM,
-)
-# Bounds: must fit inside Cave6 and inside one 2048-byte sector.
-assert CAVE6_ITEM_PARA_EXT_RAM + CAVE6_ITEM_PARA_EXT_SIZE <= _CAVE6_END_RAM, (
-    f"Cave6 ITEM_PARA ext overflow: ends at "
-    f"0x{CAVE6_ITEM_PARA_EXT_RAM + CAVE6_ITEM_PARA_EXT_SIZE:08X}, "
-    f"Cave6 ends at 0x{_CAVE6_END_RAM:08X}"
-)
-# Sector 148351's ud-region: 0x80096800..0x80097000 (2048 B). The whole
-# ext segment must stay within this single sector.
-assert CAVE6_ITEM_PARA_EXT_RAM + CAVE6_ITEM_PARA_EXT_SIZE <= 0x80097000, (
-    f"Cave6 ITEM_PARA ext crosses sector 148351 boundary at 0x80097000"
-)
-assert MERIT_SHOP_AP_ITEM_ID_LAST <= CAVE6_ITEM_PARA_EXT_SLOT_LAST, (
-    f"merit shop's highest slot {MERIT_SHOP_AP_ITEM_ID_LAST} exceeds Cave6 "
-    f"ext capacity (last slot {CAVE6_ITEM_PARA_EXT_SLOT_LAST})"
-)
+# --- Heap claim --------------------------------------------------------------
+HEAP_CLAIM_WORD_RAM: Final = 0x80113AB4
+HEAP_CLAIM_WORD_BIN_OFFSET: Final = _slus_ram_to_bin_offset(HEAP_CLAIM_WORD_RAM)
+assert HEAP_CLAIM_WORD_BIN_OFFSET == 0x14D51A7C, hex(HEAP_CLAIM_WORD_BIN_OFFSET)
+HEAP_CLAIM_WORD_VANILLA: Final = 0x801BFB64
+HEAP_CLAIM_WORD_PATCHED: Final = 0x801C1B64
+HEAP_CLAIM_WORD_FORMAT: Final = "<I"
+# New arena after the claim (documentation; the game derives both from
+# the claim word at boot).
+ITEM_PARA_RELOC_NEW_ARENA_BASE: Final = 0x801C1B70
+ITEM_PARA_RELOC_NEW_ARENA_SIZE: Final = 0x2E390
+assert ITEM_PARA_RELOC_END_KUSEG == ITEM_PARA_RELOC_NEW_ARENA_BASE
 
-
-# =============================================================================
-# Merit-scan teleport wrapper (Cave6, conditional on MeritShopLocations)
-# =============================================================================
+# --- EXT_ITEM_PARA seed block (Cave6, .bin-backed) ---------------------------
+# Reuses the exact footprint of the retired Cave6 ITEM_PARA ext
+# segment: sector 148351 ud-bytes 0..959 (RAM 0x80096800..0x80096BC0).
+# The patcher ALWAYS writes a 960-byte zero-fill here first (so
+# unpopulated ext slots decode as empty entries with meritValue 0 —
+# this also closes the merit-only gap where slots 128..134 previously
+# read as garbage rows when the recycle option was off), then the shop
+# token writers overlay their 32-byte entries via
+# :func:`ext_item_para_slot_bin_offset`. The boot hook copies the whole
+# block to :data:`ITEM_PARA_RELOC_EXT_KUSEG`.
 #
-# The merit-shop ITEM_PARA scan loop iterates over slot_id 0..N-1
-# (with N bumped from 128 to 149 by ROM_MERIT_SCAN_BOUND_*). Per
-# iteration the original code at PC 0x80107... computes
-#   r10 = ITEM_PARA + r7        (r7 = slot_id * 32)
-# via the 3-instruction sequence at PCs 0x0010732C..0x00107334:
-#
-#   0x0010732C  lui   r9, 0x8012
-#   0x00107330  addiu r9, r9, 0x69f4    ; r9 = vanilla ITEM_PARA + 0x18
-#   0x00107334  addu  r10, r9, r7       ; r10 = ITEM_PARA + r7 + 0x18
-#
-# This fails for slot_id >= 144 because slot 144's natural ITEM_PARA
-# address is 0x80127BDC (= start of the per-item color table) and
-# higher slots walk further into the color table — corruption.
-#
-# Patch: replace those 3 instructions with ``j teleport_wrapper; nop;
-# nop``. The wrapper computes r10 = ITEM_PARA[slot_id].meritValue based
-# on whether slot_id is in the freed-DESC range (< 144) or the Cave6
-# ext range (>= 144), then ``j 0x80107338`` (= the original ``lhu``
-# instruction after the patched 3) to return to the scan loop body.
-#
-# No ``$ra`` clobber: we use unconditional ``j``, not ``jal``. The
-# scan loop's own ``jr $ra`` at function end stays intact.
-
-CAVE6_MERIT_SCAN_TELEPORT_WRAPPER_RAM: Final = (
-    ROM_MERIT_SHOP_EXT_WRAPPER_RAM + len(ROM_MERIT_SHOP_EXT_WRAPPER_BYTES)
+# Staging ceiling: 30 slots (128..157). The relocated table itself has
+# room up to slot 255; staging more than 30 ext slots needs a second
+# .bin-backed seed source (none is free in Cave6 — next candidate is a
+# heap-region extension, deferred until a shop actually needs it).
+EXT_ITEM_PARA_SEED_RAM: Final = 0x80096800
+EXT_ITEM_PARA_SEED_SLOT_BASE: Final = 128
+EXT_ITEM_PARA_SEED_SLOT_COUNT: Final = 30
+EXT_ITEM_PARA_SEED_SLOT_LAST: Final = (
+    EXT_ITEM_PARA_SEED_SLOT_BASE + EXT_ITEM_PARA_SEED_SLOT_COUNT - 1         # 157
 )
-assert CAVE6_MERIT_SCAN_TELEPORT_WRAPPER_RAM % 4 == 0, hex(
-    CAVE6_MERIT_SCAN_TELEPORT_WRAPPER_RAM
+EXT_ITEM_PARA_SEED_SIZE: Final = (
+    EXT_ITEM_PARA_SEED_SLOT_COUNT * ROM_ITEM_TABLE_ENTRY_SIZE                # 960
 )
-CAVE6_MERIT_SCAN_TELEPORT_WRAPPER_OFFSET: Final = _slus_ram_to_bin_offset(
-    CAVE6_MERIT_SCAN_TELEPORT_WRAPPER_RAM,
+EXT_ITEM_PARA_SEED_BIN_OFFSET: Final = _slus_ram_to_bin_offset(
+    EXT_ITEM_PARA_SEED_RAM,
+)
+# Bounds: inside Cave6; sector-aligned base (ud-byte 0 of sector
+# 148351) so the single flat 960-byte zero-fill token write stays
+# inside one 2048-byte user-data region.
+assert EXT_ITEM_PARA_SEED_RAM + EXT_ITEM_PARA_SEED_SIZE <= _CAVE6_END_RAM, (
+    f"EXT_ITEM_PARA seed overflows Cave6: ends at "
+    f"0x{EXT_ITEM_PARA_SEED_RAM + EXT_ITEM_PARA_SEED_SIZE:08X}"
+)
+assert (EXT_ITEM_PARA_SEED_RAM - 0x80096000) % 2048 == 0, (
+    hex(EXT_ITEM_PARA_SEED_RAM)
+)
+assert EXT_ITEM_PARA_SEED_SIZE <= 2048, EXT_ITEM_PARA_SEED_SIZE
+assert MERIT_SHOP_AP_ITEM_ID_LAST <= EXT_ITEM_PARA_SEED_SLOT_LAST, (
+    f"merit shop's highest slot {MERIT_SHOP_AP_ITEM_ID_LAST} exceeds the "
+    f"seed block's last slot {EXT_ITEM_PARA_SEED_SLOT_LAST}"
 )
 
-# The 3-instruction patch site in the merit scan loop body.
-ROM_MERIT_SCAN_BASE_PATCH_RAM: Final = 0x8010732C
-ROM_MERIT_SCAN_BASE_PATCH_OFFSET: Final = _slus_ram_to_bin_offset(
-    ROM_MERIT_SCAN_BASE_PATCH_RAM,
+# --- MIPS word encoders (module-private) -------------------------------------
+# Shared by the boot-hook builder and the reader-site patch tables.
+
+
+def _mips_lui(rt: int, imm: int) -> int:
+    return 0x3C000000 | (rt << 16) | (imm & 0xFFFF)
+
+
+def _mips_addiu(rt: int, rs: int, imm: int) -> int:
+    return 0x24000000 | (rs << 21) | (rt << 16) | (imm & 0xFFFF)
+
+
+def _mips_lw(rt: int, rs: int, imm: int) -> int:
+    return 0x8C000000 | (rs << 21) | (rt << 16) | (imm & 0xFFFF)
+
+
+def _mips_sw(rt: int, rs: int, imm: int) -> int:
+    return 0xAC000000 | (rs << 21) | (rt << 16) | (imm & 0xFFFF)
+
+
+def _mips_bne(rs: int, rt: int, off: int) -> int:
+    return 0x14000000 | (rs << 21) | (rt << 16) | (off & 0xFFFF)
+
+
+def _mips_jal(target: int) -> int:
+    return 0x0C000000 | ((target >> 2) & 0x03FFFFFF)
+
+
+def _mips_jr_ra() -> int:
+    return 0x03E00008
+
+
+# --- Boot seed hook ----------------------------------------------------------
+# Hijack site: master-init FUN_800EE800's first call.
+BOOT_SEED_HOOK_SITE_RAM: Final = 0x800EE80C
+BOOT_SEED_HOOK_SITE_OFFSET: Final = _slus_ram_to_bin_offset(BOOT_SEED_HOOK_SITE_RAM)
+BOOT_SEED_HOOK_DISPLACED_CALLEE_RAM: Final = 0x800EEBDC
+BOOT_SEED_HOOK_VANILLA_WORD: Final = 0x0C03BAF7            # jal 0x800EEBDC
+assert BOOT_SEED_HOOK_VANILLA_WORD == _mips_jal(BOOT_SEED_HOOK_DISPLACED_CALLEE_RAM)
+BOOT_SEED_HOOK_FORMAT: Final = "<I"
+
+# Wrapper placement: the space freed by retiring the merit scan+name
+# teleport wrappers, immediately after the merit ext wrapper. Always-on
+# (the merit ext wrapper before it is opt-in, but its space is reserved
+# either way). Stays inside sector 148350's ud-region and clear of the
+# transition-gate wrapper at 0x800966C4 (region-gate section below).
+ITEM_PARA_BOOT_HOOK_RAM: Final = (
+    ROM_MERIT_SHOP_EXT_WRAPPER_RAM + len(ROM_MERIT_SHOP_EXT_WRAPPER_BYTES)   # 0x800965BC
 )
-# Return target inside the scan loop body (the ``lhu`` instruction
-# immediately after the 3 patched instructions).
-ROM_MERIT_SCAN_RETURN_RAM: Final = 0x80107338
+assert ITEM_PARA_BOOT_HOOK_RAM == 0x800965BC, hex(ITEM_PARA_BOOT_HOOK_RAM)
+assert ITEM_PARA_BOOT_HOOK_RAM % 4 == 0
+ITEM_PARA_BOOT_HOOK_OFFSET: Final = _slus_ram_to_bin_offset(ITEM_PARA_BOOT_HOOK_RAM)
 
 
-def _build_merit_scan_teleport_wrapper_bytes() -> bytes:
-    """Build the 16-instruction (64 B) teleport wrapper.
+def _build_item_para_boot_hook_bytes() -> bytes:
+    """Build the 37-instruction (148 B) boot seed hook.
 
-    Returns bytes ready for an apply_tokens ``WRITE`` at
-    :data:`CAVE6_MERIT_SCAN_TELEPORT_WRAPPER_OFFSET`. The wrapper
-    expects scan-loop registers in their original meanings:
-      * r5 = slot_id  (loop counter, 0..148)
-      * r7 = slot_id * 32  (byte offset into vanilla ITEM_PARA)
+    Faithful port of the lab's validated ``assemble_boot_hook`` (Net-1
+    interpreter replay + Net-2 live battery + Net-3 disc boot); only
+    the seed source (production seed block 0x80096800, 960 B) differs
+    from the lab layout (0x80095FE0, 224 B).
 
-    On exit (via unconditional ``j``):
-      * r10 = address of the current slot's ``meritValue`` halfword
-        (= base + 0x18, where base is vanilla 0x801269DC or Cave6 ext
-        :data:`CAVE6_ITEM_PARA_EXT_RAM`).
-      * r9, r1 are clobbered (temp-use).
-      * Control returns to :data:`ROM_MERIT_SCAN_RETURN_RAM`.
+    R3000 rules honored: no load consumer in a load-delay slot; branch
+    delay slots carry the dst-pointer increments (they execute on every
+    iteration including the fall-through last one); jr delay slot nop.
+    Registers t0/t1/t2/t3 are caller-saved — free to clobber between
+    the displaced call and the return.
     """
 
     import struct as _struct
 
-    # Encode ``j ROM_MERIT_SCAN_RETURN_RAM`` once — used twice.
-    j_return = 0x08000000 | (
-        (ROM_MERIT_SCAN_RETURN_RAM >> 2) & 0x03FFFFFF
-    )
+    zero, t0, t1, t2, t3, sp, ra = 0, 8, 9, 10, 11, 29, 31
 
-    # Cave6 ext base low/high. CAVE6_ITEM_PARA_EXT_RAM = 0x80096800;
-    # low half = 0x6800 < 0x8000, no sign-extension needed.
-    cave6_hi = (CAVE6_ITEM_PARA_EXT_RAM >> 16) & 0xFFFF                       # 0x8009
-    cave6_lo = CAVE6_ITEM_PARA_EXT_RAM & 0xFFFF                               # 0x6800
-    assert cave6_lo < 0x8000, hex(cave6_lo)
+    src_hi, src_lo = _decompose_kuseg(RAM_ITEM_PARA_KUSEG)        # (0x8012, 0x69DC)
+    dst_hi, dst_lo = _decompose_kuseg(ITEM_PARA_RELOC_BASE_KUSEG)  # (0x801C, 0xFB70)
+    ext_hi, ext_lo = _decompose_kuseg(ITEM_PARA_RELOC_EXT_KUSEG)   # (0x801C, 0x0B70)
+    seed_hi, seed_lo = _decompose_kuseg(EXT_ITEM_PARA_SEED_RAM)    # (0x8009, 0x6800)
 
-    threshold = CAVE6_ITEM_PARA_EXT_SLOT_BASE                                 # 144 = 0x90
+    words = [
+        _mips_addiu(sp, sp, -0x18),                # 0  prologue
+        _mips_sw(ra, sp, 0x14),                    # 1
+        _mips_jal(BOOT_SEED_HOOK_DISPLACED_CALLEE_RAM),  # 2  displaced first call
+        0x00000000,                                # 3  (jal delay slot)
+        # loop 1: copy 0x1000 B vanilla+tokens ITEM_PARA -> RELOC base
+        _mips_lui(t0, src_hi),                     # 4
+        _mips_addiu(t0, t0, src_lo),               # 5  t0 = 0x801269DC
+        _mips_lui(t1, dst_hi),                     # 6
+        _mips_addiu(t1, t1, dst_lo),               # 7  t1 = 0x801BFB70
+        _mips_addiu(t2, zero, 0x1000),             # 8  t2 = byte count
+        _mips_lw(t3, t0, 0),                       # 9  L1:
+        _mips_addiu(t0, t0, 4),                    # 10 (fills t3 load delay)
+        _mips_sw(t3, t1, 0),                       # 11
+        _mips_addiu(t2, t2, -4),                   # 12
+        _mips_bne(t2, zero, 9 - 14),               # 13 -> L1
+        _mips_addiu(t1, t1, 4),                    # 14 (branch delay: dst += 4)
+        # loop 2: zero 0x1000 B at RELOC ext (slots 128..255)
+        _mips_lui(t1, ext_hi),                     # 15
+        _mips_addiu(t1, t1, ext_lo),               # 16 t1 = 0x801C0B70
+        _mips_addiu(t2, zero, 0x1000),             # 17
+        _mips_sw(zero, t1, 0),                     # 18 L2:
+        _mips_addiu(t2, t2, -4),                   # 19
+        _mips_bne(t2, zero, 18 - 21),              # 20 -> L2
+        _mips_addiu(t1, t1, 4),                    # 21 (branch delay: dst += 4)
+        # loop 3: copy the seed block (960 B) Cave6 -> RELOC ext
+        _mips_lui(t0, seed_hi),                    # 22
+        _mips_addiu(t0, t0, seed_lo),              # 23 t0 = 0x80096800
+        _mips_lui(t1, ext_hi),                     # 24
+        _mips_addiu(t1, t1, ext_lo),               # 25 t1 = 0x801C0B70
+        _mips_addiu(t2, zero, EXT_ITEM_PARA_SEED_SIZE),  # 26
+        _mips_lw(t3, t0, 0),                       # 27 L3:
+        _mips_addiu(t0, t0, 4),                    # 28 (fills t3 load delay)
+        _mips_sw(t3, t1, 0),                       # 29
+        _mips_addiu(t2, t2, -4),                   # 30
+        _mips_bne(t2, zero, 27 - 32),              # 31 -> L3
+        _mips_addiu(t1, t1, 4),                    # 32 (branch delay: dst += 4)
+        # epilogue
+        _mips_lw(ra, sp, 0x14),                    # 33
+        _mips_addiu(sp, sp, 0x18),                 # 34 (fills ra load delay)
+        _mips_jr_ra(),                             # 35
+        0x00000000,                                # 36 (jr delay slot)
+    ]
+    assert len(words) == 37, len(words)
+    return b"".join(_struct.pack("<I", w) for w in words)
 
-    out = bytearray()
 
-    # offset 0x00 — sltiu r1, r5, threshold (r1 = r5 < 144)
-    out += _struct.pack("<I", (0x0B << 26) | (5 << 21) | (1 << 16) | threshold)
-    # offset 0x04 — beq r1, r0, +6 (skip vanilla path -> ext_path at 0x20)
-    out += _struct.pack("<I", (0x04 << 26) | (1 << 21) | (0 << 16) | 6)
-    # offset 0x08 — nop (branch delay slot)
-    out += _struct.pack("<I", 0x00000000)
+ITEM_PARA_BOOT_HOOK_BYTES: Final = _build_item_para_boot_hook_bytes()
+assert len(ITEM_PARA_BOOT_HOOK_BYTES) == 148, len(ITEM_PARA_BOOT_HOOK_BYTES)
 
-    # Vanilla path: r10 = 0x801269F4 + r7
-    # offset 0x0C — lui r9, 0x8012
-    out += _struct.pack("<I", 0x3C098012)
-    # offset 0x10 — addiu r9, r9, 0x69F4
-    out += _struct.pack("<I", 0x252969F4)
-    # offset 0x14 — addu r10, r9, r7
-    out += _struct.pack("<I", 0x01275021)
-    # offset 0x18 — j ROM_MERIT_SCAN_RETURN_RAM
-    out += _struct.pack("<I", j_return)
-    # offset 0x1C — nop (delay slot)
-    out += _struct.pack("<I", 0x00000000)
+# Placement asserts: inside sector 148350's ud-region (ends at RAM
+# 0x80096800) and clear of the transition-gate wrapper at 0x800966C4
+# (defined in the region-gate section at the bottom of this file; the
+# literal is asserted there against this bound too).
+_ITEM_PARA_BOOT_HOOK_END_RAM: Final = (
+    ITEM_PARA_BOOT_HOOK_RAM + len(ITEM_PARA_BOOT_HOOK_BYTES)                 # 0x80096650
+)
+assert _ITEM_PARA_BOOT_HOOK_END_RAM <= 0x800966C4, hex(_ITEM_PARA_BOOT_HOOK_END_RAM)
+assert _ITEM_PARA_BOOT_HOOK_END_RAM <= 0x80096800, hex(_ITEM_PARA_BOOT_HOOK_END_RAM)
 
-    # Ext path: r10 = CAVE6_EXT + (r5 - 144) * 32 + 0x18
-    # offset 0x20 — addi r9, r5, -144   (signed imm = 0xFF70)
-    out += _struct.pack("<I", (0x08 << 26) | (5 << 21) | (9 << 16) | 0xFF70)
-    # offset 0x24 — sll r9, r9, 5       (* 32)
-    out += _struct.pack("<I", (0 << 26) | (0 << 21) | (9 << 16) | (9 << 11) | (5 << 6))
-    # offset 0x28 — lui r1, cave6_hi
-    out += _struct.pack("<I", (0x0F << 26) | (0 << 21) | (1 << 16) | cave6_hi)
-    # offset 0x2C — addiu r1, r1, cave6_lo
-    out += _struct.pack("<I", (0x09 << 26) | (1 << 21) | (1 << 16) | cave6_lo)
-    # offset 0x30 — addu r10, r1, r9
-    out += _struct.pack("<I", (0 << 26) | (1 << 21) | (9 << 16) | (10 << 11) | (0 << 6) | 0x21)
-    # offset 0x34 — addiu r10, r10, 0x18
-    out += _struct.pack("<I", (0x09 << 26) | (10 << 21) | (10 << 16) | 0x18)
-    # offset 0x38 — j ROM_MERIT_SCAN_RETURN_RAM
-    out += _struct.pack("<I", j_return)
-    # offset 0x3C — nop (delay slot)
-    out += _struct.pack("<I", 0x00000000)
+# The jal redirect written over the hijack site.
+BOOT_SEED_HOOK_PATCH_VALUE: Final = _mips_jal(ITEM_PARA_BOOT_HOOK_RAM)
+assert BOOT_SEED_HOOK_PATCH_VALUE == 0x0C02596F, hex(BOOT_SEED_HOOK_PATCH_VALUE)
 
-    return bytes(out)
-
-
-ROM_MERIT_SCAN_TELEPORT_WRAPPER_BYTES: Final = _build_merit_scan_teleport_wrapper_bytes()
-assert len(ROM_MERIT_SCAN_TELEPORT_WRAPPER_BYTES) == 64, (
-    len(ROM_MERIT_SCAN_TELEPORT_WRAPPER_BYTES)
+# --- SLUS reader sites (24 sites, 48 words) ----------------------------------
+# Source: the lab census (dw1_scan_item_para_readers.py re-run
+# 2026-08-20; identical to Path A's enumeration). Each row is
+# ``(lui_ram, addiu_ram, reg, field_offset)`` for a lui+addiu pair
+# constructing ``vanilla ITEM_PARA + field``. Vanilla and patched words
+# are derived below and byte-asserted against the shipped .bin by the
+# test suite and by dw1_apply_patch-style verification.
+_ITEM_PARA_READER_SITES: Final[tuple[tuple[int, int, int, int], ...]] = (
+    (0x800AA3AC, 0x800AA3B0, 2, 0x00),
+    (0x800AA760, 0x800AA764, 2, 0x00),
+    (0x800DAB40, 0x800DAB48, 2, 0x00),
+    (0x800DAC10, 0x800DAC18, 2, 0x00),
+    (0x800DAD70, 0x800DAD74, 2, 0x00),
+    (0x800DB7C8, 0x800DB7D0, 2, 0x1C),
+    (0x800DC814, 0x800DC81C, 2, 0x00),
+    (0x800DC8E8, 0x800DC8F0, 2, 0x1D),
+    (0x800DCAB8, 0x800DCAC0, 5, 0x1A),
+    (0x800E4D20, 0x800E4D28, 2, 0x1A),
+    (0x800FA8F8, 0x800FA8FC, 2, 0x14),
+    (0x800FAAAC, 0x800FAAB4, 5, 0x1D),
+    (0x800FB018, 0x800FB020, 2, 0x18),   # merit purchase-deduct meritValue read
+    (0x800FB740, 0x800FB744, 2, 0x00),
+    (0x800FB75C, 0x800FB760, 2, 0x00),
+    (0x800FD034, 0x800FD03C, 2, 0x14),
+    (0x800FE7F4, 0x800FE7F8, 2, 0x00),   # merit row-display name read
+    (0x800FE874, 0x800FE878, 2, 0x14),   # merit row-display value read
+    (0x800FE8FC, 0x800FE900, 2, 0x18),   # merit row-display meritValue read
+    (0x800FF01C, 0x800FF024, 2, 0x00),
+    (0x800FF0A8, 0x800FF0B0, 2, 0x00),
+    (0x80101A4C, 0x80101A54, 2, 0x00),   # name renderer (ex name-teleport site)
+    (0x80106D90, 0x80106D98, 5, 0x14),
+    (0x8010732C, 0x80107330, 9, 0x18),   # merit scan meritValue base (ex scan-teleport site)
 )
 
-# Cave6 layout assertion: teleport wrapper must stay inside sector
-# 148350's ud-region (ends at RAM 0x80096800).
-assert (CAVE6_MERIT_SCAN_TELEPORT_WRAPPER_RAM
-        + len(ROM_MERIT_SCAN_TELEPORT_WRAPPER_BYTES)
-        <= 0x80096800), (
-    f"merit-scan teleport wrapper "
-    f"0x{CAVE6_MERIT_SCAN_TELEPORT_WRAPPER_RAM:08X}.."
-    f"0x{CAVE6_MERIT_SCAN_TELEPORT_WRAPPER_RAM + len(ROM_MERIT_SCAN_TELEPORT_WRAPPER_BYTES):08X} "
-    f"crosses Cave6 sector 148350 boundary at 0x80096800"
+
+def _build_item_para_reader_word_patches() -> tuple[tuple[int, int, int], ...]:
+    """Derive the 48 SLUS reader-word patches.
+
+    Returns ``((bin_offset, patched_word, vanilla_word), ...)`` — two
+    rows per site (lui then addiu). Uniform hi-half by design: every
+    re-based target ``RELOC + field`` falls in the sign-extension
+    window, so each patched lui is ``lui reg, 0x801C`` and each patched
+    addiu low half is ``0xFB70 + field``.
+    """
+
+    rows: list[tuple[int, int, int]] = []
+    for lui_ram, addiu_ram, reg, field in _ITEM_PARA_READER_SITES:
+        van_hi, van_lo = _decompose_kuseg(RAM_ITEM_PARA_KUSEG + field)
+        new_hi, new_lo = _decompose_kuseg(ITEM_PARA_RELOC_BASE_KUSEG + field)
+        assert van_hi == 0x8012 and van_lo == 0x69DC + field
+        assert new_hi == 0x801C, hex(new_hi)
+        rows.append((
+            _slus_ram_to_bin_offset(lui_ram),
+            _mips_lui(reg, new_hi),
+            _mips_lui(reg, van_hi),
+        ))
+        rows.append((
+            _slus_ram_to_bin_offset(addiu_ram),
+            _mips_addiu(reg, reg, new_lo),
+            _mips_addiu(reg, reg, van_lo),
+        ))
+    return tuple(rows)
+
+
+ITEM_PARA_READER_WORD_PATCHES: Final = _build_item_para_reader_word_patches()
+assert len(ITEM_PARA_READER_WORD_PATCHES) == 48, len(ITEM_PARA_READER_WORD_PATCHES)
+
+# --- Overlay reader sites (7 sites, 14 words) --------------------------------
+# Overlays reload from disc per activation, so these are patched at
+# their .bin file offsets (root files at fixed LBAs, Mode2/2352).
+# BTL_REL vanilla words were additionally verified LIVE in the resident
+# overlay (RAM base 0x80052AE0) during the lab's Net 2.
+
+_OVERLAY_BTL_LBA: Final = 147703
+_OVERLAY_FISH_LBA: Final = 147843
+
+
+def _overlay_file_to_bin(lba: int, file_off: int) -> int:
+    """Flat .bin offset of ``file_off`` inside a root file at ``lba``."""
+
+    sector = lba + file_off // 2048
+    return sector * SECTOR_SIZE_BYTES + SECTOR_HEADER_BYTES + (file_off % 2048)
+
+
+# Anchor cross-check: the chest wrapper's known .bin offset must
+# reproduce through the LBA formula (SLUS at LBA 148338, 0x800-byte EXE
+# header, load base 0x80090800).
+_SLUS_LBA: Final = 148338
+_SLUS_EXE_HEADER_BYTES: Final = 0x800
+_SLUS_LOAD_BASE_RAM: Final = 0x80090800
+assert _overlay_file_to_bin(
+    _SLUS_LBA,
+    ROM_CHEST_GIVEITEM_WRAPPER_RAM - _SLUS_LOAD_BASE_RAM + _SLUS_EXE_HEADER_BYTES,
+) == ROM_CHEST_GIVEITEM_WRAPPER_OFFSET
+
+# ``(file, lba, lui_file_off, addiu_file_off, reg, field_offset)``
+_ITEM_PARA_OVERLAY_READER_SITES: Final[
+    tuple[tuple[str, int, int, int, int, int], ...]
+] = (
+    ("BTL_REL.BIN", _OVERLAY_BTL_LBA, 0xFED4, 0xFED8, 2, 0x00),
+    ("FISH_REL.BIN", _OVERLAY_FISH_LBA, 0x0BA4, 0x0BAC, 2, 0x00),
+    ("FISH_REL.BIN", _OVERLAY_FISH_LBA, 0x10DC, 0x10E4, 3, 0x1A),
+    ("FISH_REL.BIN", _OVERLAY_FISH_LBA, 0x913C, 0x9140, 2, 0x00),
+    ("FISH_REL.BIN", _OVERLAY_FISH_LBA, 0x917C, 0x9180, 2, 0x00),
+    ("FISH_REL.BIN", _OVERLAY_FISH_LBA, 0x93F0, 0x93F4, 2, 0x00),
+    ("FISH_REL.BIN", _OVERLAY_FISH_LBA, 0x9430, 0x9434, 2, 0x00),
 )
+
+
+def _build_item_para_overlay_word_patches() -> tuple[tuple[str, int, int, int], ...]:
+    """Derive the 14 overlay reader-word patches.
+
+    Returns ``((file, bin_offset, patched_word, vanilla_word), ...)``.
+    Same lui/addiu re-encoding as the SLUS sites; offsets translated
+    through the LBA formula. Each 4-byte word is 4-aligned within its
+    2048-byte user-data region, so a flat token write is sector-safe.
+    """
+
+    rows: list[tuple[str, int, int, int]] = []
+    for fname, lba, lui_off, addiu_off, reg, field in _ITEM_PARA_OVERLAY_READER_SITES:
+        van_hi, van_lo = _decompose_kuseg(RAM_ITEM_PARA_KUSEG + field)
+        new_hi, new_lo = _decompose_kuseg(ITEM_PARA_RELOC_BASE_KUSEG + field)
+        assert new_hi == 0x801C, hex(new_hi)
+        for file_off, patched, vanilla in (
+            (lui_off, _mips_lui(reg, new_hi), _mips_lui(reg, van_hi)),
+            (addiu_off, _mips_addiu(reg, reg, new_lo), _mips_addiu(reg, reg, van_lo)),
+        ):
+            assert file_off % 4 == 0 and file_off % 2048 <= 2044, hex(file_off)
+            rows.append((fname, _overlay_file_to_bin(lba, file_off), patched, vanilla))
+    return tuple(rows)
+
+
+ITEM_PARA_OVERLAY_WORD_PATCHES: Final = _build_item_para_overlay_word_patches()
+assert len(ITEM_PARA_OVERLAY_WORD_PATCHES) == 14, len(ITEM_PARA_OVERLAY_WORD_PATCHES)
+
+# Lock the derived offsets to the lab-validated spec values
+# (item_para_reloc.json, Net-3 verified in the built image).
+_EXPECTED_OVERLAY_BIN_OFFSETS: Final = (
+    0x14B6010C, 0x14B60110,                       # BTL_REL.BIN +0xFED4/+0xFED8
+    0x14B9F07C, 0x14B9F084,                       # FISH_REL.BIN +0x0BA4/+0x0BAC
+    0x14B9F6E4, 0x14B9F6EC,                       # FISH_REL.BIN +0x10DC/+0x10E4
+    0x14BA8A44, 0x14BA8A48,                       # FISH_REL.BIN +0x913C/+0x9140
+    0x14BA8A84, 0x14BA8A88,                       # FISH_REL.BIN +0x917C/+0x9180
+    0x14BA8CF8, 0x14BA8CFC,                       # FISH_REL.BIN +0x93F0/+0x93F4
+    0x14BA8D38, 0x14BA8D3C,                       # FISH_REL.BIN +0x9430/+0x9434
+)
+assert tuple(
+    off for _f, off, _p, _v in ITEM_PARA_OVERLAY_WORD_PATCHES
+) == _EXPECTED_OVERLAY_BIN_OFFSETS
 
 
 # =============================================================================
-# Merit-shop NAME teleport wrapper (Cave6, conditional on MeritShopLocations)
+# Cave6 teleport wrappers — RETIRED 2026-08-21
 # =============================================================================
 #
-# Independent from the scan teleport. The merit shop renders each row's
-# name via a SEPARATE codepath at PC 0x80101A4C..0x00101A58 (= the
-# 22nd ITEM_PARA reader from tools/dw1_scan_item_para_readers.py). It
-# computes the name address as
-#   r5 = ITEM_PARA + slot_id * 32
-# via
-#   0x00101A4C  lui r2, 0x8012
-#   0x00101A50  sll r3, r5, 5         (r5 = slot_id in, r3 = slot*32)
-#   0x00101A54  addiu r2, r2, 0x69DC
-#   0x00101A58  addu r5, r2, r3       (r5 = name addr out)
-# then jal's a text renderer with r5 as the string pointer.
-#
-# For slot_id >= 144 (Cave6 ext) this naively reads from RAM
-# 0x80127BDC — the per-item color table — and the text renderer
-# treats palette bytes as ASCII (visible as triangles / corrupt text
-# in the merit shop UI; bug reported 2026-05-13 against the Cave6
-# multi-segment release).
-#
-# Fix: patch the same 3 instructions with ``j name_wrapper; nop; nop``,
-# wrapper computes r5 = ITEM_PARA-or-CAVE6_EXT + slot_offset, then
-# ``j`` back to 0x80101A5C (the next instruction, ``addu r18, r5, r0``).
-# Same return-via-``j`` approach as the scan wrapper — no $ra clobber.
-
-CAVE6_MERIT_NAME_TELEPORT_WRAPPER_RAM: Final = (
-    CAVE6_MERIT_SCAN_TELEPORT_WRAPPER_RAM
-    + len(ROM_MERIT_SCAN_TELEPORT_WRAPPER_BYTES)
-)
-assert CAVE6_MERIT_NAME_TELEPORT_WRAPPER_RAM % 4 == 0, hex(
-    CAVE6_MERIT_NAME_TELEPORT_WRAPPER_RAM
-)
-CAVE6_MERIT_NAME_TELEPORT_WRAPPER_OFFSET: Final = _slus_ram_to_bin_offset(
-    CAVE6_MERIT_NAME_TELEPORT_WRAPPER_RAM,
-)
-
-# The 3-instruction patch site in the name-renderer's pointer setup.
-ROM_MERIT_NAME_PATCH_RAM: Final = 0x80101A4C
-ROM_MERIT_NAME_PATCH_OFFSET: Final = _slus_ram_to_bin_offset(
-    ROM_MERIT_NAME_PATCH_RAM,
-)
-# Return target = the instruction immediately after the patch site
-# (``addu r18, r5, r0`` that copies r5 into r18 before the text renderer
-# jal at 0x80101A60).
-ROM_MERIT_NAME_RETURN_RAM: Final = 0x80101A5C
-
-
-def _build_merit_name_teleport_wrapper_bytes() -> bytes:
-    """Build the 16-instruction (64 B) name-renderer teleport wrapper.
-
-    Input: r5 = slot_id (the merit shop's current row's item id, already
-    ``andi r5, r5, 0xFF``-masked by the original 0x00101A48).
-    Output: r5 = name field address inside ITEM_PARA[slot_id]
-    (== ITEM_PARA_base[slot_id] + 0; the text renderer reads bytes 0..19
-    as the ASCII name string).
-
-    Layout (16 words, 64 B). Vanilla path occupies words 3..7; ext path
-    occupies words 9..14. The ``j`` instructions' delay slots are
-    explicit nops at offsets 0x20 and 0x3C — no overlap with the
-    ext_path entry label at 0x24.
-
-    Clobbers r1, r2, r3, r5 (same set the original 3 instructions
-    clobber, plus r1 for the threshold compare). r4, r16, r17, r18,
-    $sp are preserved.
-    """
-
-    import struct as _struct
-
-    j_return = 0x08000000 | (
-        (ROM_MERIT_NAME_RETURN_RAM >> 2) & 0x03FFFFFF
-    )
-
-    cave6_hi = (CAVE6_ITEM_PARA_EXT_RAM >> 16) & 0xFFFF                       # 0x8009
-    cave6_lo = CAVE6_ITEM_PARA_EXT_RAM & 0xFFFF                               # 0x6800
-
-    threshold = CAVE6_ITEM_PARA_EXT_SLOT_BASE                                 # 144
-
-    out = bytearray()
-
-    # offset 0x00 — sltiu r1, r5, threshold
-    out += _struct.pack("<I", (0x0B << 26) | (5 << 21) | (1 << 16) | threshold)
-    # offset 0x04 — beq r1, r0, +7 (ext_path target = 0x04 + 4 + 7*4 = 0x24)
-    out += _struct.pack("<I", (0x04 << 26) | (1 << 21) | (0 << 16) | 7)
-    # offset 0x08 — nop (branch delay slot)
-    out += _struct.pack("<I", 0x00000000)
-
-    # Vanilla path (offsets 0x0C..0x20): r5 = vanilla ITEM_PARA + slot*32
-    # offset 0x0C — sll r3, r5, 5
-    out += _struct.pack("<I", (0 << 26) | (0 << 21) | (5 << 16) | (3 << 11) | (5 << 6))
-    # offset 0x10 — lui r2, 0x8012
-    out += _struct.pack("<I", 0x3C028012)
-    # offset 0x14 — addiu r2, r2, 0x69DC
-    out += _struct.pack("<I", 0x244269DC)
-    # offset 0x18 — addu r5, r2, r3
-    out += _struct.pack("<I", (0 << 26) | (2 << 21) | (3 << 16) | (5 << 11) | (0 << 6) | 0x21)
-    # offset 0x1C — j ROM_MERIT_NAME_RETURN_RAM
-    out += _struct.pack("<I", j_return)
-    # offset 0x20 — nop (j delay slot)
-    out += _struct.pack("<I", 0x00000000)
-
-    # Ext path (offsets 0x24..0x3C): r5 = CAVE6_EXT + (slot - 144) * 32
-    # offset 0x24 — addi r3, r5, -144  (signed imm = 0xFF70)
-    out += _struct.pack("<I", (0x08 << 26) | (5 << 21) | (3 << 16) | 0xFF70)
-    # offset 0x28 — sll r3, r3, 5
-    out += _struct.pack("<I", (0 << 26) | (0 << 21) | (3 << 16) | (3 << 11) | (5 << 6))
-    # offset 0x2C — lui r2, cave6_hi
-    out += _struct.pack("<I", (0x0F << 26) | (0 << 21) | (2 << 16) | cave6_hi)
-    # offset 0x30 — addiu r2, r2, cave6_lo
-    out += _struct.pack("<I", (0x09 << 26) | (2 << 21) | (2 << 16) | cave6_lo)
-    # offset 0x34 — addu r5, r2, r3
-    out += _struct.pack("<I", (0 << 26) | (2 << 21) | (3 << 16) | (5 << 11) | (0 << 6) | 0x21)
-    # offset 0x38 — j ROM_MERIT_NAME_RETURN_RAM
-    out += _struct.pack("<I", j_return)
-    # offset 0x3C — nop (j delay slot)
-    out += _struct.pack("<I", 0x00000000)
-
-    return bytes(out)
-
-
-# The 3-instruction patch at ROM_MERIT_SCAN_BASE_PATCH_RAM:
-#   j   CAVE6_MERIT_SCAN_TELEPORT_WRAPPER_RAM
-#   nop
-#   nop
-# Total 12 bytes. Emitted as a single token write when MeritShopLocations
-# is on.
-def _build_merit_scan_base_patch_bytes() -> bytes:
-    import struct as _struct
-    j_wrapper = 0x08000000 | (
-        (CAVE6_MERIT_SCAN_TELEPORT_WRAPPER_RAM >> 2) & 0x03FFFFFF
-    )
-    return (
-        _struct.pack("<I", j_wrapper)
-        + _struct.pack("<I", 0x00000000)
-        + _struct.pack("<I", 0x00000000)
-    )
-
-
-ROM_MERIT_SCAN_BASE_PATCH_BYTES: Final = _build_merit_scan_base_patch_bytes()
-assert len(ROM_MERIT_SCAN_BASE_PATCH_BYTES) == 12
-
-
-ROM_MERIT_NAME_TELEPORT_WRAPPER_BYTES: Final = _build_merit_name_teleport_wrapper_bytes()
-assert len(ROM_MERIT_NAME_TELEPORT_WRAPPER_BYTES) == 64, (
-    len(ROM_MERIT_NAME_TELEPORT_WRAPPER_BYTES)
-)
-
-# Cave6 layout assertion: name teleport wrapper must stay inside sector
-# 148350's ud-region (ends at RAM 0x80096800).
-assert (CAVE6_MERIT_NAME_TELEPORT_WRAPPER_RAM
-        + len(ROM_MERIT_NAME_TELEPORT_WRAPPER_BYTES)
-        <= 0x80096800), (
-    f"merit-name teleport wrapper "
-    f"0x{CAVE6_MERIT_NAME_TELEPORT_WRAPPER_RAM:08X}.."
-    f"0x{CAVE6_MERIT_NAME_TELEPORT_WRAPPER_RAM + len(ROM_MERIT_NAME_TELEPORT_WRAPPER_BYTES):08X} "
-    f"crosses Cave6 sector 148350 boundary at 0x80096800"
-)
-
-
-def _build_merit_name_patch_bytes() -> bytes:
-    """3-instruction patch at ROM_MERIT_NAME_PATCH_RAM (= 0x80101A4C):
-    ``j CAVE6_MERIT_NAME_TELEPORT_WRAPPER_RAM; nop; nop``.
-    """
-
-    import struct as _struct
-    j_wrapper = 0x08000000 | (
-        (CAVE6_MERIT_NAME_TELEPORT_WRAPPER_RAM >> 2) & 0x03FFFFFF
-    )
-    return (
-        _struct.pack("<I", j_wrapper)
-        + _struct.pack("<I", 0x00000000)
-        + _struct.pack("<I", 0x00000000)
-    )
-
-
-ROM_MERIT_NAME_PATCH_BYTES: Final = _build_merit_name_patch_bytes()
-assert len(ROM_MERIT_NAME_PATCH_BYTES) == 12
-
-
-# =============================================================================
-# Merit-shop ROW-DISPLAY function teleport wrapper (Cave6, conditional)
-# =============================================================================
-#
-# The merit shop's per-row display function (entered at SLUS PC
-# 0x000FE704) reads ITEM_PARA[slot] THREE times per row via a shared
-# offset register r17:
-#
-#   0x000FE7F0  sll  r3, r2, 5         r3 = slot * 32 (r2 = slot_id arg)
-#   0x000FE7F4  lui  r2, 0x8012        \\
-#   0x000FE7F8  addiu r2, r2, 0x69DC    > r2 = vanilla ITEM_PARA;
-#   0x000FE7FC  addu r5, r2, r3         / r5 = name addr (= base + r3)
-#   0x000FE800  addu r17, r3, r0       r17 = slot * 32 (saved for siblings)
-#   ...
-#   0x000FE874  lui r2, 0x8012; addiu r2, r2, 0x69F0; addu r2, r2, r17
-#                                      r2 = vanilla.value (= money field)
-#   ...
-#   0x000FE8FC  lui r2, 0x8012; addiu r2, r2, 0x69F4; addu r2, r2, r17
-#                                      r2 = vanilla.meritValue
-#
-# For slot_id >= 144, every one of these reads lands in the per-item
-# color table at RAM 0x80127BDC and the displayed name + value + merit
-# price are all garbage (triangles + nonsense numbers — bug reported
-# 2026-05-13 against the Cave6 multi-segment release; the earlier
-# 0x101A4C name-teleport didn't fix it because the merit shop uses
-# THIS function, not the one at 0x101A4C).
-#
-# **The r17-offset trick**: instead of patching all three reader
-# callsites, patch ONLY the first one (0x000FE7F4) with a wrapper that
-# for slot >= 144 sets r17 = (slot - 144)*32 + (CAVE6 - vanilla). Then
-# the downstream sibling reads — which do ``r2 = vanilla_base + field;
-# addu r2, r2, r17`` — automatically land in Cave6:
-#
-#   r2 + r17 = (vanilla_base + field) + ((slot - 144)*32 + (cave6 - vanilla))
-#            = cave6 + (slot - 144)*32 + field
-#
-# One wrapper fixes name + value + merit reads in a single shot. The
-# vanilla path leaves r17 = slot*32 unchanged, so slot < 144 rows
-# render exactly as before.
-
-CAVE6_MERIT_ROW_TELEPORT_WRAPPER_RAM: Final = (
-    CAVE6_MERIT_NAME_TELEPORT_WRAPPER_RAM
-    + len(ROM_MERIT_NAME_TELEPORT_WRAPPER_BYTES)
-)
-assert CAVE6_MERIT_ROW_TELEPORT_WRAPPER_RAM % 4 == 0, hex(
-    CAVE6_MERIT_ROW_TELEPORT_WRAPPER_RAM
-)
-CAVE6_MERIT_ROW_TELEPORT_WRAPPER_OFFSET: Final = _slus_ram_to_bin_offset(
-    CAVE6_MERIT_ROW_TELEPORT_WRAPPER_RAM,
-)
-
-# Patch site = 4 instructions at PC 0x000FE7F4 (lui through addu r17),
-# keeping the preceding ``sll r3, r2, 5`` at 0x000FE7F0 intact.
-ROM_MERIT_ROW_PATCH_RAM: Final = 0x800FE7F4
-ROM_MERIT_ROW_PATCH_OFFSET: Final = _slus_ram_to_bin_offset(
-    ROM_MERIT_ROW_PATCH_RAM,
-)
-ROM_MERIT_ROW_RETURN_RAM: Final = 0x800FE804
-
-
-def _build_merit_row_teleport_wrapper_bytes() -> bytes:
-    """Build the unified row-display teleport wrapper.
-
-    Layout (17 instructions, 68 B):
-
-      offset 0x00  sltiu r1, r2, 0x90
-      offset 0x04  beq   r1, r0, +7         (target = ext_path at 0x24)
-      offset 0x08  nop                      (branch delay)
-      offset 0x0C  addu  r17, r3, r0        ; vanilla: r17 = slot*32
-      offset 0x10  lui   r2, 0x8012
-      offset 0x14  addiu r2, r2, 0x69DC
-      offset 0x18  addu  r5, r2, r17        ; r5 = vanilla + slot*32
-      offset 0x1C  j     ROW_RETURN
-      offset 0x20  nop                      ; j delay
-      offset 0x24  lui   $at, 0xFFF7        ; ext: $at = -0x913DC
-      offset 0x28  addiu $at, $at, 0xEC24   ;     (= cave6 - vanilla - 144*32)
-      offset 0x2C  addu  r17, r3, $at       ; r17 = slot*32 - 0x913DC
-                                            ;     = (slot-144)*32 + (cave6-vanilla)
-      offset 0x30  lui   r2, 0x8012
-      offset 0x34  addiu r2, r2, 0x69DC
-      offset 0x38  addu  r5, r2, r17        ; r5 = cave6 + (slot-144)*32
-      offset 0x3C  j     ROW_RETURN
-      offset 0x40  nop                      ; j delay
-    """
-
-    import struct as _struct
-
-    # Constant for the ext path: cave6_base - vanilla_base - 144*32
-    # = 0x80096800 - 0x801269DC - 0x1200 = -0x913DC = 0xFFF6EC24 (u32).
-    # Encoded as ``lui $at, 0xFFF7; addiu $at, $at, 0xEC24`` because the
-    # low half 0xEC24 sign-extends to -0x13DC; (0xFFF7 << 16) - 0x13DC
-    # = 0xFFF70000 - 0x13DC = 0xFFF6EC24. ✓
-    ext_hi = 0xFFF7
-    ext_lo = 0xEC24
-
-    j_return = 0x08000000 | (
-        (ROM_MERIT_ROW_RETURN_RAM >> 2) & 0x03FFFFFF
-    )
-    threshold = CAVE6_ITEM_PARA_EXT_SLOT_BASE                                  # 144
-
-    out = bytearray()
-
-    # 0x00 sltiu r1, r2, 0x90
-    out += _struct.pack("<I", (0x0B << 26) | (2 << 21) | (1 << 16) | threshold)
-    # 0x04 beq r1, r0, +7 (-> ext_path at offset 0x24)
-    out += _struct.pack("<I", (0x04 << 26) | (1 << 21) | (0 << 16) | 7)
-    # 0x08 nop (branch delay)
-    out += _struct.pack("<I", 0x00000000)
-
-    # Vanilla path (0x0C..0x20)
-    # 0x0C addu r17, r3, r0       (rs=3, rt=0, rd=17, funct=0x21)
-    out += _struct.pack("<I", (0 << 26) | (3 << 21) | (0 << 16) | (17 << 11) | (0 << 6) | 0x21)
-    # 0x10 lui r2, 0x8012
-    out += _struct.pack("<I", 0x3C028012)
-    # 0x14 addiu r2, r2, 0x69DC
-    out += _struct.pack("<I", 0x244269DC)
-    # 0x18 addu r5, r2, r17        (rs=2, rt=17, rd=5, funct=0x21)
-    out += _struct.pack("<I", (0 << 26) | (2 << 21) | (17 << 16) | (5 << 11) | (0 << 6) | 0x21)
-    # 0x1C j ROW_RETURN
-    out += _struct.pack("<I", j_return)
-    # 0x20 nop (j delay)
-    out += _struct.pack("<I", 0x00000000)
-
-    # Ext path (0x24..0x40)
-    # 0x24 lui $at, ext_hi
-    out += _struct.pack("<I", (0x0F << 26) | (0 << 21) | (1 << 16) | ext_hi)
-    # 0x28 addiu $at, $at, ext_lo
-    out += _struct.pack("<I", (0x09 << 26) | (1 << 21) | (1 << 16) | ext_lo)
-    # 0x2C addu r17, r3, $at        (rs=3, rt=1, rd=17, funct=0x21)
-    out += _struct.pack("<I", (0 << 26) | (3 << 21) | (1 << 16) | (17 << 11) | (0 << 6) | 0x21)
-    # 0x30 lui r2, 0x8012
-    out += _struct.pack("<I", 0x3C028012)
-    # 0x34 addiu r2, r2, 0x69DC
-    out += _struct.pack("<I", 0x244269DC)
-    # 0x38 addu r5, r2, r17
-    out += _struct.pack("<I", (0 << 26) | (2 << 21) | (17 << 16) | (5 << 11) | (0 << 6) | 0x21)
-    # 0x3C j ROW_RETURN
-    out += _struct.pack("<I", j_return)
-    # 0x40 nop (j delay)
-    out += _struct.pack("<I", 0x00000000)
-
-    return bytes(out)
-
-
-ROM_MERIT_ROW_TELEPORT_WRAPPER_BYTES: Final = _build_merit_row_teleport_wrapper_bytes()
-assert len(ROM_MERIT_ROW_TELEPORT_WRAPPER_BYTES) == 68, (
-    len(ROM_MERIT_ROW_TELEPORT_WRAPPER_BYTES)
-)
-
-# Cave6 layout: row teleport wrapper must stay inside sector 148350.
-assert (CAVE6_MERIT_ROW_TELEPORT_WRAPPER_RAM
-        + len(ROM_MERIT_ROW_TELEPORT_WRAPPER_BYTES)
-        <= 0x80096800), (
-    f"merit-row teleport wrapper "
-    f"0x{CAVE6_MERIT_ROW_TELEPORT_WRAPPER_RAM:08X}.."
-    f"0x{CAVE6_MERIT_ROW_TELEPORT_WRAPPER_RAM + len(ROM_MERIT_ROW_TELEPORT_WRAPPER_BYTES):08X} "
-    f"crosses Cave6 sector 148350 boundary at 0x80096800"
-)
-
-
-def _build_merit_row_patch_bytes() -> bytes:
-    """3-instruction patch at ROM_MERIT_ROW_PATCH_RAM:
-    ``j wrapper; nop; nop``. Only 3 words = 12 bytes (not 4) because:
-
-    * Word 4 of the original sequence (``addu r17, r3, r0`` at PC
-      0x000FE800) is SKIPPED by the wrapper's ``j 0x000FE804`` return,
-      so it doesn't need to be neutralised — leaving it intact has no
-      effect at runtime.
-    * Writing a 4th word here would spill into sector 148558's EDC
-      region (sector user-data ends at .bin 0x14D394B8 = patch start
-      + 12). ``apply_tokens`` writes flatly and crossing the user-data
-      boundary loses the 4th word, which is exactly the bug observed
-      on 2026-05-13. Keeping the patch at 12 bytes stays inside
-      sector 148558's user-data window.
-    """
-
-    import struct as _struct
-    j_wrapper = 0x08000000 | (
-        (CAVE6_MERIT_ROW_TELEPORT_WRAPPER_RAM >> 2) & 0x03FFFFFF
-    )
-    return (
-        _struct.pack("<I", j_wrapper)
-        + _struct.pack("<I", 0x00000000)
-        + _struct.pack("<I", 0x00000000)
-    )
-
-
-ROM_MERIT_ROW_PATCH_BYTES: Final = _build_merit_row_patch_bytes()
-assert len(ROM_MERIT_ROW_PATCH_BYTES) == 12
-
-
-# =============================================================================
-# Merit-shop PURCHASE-DEDUCT teleport wrapper (Cave6, conditional)
-# =============================================================================
-#
-# The merit shop's purchase pipeline reads the slot's ``meritValue``
-# AGAIN — separate from the scan loop and the row-display function —
-# in the function around PC 0x000FAFB0..0x000FB068. At 0x000FB018 it
-# computes ``r2 = ITEM_PARA + slot*32 + 0x18`` via vanilla addressing,
-# then ``lhu`` reads the meritValue and stores it to ``-0x6B20(r28)``,
-# which the state-machine later subtracts from the player's merit
-# counter (the deduct itself happens at PC 0x0010BF18).
-#
-# For slot >= 144 this read lands in the per-item color table at
-# RAM 0x80127BDC and returns whatever palette byte happens to be at
-# ``0x80127BDC + (slot-128)*32 + 0x18``. In testing on 2026-05-13 the
-# user reported deducted values in the 3000..6000 range for Cave6
-# ext slots (matching color-table reads of 3588 / 1036 / 5900 / 5892
-# / 5910 for slots 144..148), with merit going negative and the UI
-# corrupting after purchase.
-#
-# Fix: teleport the same way the scan / row-display readers do.
-# Replace the 4 instructions at 0x000FB018..0x000FB024 with
-# ``j wrapper; nop; nop; nop``. Wrapper computes
-# ``r2 = ITEM_PARA[slot].meritValue address`` (vanilla base for
-# slot < 144, Cave6 ext base for slot >= 144), then ``j 0x800FB028``
-# returns to the original ``lhu`` instruction.
-
-CAVE6_MERIT_DEDUCT_TELEPORT_WRAPPER_RAM: Final = (
-    CAVE6_MERIT_ROW_TELEPORT_WRAPPER_RAM
-    + len(ROM_MERIT_ROW_TELEPORT_WRAPPER_BYTES)
-)
-assert CAVE6_MERIT_DEDUCT_TELEPORT_WRAPPER_RAM % 4 == 0, hex(
-    CAVE6_MERIT_DEDUCT_TELEPORT_WRAPPER_RAM
-)
-CAVE6_MERIT_DEDUCT_TELEPORT_WRAPPER_OFFSET: Final = _slus_ram_to_bin_offset(
-    CAVE6_MERIT_DEDUCT_TELEPORT_WRAPPER_RAM,
-)
-
-ROM_MERIT_DEDUCT_PATCH_RAM: Final = 0x800FB018
-ROM_MERIT_DEDUCT_PATCH_OFFSET: Final = _slus_ram_to_bin_offset(
-    ROM_MERIT_DEDUCT_PATCH_RAM,
-)
-# Return target = the ``lhu r2, 0x0000(r2)`` immediately after the
-# four patched instructions.
-ROM_MERIT_DEDUCT_RETURN_RAM: Final = 0x800FB028
-
-
-def _build_merit_deduct_teleport_wrapper_bytes() -> bytes:
-    """Build the 17-instruction (68 B) deduct-path teleport wrapper.
-
-    Input: r5 = slot_id.
-    Output: r2 = address of ITEM_PARA[slot].meritValue (correctly
-    routed to vanilla base for slot < 144 or Cave6 ext base for
-    slot >= 144). r3 is also written but the caller doesn't depend
-    on its post-wrapper value.
-
-    Clobbers r1, r2, r3.
-    """
-
-    import struct as _struct
-
-    j_return = 0x08000000 | (
-        (ROM_MERIT_DEDUCT_RETURN_RAM >> 2) & 0x03FFFFFF
-    )
-    cave6_hi = (CAVE6_ITEM_PARA_EXT_RAM >> 16) & 0xFFFF                       # 0x8009
-    cave6_lo = CAVE6_ITEM_PARA_EXT_RAM & 0xFFFF                               # 0x6800
-    threshold = CAVE6_ITEM_PARA_EXT_SLOT_BASE                                  # 144
-
-    out = bytearray()
-
-    # 0x00 sltiu r1, r5, 0x90
-    out += _struct.pack("<I", (0x0B << 26) | (5 << 21) | (1 << 16) | threshold)
-    # 0x04 beq r1, r0, +7  (-> ext_path at offset 0x24)
-    out += _struct.pack("<I", (0x04 << 26) | (1 << 21) | (0 << 16) | 7)
-    # 0x08 nop (branch delay)
-    out += _struct.pack("<I", 0x00000000)
-
-    # Vanilla path (0x0C..0x20): r2 = vanilla ITEM_PARA + slot*32 + 0x18
-    # 0x0C sll r3, r5, 5
-    out += _struct.pack("<I", (0 << 26) | (0 << 21) | (5 << 16) | (3 << 11) | (5 << 6))
-    # 0x10 lui r2, 0x8012
-    out += _struct.pack("<I", 0x3C028012)
-    # 0x14 addiu r2, r2, 0x69F4   (vanilla ITEM_PARA + 0x18 = meritValue base)
-    out += _struct.pack("<I", 0x244269F4)
-    # 0x18 addu r2, r2, r3
-    out += _struct.pack("<I", (0 << 26) | (2 << 21) | (3 << 16) | (2 << 11) | (0 << 6) | 0x21)
-    # 0x1C j ROM_MERIT_DEDUCT_RETURN_RAM
-    out += _struct.pack("<I", j_return)
-    # 0x20 nop (j delay)
-    out += _struct.pack("<I", 0x00000000)
-
-    # Ext path (0x24..0x40): r2 = CAVE6_EXT + (slot-144)*32 + 0x18
-    # 0x24 addi r3, r5, -144  (signed imm = 0xFF70)
-    out += _struct.pack("<I", (0x08 << 26) | (5 << 21) | (3 << 16) | 0xFF70)
-    # 0x28 sll r3, r3, 5
-    out += _struct.pack("<I", (0 << 26) | (0 << 21) | (3 << 16) | (3 << 11) | (5 << 6))
-    # 0x2C lui r2, cave6_hi
-    out += _struct.pack("<I", (0x0F << 26) | (0 << 21) | (2 << 16) | cave6_hi)
-    # 0x30 addiu r2, r2, cave6_lo
-    out += _struct.pack("<I", (0x09 << 26) | (2 << 21) | (2 << 16) | cave6_lo)
-    # 0x34 addu r2, r2, r3
-    out += _struct.pack("<I", (0 << 26) | (2 << 21) | (3 << 16) | (2 << 11) | (0 << 6) | 0x21)
-    # 0x38 addiu r2, r2, 0x18    (+ meritValue offset)
-    out += _struct.pack("<I", (0x09 << 26) | (2 << 21) | (2 << 16) | 0x18)
-    # 0x3C j ROM_MERIT_DEDUCT_RETURN_RAM
-    out += _struct.pack("<I", j_return)
-    # 0x40 nop (j delay)
-    out += _struct.pack("<I", 0x00000000)
-
-    return bytes(out)
-
-
-ROM_MERIT_DEDUCT_TELEPORT_WRAPPER_BYTES: Final = _build_merit_deduct_teleport_wrapper_bytes()
-assert len(ROM_MERIT_DEDUCT_TELEPORT_WRAPPER_BYTES) == 68, (
-    len(ROM_MERIT_DEDUCT_TELEPORT_WRAPPER_BYTES)
-)
-
-# Cave6 layout: deduct wrapper must stay inside sector 148350.
-assert (CAVE6_MERIT_DEDUCT_TELEPORT_WRAPPER_RAM
-        + len(ROM_MERIT_DEDUCT_TELEPORT_WRAPPER_BYTES)
-        <= 0x80096800), (
-    f"merit-deduct teleport wrapper "
-    f"0x{CAVE6_MERIT_DEDUCT_TELEPORT_WRAPPER_RAM:08X}.."
-    f"0x{CAVE6_MERIT_DEDUCT_TELEPORT_WRAPPER_RAM + len(ROM_MERIT_DEDUCT_TELEPORT_WRAPPER_BYTES):08X} "
-    f"crosses Cave6 sector 148350 boundary at 0x80096800"
-)
-
-
-def _build_merit_deduct_patch_bytes() -> bytes:
-    """4-instruction patch at ROM_MERIT_DEDUCT_PATCH_RAM:
-    ``j wrapper; nop; nop; nop``. Replaces the 4 address-construction
-    instructions before the ``lhu`` so the wrapper computes the merit
-    field address with the right base for Cave6 ext slots.
-    """
-
-    import struct as _struct
-    j_wrapper = 0x08000000 | (
-        (CAVE6_MERIT_DEDUCT_TELEPORT_WRAPPER_RAM >> 2) & 0x03FFFFFF
-    )
-    return (
-        _struct.pack("<I", j_wrapper)
-        + _struct.pack("<I", 0x00000000)
-        + _struct.pack("<I", 0x00000000)
-        + _struct.pack("<I", 0x00000000)
-    )
-
-
-ROM_MERIT_DEDUCT_PATCH_BYTES: Final = _build_merit_deduct_patch_bytes()
-assert len(ROM_MERIT_DEDUCT_PATCH_BYTES) == 16
-
+# The Cave6 multi-segment architecture (ext slots 144..173 in a Cave6
+# segment, reached by patching the merit shop's scan / name / row /
+# deduct ITEM_PARA readers to "teleport" through per-callsite Cave6
+# wrappers) is superseded by the 256-slot relocation above: with one
+# contiguous table, the four plain reader-word patches at the same
+# sites (0x8010732C scan, 0x80101A4C name, 0x800FE7F4+ row,
+# 0x800FB018 deduct — all in _ITEM_PARA_READER_SITES) cover every
+# slot 0..255, and the wrappers plus their inline ``j`` patches are
+# unnecessary. Constants and builders removed; the wrappers' Cave6
+# space is reused by the boot seed hook (scan/name footprint) and
+# freed (row/deduct footprint, 0x80096650..0x800966C4). See
+# ``docs/item_para_cave6_multisegment.md`` for the historical design.
 
 # =============================================================================
 # Path A (ITEM_PARA relocation) — REVERTED 2026-05-13
@@ -8708,11 +8448,13 @@ assert len(ROM_MERIT_DEDUCT_PATCH_BYTES) == 16
 # watched for writes to the region, not for pointer constants stored
 # elsewhere that point into it.
 #
-# The infrastructure (tools/dw1_scan_item_para_readers.py, the static
-# analysis in docs/item_para_relocation.md, test_item_para_relocation.py)
-# is retained for re-use whenever we pick a real safe region. Current
-# AP ceiling is back to slot 143 (= freed-ITEM_DESC_PTR region only):
-# 7 recycle + 9 merit = exact fit.
+# The reader-site census infrastructure
+# (tools/dw1_scan_item_para_readers.py, the static analysis in
+# docs/item_para_relocation.md) fed directly into the SUCCESSOR that
+# shipped 2026-08-21: the always-on 256-slot relocation onto the
+# heap-claimed region 0x801BFB70 (section above), whose target is real
+# vacated arena space rather than a hoped-for free code region — the
+# function-pointer failure mode cannot recur there.
 
 
 # --- Merit-shop jal-hijack override -----------------------------------------
@@ -8731,22 +8473,24 @@ ROM_MERIT_SHOP_EXT_PATCH_VALUE: Final = (
 # --- Merit-shop scan-loop bound patch ---------------------------------------
 # Vanilla DW1 caps the merit-shop ITEM_PARA scan at id < 128 via the
 # ``sltiu $r1, $r5, 0x0080`` immediate at RAM 0x00107430. Bump to
-# ``sltiu $r1, $r5, 0x0090`` (= 144) so the scan reaches up through
-# extended slot 143 (MERIT_SHOP_AP_ITEM_ID_LAST). Don't push past 144 —
-# slots 144..255 are NOT safe to scan (the per-item color table at
-# RAM 0x80127BDC sits where slot-144's ITEM_PARA entry would start).
+# ``sltiu $r1, $r5, 0x0095`` (= 149) so the scan reaches up through
+# extended slot 148 (MERIT_SHOP_AP_ITEM_ID_LAST). With the always-on
+# 256-slot relocation the scan walks the contiguous relocated table,
+# so any bound up to 256 is structurally safe — 149 is simply the
+# highest populated merit slot + 1 (unpopulated seed slots decode as
+# meritValue 0 and would be skipped anyway).
 ROM_MERIT_SCAN_BOUND_RAM: Final = 0x80107430
 ROM_MERIT_SCAN_BOUND_OFFSET: Final = _slus_ram_to_bin_offset(
     ROM_MERIT_SCAN_BOUND_RAM,
 )
 ROM_MERIT_SCAN_BOUND_FORMAT: Final = "<I"
 # Encoding: opcode 0x0B (sltiu), rs=5 ($r5/$a1), rt=1 ($at), imm.
-_MERIT_SCAN_BOUND_NEW_IMM: Final = MERIT_SHOP_AP_ITEM_ID_LAST + 1            # 144
+_MERIT_SCAN_BOUND_NEW_IMM: Final = MERIT_SHOP_AP_ITEM_ID_LAST + 1            # 149
 assert _MERIT_SCAN_BOUND_NEW_IMM < 0x8000, _MERIT_SCAN_BOUND_NEW_IMM
 ROM_MERIT_SCAN_BOUND_VALUE: Final = (
     (0x0B << 26) | (5 << 21) | (1 << 16) | _MERIT_SCAN_BOUND_NEW_IMM
 )
-# Sanity: vanilla bound = 0x2CA10080. New bound = 0x2CA10090 for limit 144.
+# Sanity: vanilla bound = 0x2CA10080. New bound = 0x2CA10095 for limit 149.
 assert ROM_MERIT_SCAN_BOUND_VALUE == 0x2CA10000 | _MERIT_SCAN_BOUND_NEW_IMM, (
     hex(ROM_MERIT_SCAN_BOUND_VALUE)
 )
@@ -8904,16 +8648,18 @@ del _off, _ln, _pos
 
 # --- Walk-on transition-gate wrapper + table (Cave6) ------------------------
 #
-# Cave6 space claim: the free gap between the merit purchase-deduct
-# teleport wrapper (ends at 0x800966C4) and the Cave6 ITEM_PARA ext
-# segment (starts at 0x80096800), fully inside sector 148350's user-data
+# Cave6 space claim: historically the free gap between the (retired)
+# merit purchase-deduct teleport wrapper and the (retired) Cave6
+# ITEM_PARA ext segment; today the gap between the ITEM_PARA boot seed
+# hook's free tail (hook ends at 0x80096650) and the EXT_ITEM_PARA seed
+# block (starts at 0x80096800), fully inside sector 148350's user-data
 # window — wrapper 164 B @ 0x800966C4..0x80096768, full table 136 B @
 # 0x80096768..0x800967F0, 16 B spare.
 TRANSITION_GATE_WRAPPER_RAM: Final = 0x800966C4
-assert TRANSITION_GATE_WRAPPER_RAM == (
-    CAVE6_MERIT_DEDUCT_TELEPORT_WRAPPER_RAM
-    + len(ROM_MERIT_DEDUCT_TELEPORT_WRAPPER_BYTES)
-), "Cave6 gap start drifted — re-check the merit wrapper chain"
+assert TRANSITION_GATE_WRAPPER_RAM >= _ITEM_PARA_BOOT_HOOK_END_RAM, (
+    "Cave6 layout drifted — the ITEM_PARA boot seed hook overlaps the "
+    "transition-gate wrapper"
+)
 TRANSITION_GATE_WRAPPER_OFFSET: Final = _slus_ram_to_bin_offset(
     TRANSITION_GATE_WRAPPER_RAM,
 )
@@ -9160,13 +8906,13 @@ def build_transition_gate_table(locked_regions: frozenset[str] | set[str]) -> by
 
 # Layout invariants: wrapper + full table must fit the claimed gap and
 # stay inside sector 148350's user-data window (which ends at RAM
-# 0x80096800 = the Cave6 ITEM_PARA ext base), so both tokens are flat
+# 0x80096800 = the EXT_ITEM_PARA seed base), so both tokens are flat
 # single-sector writes.
 _TRANSITION_GATE_FULL_TABLE_LEN: Final = (len(TRANSITION_GATE_ROWS) + 1) * 4  # 136
 assert (
     TRANSITION_GATE_TABLE_RAM + _TRANSITION_GATE_FULL_TABLE_LEN
-    <= CAVE6_ITEM_PARA_EXT_RAM
-), "transition gate table overflows into the Cave6 ITEM_PARA ext segment"
+    <= EXT_ITEM_PARA_SEED_RAM
+), "transition gate table overflows into the EXT_ITEM_PARA seed block"
 assert TRANSITION_GATE_WRAPPER_OFFSET % 2352 + len(ROM_TRANSITION_GATE_WRAPPER_BYTES) \
     <= 2072, "transition gate wrapper write straddles a sector boundary"
 assert TRANSITION_GATE_TABLE_OFFSET % 2352 + _TRANSITION_GATE_FULL_TABLE_LEN \

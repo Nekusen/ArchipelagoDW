@@ -115,7 +115,7 @@ from .data.addresses import (
     MERIT_SHOP_DISPATCH,
     MERIT_SHOP_LOCATION_RAM_BITS,
     NANIMON_QUEST_LOCATION_RAM_BITS,
-    RAM_ITEM_PARA,
+    ITEM_PARA_RELOC_BASE,
     RAM_RECYCLE_SHOP_GP_SLOT,
     RECYCLE_SHOP_AP_ITEM_ID_BASE,
     RECYCLE_SHOP_AP_ITEM_ID_COUNT,
@@ -1359,8 +1359,12 @@ class DigimonWorldClient:
         for item_id, trigger_id in MERIT_SHOP_DISPATCH:
             trigger_byte_addr = AP_TRIGGER_ARRAY_BASE + (trigger_id // 8)
             trigger_mask = 1 << (trigger_id % 8)
+            # The merit-shop UI reads the RELOCATED 256-slot table (see
+            # addresses.py "ITEM_PARA 256-slot relocation"), so the
+            # post-purchase bump must target it — the vanilla table at
+            # RAM_ITEM_PARA is only the boot hook's copy source now.
             merit_addr = (
-                RAM_ITEM_PARA
+                ITEM_PARA_RELOC_BASE
                 + item_id * ROM_ITEM_TABLE_ENTRY_SIZE
                 + ITEM_PARA_MERIT_VALUE_OFFSET
             )

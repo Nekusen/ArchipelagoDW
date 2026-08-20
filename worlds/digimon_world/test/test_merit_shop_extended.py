@@ -15,17 +15,21 @@ Covers four areas:
   is on (14 extended ITEM_PARA entries with non-zero merit prices,
   14 AP description strings, vanilla-item meritValue zero-outs for all
   14 vanilla entries, extended wrapper, jal override, scan-loop bound
-  patch, Cave6 teleport wrapper, scan-base inline patch); emits none
-  of those tokens when the option is off, and leaves the always-on N=1
-  merit wrapper untouched.
+  patch); emits none of those tokens when the option is off, and
+  leaves the always-on N=1 merit wrapper untouched.
 * :class:`TestMeritShopExtendedWrapper` — the 572-byte wrapper bytecode
   decode-verifies against the 15-entry dispatch shape.
+* :class:`TestExtSeedSegment` and friends — the ext slots' seed-block
+  staging under the always-on ITEM_PARA 256-slot relocation.
 
-**Cave6 multi-segment**: slots 135..143 live in the freed
-ITEM_DESC_PTR region (contiguous with vanilla ITEM_PARA); slots
-144..148 live in the Cave6 ext segment at RAM 0x80096800, reached by
-the merit-scan teleport wrapper. See
-``docs/item_para_cave6_multisegment.md`` for the architecture.
+**Relocated-table era**: all ext slots 128..157 live at natural
+positions in the relocated 256-slot ITEM_PARA table (heap-claimed
+region), staged via the .bin-backed EXT_ITEM_PARA seed block at RAM
+0x80096800 and copied in by the boot seed hook. The Cave6
+multi-segment architecture (freed-desc + Cave6 ext + scan/name/row/
+deduct teleport wrappers, ``docs/item_para_cave6_multisegment.md``)
+is retired; see ``test_item_para_relocation.py`` for the relocation
+machinery itself.
 """
 
 from __future__ import annotations
@@ -46,7 +50,6 @@ from ..data.addresses import (
     AP_TRIGGER_ARRAY_BASE,
     ITEM_PARA_MERIT_VALUE_OFFSET,
     MERIT_AP_DESC_STRINGS_BIN_OFFSET,
-    MERIT_AP_DESC_STRINGS_RAM,
     MERIT_SHOP_AP_ITEM_ID_BASE,
     MERIT_SHOP_AP_ITEM_ID_COUNT,
     MERIT_SHOP_AP_ITEM_IDS,
@@ -199,21 +202,17 @@ class TestMeritShopConstants(unittest.TestCase):
             tuple(range(135, 149)),
         )
 
-    def test_slot_range_spans_freed_desc_and_cave6_ext(self) -> None:
-        # Slots 135..143 sit in the freed ITEM_DESC_PTR region
-        # (16-slot ceiling there). Slots 144..148 sit in the Cave6
-        # ext segment, reached by the merit-scan teleport wrapper.
-        # The patch-time helper :func:`ext_item_para_slot_bin_offset`
-        # routes the two ranges to their respective .bin offsets.
+    def test_slot_range_fits_the_seed_segment(self) -> None:
+        # All 14 merit slots live in the single EXT_ITEM_PARA seed
+        # segment (relocated-table staging) — no freed-desc / Cave6
+        # split anymore.
         from ..data.addresses import (
-            CAVE6_ITEM_PARA_EXT_SLOT_BASE,
+            EXT_ITEM_PARA_SEED_SLOT_BASE,
+            EXT_ITEM_PARA_SEED_SLOT_LAST,
         )
-        # First 9 merit slots stay in the freed-DESC region.
-        for slot in range(MERIT_SHOP_AP_ITEM_ID_BASE, 144):
-            self.assertLess(slot, CAVE6_ITEM_PARA_EXT_SLOT_BASE)
-        # Last 5 merit slots are in Cave6 ext.
-        for slot in range(144, MERIT_SHOP_AP_ITEM_ID_LAST + 1):
-            self.assertGreaterEqual(slot, CAVE6_ITEM_PARA_EXT_SLOT_BASE)
+        for slot in range(MERIT_SHOP_AP_ITEM_ID_BASE, MERIT_SHOP_AP_ITEM_ID_LAST + 1):
+            self.assertGreaterEqual(slot, EXT_ITEM_PARA_SEED_SLOT_BASE)
+            self.assertLessEqual(slot, EXT_ITEM_PARA_SEED_SLOT_LAST)
 
     def test_slots_follow_recycle_range(self) -> None:
         from ..data.addresses import (
@@ -352,19 +351,20 @@ class TestMeritShopPatcherOn(DigimonWorldTestBase):
 
     def test_extended_item_para_count_matches_ap_slot_count(self) -> None:
         # Exactly MERIT_SHOP_AP_ITEM_ID_COUNT (= 14) extended slots get
-        # written. Slots 135..143 go to the freed ITEM_DESC_PTR region;
-        # slots 144..148 go to the Cave6 ext segment.
+        # 32-byte entry writes in the EXT_ITEM_PARA seed block.
         written_slots = sum(
             1 for slot in MERIT_SHOP_AP_ITEM_IDS
-            if ext_item_para_slot_bin_offset(slot) in self.observed_last
+            if len(self.observed_last.get(
+                ext_item_para_slot_bin_offset(slot), b"")) == 32
         )
         self.assertEqual(written_slots, MERIT_SHOP_AP_ITEM_ID_COUNT)
-        # Defensive: nothing written for slots beyond 148 (reserved for
-        # future shops in the Cave6 ext segment).
-        for slot in range(149, 174):
-            self.assertNotIn(
-                ext_item_para_slot_bin_offset(slot), self.observed_last,
-                f"slot {slot} write (Cave6 ext) not expected from merit shop",
+        # Defensive: no 32-byte entry for slots beyond 148 (headroom
+        # reserved for future shops in the seed block).
+        for slot in range(149, 158):
+            self.assertNotEqual(
+                len(self.observed_last.get(
+                    ext_item_para_slot_bin_offset(slot), b"")), 32,
+                f"slot {slot} entry write not expected from merit shop",
             )
 
     def test_merit_ap_desc_strings_present(self) -> None:
@@ -599,356 +599,98 @@ class TestMeritShopExtendedWrapper(DigimonWorldTestBase):
 
 
 # =============================================================================
-# Cave6 multi-segment (ITEM_PARA ext + teleport wrapper + scan-base patch)
+# Ext-slot seed segment (relocated-table era; replaces Cave6 multi-segment)
 # =============================================================================
 
 
-class TestCave6MultiSegment(unittest.TestCase):
-    """Cave6 ext segment + merit-scan teleport wrapper invariants."""
+class TestExtSeedSegment(unittest.TestCase):
+    """EXT_ITEM_PARA seed block + single-segment ext-slot routing.
 
-    def test_cave6_ext_segment_size_and_alignment(self) -> None:
+    Migrated from the retired Cave6 multi-segment coverage: the ext
+    slots now live at natural positions in the relocated 256-slot
+    table, staged via ONE contiguous .bin-backed seed block (which
+    reuses the retired Cave6 ext segment's footprint).
+    """
+
+    def test_seed_segment_size_and_alignment(self) -> None:
         from ..data.addresses import (
-            CAVE6_ITEM_PARA_EXT_RAM,
-            CAVE6_ITEM_PARA_EXT_SIZE,
-            CAVE6_ITEM_PARA_EXT_SLOT_BASE,
-            CAVE6_ITEM_PARA_EXT_SLOT_COUNT,
-            CAVE6_ITEM_PARA_EXT_SLOT_LAST,
+            EXT_ITEM_PARA_SEED_RAM,
+            EXT_ITEM_PARA_SEED_SIZE,
+            EXT_ITEM_PARA_SEED_SLOT_BASE,
+            EXT_ITEM_PARA_SEED_SLOT_COUNT,
+            EXT_ITEM_PARA_SEED_SLOT_LAST,
         )
         # Aligned to a Mode2/2352 sector boundary (sector 148351 starts
-        # at RAM 0x80096800).
-        self.assertEqual(CAVE6_ITEM_PARA_EXT_RAM, 0x80096800)
-        self.assertEqual(CAVE6_ITEM_PARA_EXT_SLOT_BASE, 144)
-        self.assertEqual(CAVE6_ITEM_PARA_EXT_SLOT_COUNT, 30)
-        self.assertEqual(CAVE6_ITEM_PARA_EXT_SLOT_LAST, 173)
+        # at RAM 0x80096800) so the 960-byte zero-fill token is a flat
+        # single-sector write.
+        self.assertEqual(EXT_ITEM_PARA_SEED_RAM, 0x80096800)
+        self.assertEqual(EXT_ITEM_PARA_SEED_SLOT_BASE, 128)
+        self.assertEqual(EXT_ITEM_PARA_SEED_SLOT_COUNT, 30)
+        self.assertEqual(EXT_ITEM_PARA_SEED_SLOT_LAST, 157)
         self.assertEqual(
-            CAVE6_ITEM_PARA_EXT_SIZE, CAVE6_ITEM_PARA_EXT_SLOT_COUNT * 32,
+            EXT_ITEM_PARA_SEED_SIZE, EXT_ITEM_PARA_SEED_SLOT_COUNT * 32,
         )
-        # Must stay inside one 2048-byte sector ud-region so that
-        # apply_tokens flat writes don't corrupt the next sector header.
         self.assertLessEqual(
-            CAVE6_ITEM_PARA_EXT_RAM + CAVE6_ITEM_PARA_EXT_SIZE, 0x80097000,
+            EXT_ITEM_PARA_SEED_RAM + EXT_ITEM_PARA_SEED_SIZE, 0x80097000,
         )
 
-    def test_ext_slot_helper_routes_freed_desc_and_cave6(self) -> None:
+    def test_ext_slot_helper_is_single_segment(self) -> None:
         from ..data.addresses import (
-            CAVE6_ITEM_PARA_EXT_BIN_OFFSET,
-            CAVE6_ITEM_PARA_EXT_SLOT_BASE,
-            CAVE6_ITEM_PARA_EXT_SLOT_LAST,
+            EXT_ITEM_PARA_SEED_BIN_OFFSET,
+            EXT_ITEM_PARA_SEED_SLOT_LAST,
             ext_item_para_slot_bin_offset,
         )
-        # Slot 143 (last freed-DESC slot) and slot 144 (first Cave6 ext
-        # slot) should land in DIFFERENT regions, not be contiguous.
-        off_143 = ext_item_para_slot_bin_offset(143)
-        off_144 = ext_item_para_slot_bin_offset(144)
-        self.assertNotEqual(off_144, off_143 + 32)
-        self.assertEqual(off_144, CAVE6_ITEM_PARA_EXT_BIN_OFFSET)
-        # Slot 173 is the last valid Cave6 ext slot.
-        ext_item_para_slot_bin_offset(CAVE6_ITEM_PARA_EXT_SLOT_LAST)
-        # Slot 174 must reject.
+        # Slot 128 = seed base; every subsequent slot is contiguous
+        # (+32) — no freed-desc / Cave6 split anymore.
+        self.assertEqual(
+            ext_item_para_slot_bin_offset(128), EXT_ITEM_PARA_SEED_BIN_OFFSET,
+        )
+        for slot in range(129, EXT_ITEM_PARA_SEED_SLOT_LAST + 1):
+            self.assertEqual(
+                ext_item_para_slot_bin_offset(slot),
+                ext_item_para_slot_bin_offset(slot - 1) + 32,
+                f"slot {slot} not contiguous with slot {slot - 1}",
+            )
+        # Out-of-range slots reject on both sides.
         with self.assertRaises(ValueError):
-            ext_item_para_slot_bin_offset(CAVE6_ITEM_PARA_EXT_SLOT_LAST + 1)
+            ext_item_para_slot_bin_offset(127)
+        with self.assertRaises(ValueError):
+            ext_item_para_slot_bin_offset(EXT_ITEM_PARA_SEED_SLOT_LAST + 1)
 
-    def test_teleport_wrapper_size(self) -> None:
-        from ..data.addresses import ROM_MERIT_SCAN_TELEPORT_WRAPPER_BYTES
-        self.assertEqual(len(ROM_MERIT_SCAN_TELEPORT_WRAPPER_BYTES), 64)
+    def test_merit_slots_fit_inside_seed_segment(self) -> None:
+        from ..data.addresses import EXT_ITEM_PARA_SEED_SLOT_LAST
+        self.assertLessEqual(MERIT_SHOP_AP_ITEM_ID_LAST, EXT_ITEM_PARA_SEED_SLOT_LAST)
 
-    def test_teleport_wrapper_branches_correctly(self) -> None:
-        # Decode-verify the wrapper bytecode. The vanilla path branch
-        # target must be word index 8 (= offset 0x20), and both ``j``
-        # instructions must target 0x80107338 (the original ``lhu``).
-        from ..data.addresses import (
-            CAVE6_ITEM_PARA_EXT_RAM,
-            CAVE6_ITEM_PARA_EXT_SLOT_BASE,
-            ROM_MERIT_SCAN_RETURN_RAM,
-            ROM_MERIT_SCAN_TELEPORT_WRAPPER_BYTES,
-        )
-        self.assertEqual(ROM_MERIT_SCAN_RETURN_RAM, 0x80107338)
-        words = struct.unpack(
-            "<16I", ROM_MERIT_SCAN_TELEPORT_WRAPPER_BYTES,
-        )
-        # Word 0: sltiu r1, r5, 0x90  (threshold = ext slot base)
-        sltiu = words[0]
-        self.assertEqual((sltiu >> 26) & 0x3F, 0x0B)
-        self.assertEqual((sltiu >> 21) & 0x1F, 5)    # rs = r5
-        self.assertEqual((sltiu >> 16) & 0x1F, 1)    # rt = r1
-        self.assertEqual(sltiu & 0xFFFF, CAVE6_ITEM_PARA_EXT_SLOT_BASE)
-        # Word 1: beq r1, r0, +6 (branch to ext_path at word 8)
-        beq = words[1]
-        self.assertEqual((beq >> 26) & 0x3F, 0x04)
-        self.assertEqual(beq & 0xFFFF, 6)
-        # Word 6: j ROM_MERIT_SCAN_RETURN_RAM (end of vanilla path)
-        j1 = words[6]
-        self.assertEqual((j1 >> 26) & 0x3F, 0x02)
-        self.assertEqual(
-            (j1 & 0x03FFFFFF) << 2, ROM_MERIT_SCAN_RETURN_RAM & 0x0FFFFFFC,
-        )
-        # Word 14: j ROM_MERIT_SCAN_RETURN_RAM (end of ext path)
-        j2 = words[14]
-        self.assertEqual((j2 >> 26) & 0x3F, 0x02)
-        self.assertEqual(
-            (j2 & 0x03FFFFFF) << 2, ROM_MERIT_SCAN_RETURN_RAM & 0x0FFFFFFC,
-        )
-        # Word 10/11: lui+addiu constructing CAVE6_ITEM_PARA_EXT_RAM.
-        lui_hi = (CAVE6_ITEM_PARA_EXT_RAM >> 16) & 0xFFFF
-        lui_lo = CAVE6_ITEM_PARA_EXT_RAM & 0xFFFF
-        self.assertEqual(words[10] & 0xFFFF, lui_hi)
-        self.assertEqual(words[11] & 0xFFFF, lui_lo)
-
-    def test_scan_base_patch_jumps_to_teleport_wrapper(self) -> None:
-        from ..data.addresses import (
-            CAVE6_MERIT_SCAN_TELEPORT_WRAPPER_RAM,
-            ROM_MERIT_SCAN_BASE_PATCH_BYTES,
-            ROM_MERIT_SCAN_BASE_PATCH_RAM,
-        )
-        self.assertEqual(ROM_MERIT_SCAN_BASE_PATCH_RAM, 0x8010732C)
-        self.assertEqual(len(ROM_MERIT_SCAN_BASE_PATCH_BYTES), 12)
-        j_word, nop1, nop2 = struct.unpack(
-            "<3I", ROM_MERIT_SCAN_BASE_PATCH_BYTES,
-        )
-        # j CAVE6_MERIT_SCAN_TELEPORT_WRAPPER_RAM
-        self.assertEqual((j_word >> 26) & 0x3F, 0x02)
-        self.assertEqual(
-            (j_word & 0x03FFFFFF) << 2,
-            CAVE6_MERIT_SCAN_TELEPORT_WRAPPER_RAM & 0x0FFFFFFC,
-        )
-        # Both delay/replacement slots are nop.
-        self.assertEqual(nop1, 0)
-        self.assertEqual(nop2, 0)
-
-    def test_name_teleport_wrapper_size_and_placement(self) -> None:
-        from ..data.addresses import (
-            CAVE6_MERIT_NAME_TELEPORT_WRAPPER_RAM,
-            CAVE6_MERIT_SCAN_TELEPORT_WRAPPER_RAM,
-            ROM_MERIT_NAME_TELEPORT_WRAPPER_BYTES,
-            ROM_MERIT_SCAN_TELEPORT_WRAPPER_BYTES,
-        )
-        self.assertEqual(len(ROM_MERIT_NAME_TELEPORT_WRAPPER_BYTES), 64)
-        # Name wrapper sits directly after the scan wrapper in Cave6.
-        self.assertEqual(
-            CAVE6_MERIT_NAME_TELEPORT_WRAPPER_RAM,
-            CAVE6_MERIT_SCAN_TELEPORT_WRAPPER_RAM
-            + len(ROM_MERIT_SCAN_TELEPORT_WRAPPER_BYTES),
-        )
-        # End stays inside sector 148350 (ends at RAM 0x80096800).
-        self.assertLessEqual(
-            CAVE6_MERIT_NAME_TELEPORT_WRAPPER_RAM
-            + len(ROM_MERIT_NAME_TELEPORT_WRAPPER_BYTES),
-            0x80096800,
-        )
-
-    def test_name_teleport_wrapper_layout_and_return(self) -> None:
-        # Decode-verify: both `j` instructions must target 0x80101A5C
-        # (the instruction immediately after the patched 3) and their
-        # delay slots must NOT overlap with executable instructions.
-        from ..data.addresses import (
-            CAVE6_ITEM_PARA_EXT_RAM,
-            ROM_MERIT_NAME_RETURN_RAM,
-            ROM_MERIT_NAME_TELEPORT_WRAPPER_BYTES,
-        )
-        self.assertEqual(ROM_MERIT_NAME_RETURN_RAM, 0x80101A5C)
-        words = struct.unpack(
-            "<16I", ROM_MERIT_NAME_TELEPORT_WRAPPER_BYTES,
-        )
-        # Word 1: beq r1, r0, +7 (branch to ext_path at word 9 / offset 0x24)
-        beq = words[1]
-        self.assertEqual((beq >> 26) & 0x3F, 0x04)
-        self.assertEqual(beq & 0xFFFF, 7)
-        # Word 7: j to return (vanilla path tail)
-        # Word 8: nop (vanilla path j's delay slot — must NOT be ext_path)
-        j_van = words[7]
-        self.assertEqual((j_van >> 26) & 0x3F, 0x02)
-        self.assertEqual(
-            (j_van & 0x03FFFFFF) << 2,
-            ROM_MERIT_NAME_RETURN_RAM & 0x0FFFFFFC,
-        )
-        self.assertEqual(words[8], 0,
-                         "vanilla j delay slot must be nop, not the "
-                         "first instruction of ext_path")
-        # Word 14: j to return (ext path tail)
-        # Word 15: nop (ext path j delay slot)
-        j_ext = words[14]
-        self.assertEqual((j_ext >> 26) & 0x3F, 0x02)
-        self.assertEqual(
-            (j_ext & 0x03FFFFFF) << 2,
-            ROM_MERIT_NAME_RETURN_RAM & 0x0FFFFFFC,
-        )
-        self.assertEqual(words[15], 0)
-        # Words 11/12 = lui/addiu constructing CAVE6_ITEM_PARA_EXT_RAM.
-        self.assertEqual(words[11] & 0xFFFF, (CAVE6_ITEM_PARA_EXT_RAM >> 16) & 0xFFFF)
-        self.assertEqual(words[12] & 0xFFFF, CAVE6_ITEM_PARA_EXT_RAM & 0xFFFF)
-
-    def test_name_patch_jumps_to_name_teleport_wrapper(self) -> None:
-        from ..data.addresses import (
-            CAVE6_MERIT_NAME_TELEPORT_WRAPPER_RAM,
-            ROM_MERIT_NAME_PATCH_BYTES,
-            ROM_MERIT_NAME_PATCH_RAM,
-        )
-        self.assertEqual(ROM_MERIT_NAME_PATCH_RAM, 0x80101A4C)
-        self.assertEqual(len(ROM_MERIT_NAME_PATCH_BYTES), 12)
-        j_word, nop1, nop2 = struct.unpack(
-            "<3I", ROM_MERIT_NAME_PATCH_BYTES,
-        )
-        self.assertEqual((j_word >> 26) & 0x3F, 0x02)
-        self.assertEqual(
-            (j_word & 0x03FFFFFF) << 2,
-            CAVE6_MERIT_NAME_TELEPORT_WRAPPER_RAM & 0x0FFFFFFC,
-        )
-        self.assertEqual(nop1, 0)
-        self.assertEqual(nop2, 0)
-
-    def test_row_teleport_wrapper_size_and_layout(self) -> None:
-        from ..data.addresses import (
-            CAVE6_ITEM_PARA_EXT_RAM,
-            CAVE6_MERIT_ROW_TELEPORT_WRAPPER_RAM,
-            ROM_MERIT_ROW_RETURN_RAM,
-            ROM_MERIT_ROW_TELEPORT_WRAPPER_BYTES,
-        )
-        self.assertEqual(ROM_MERIT_ROW_RETURN_RAM, 0x800FE804)
-        self.assertEqual(len(ROM_MERIT_ROW_TELEPORT_WRAPPER_BYTES), 68)
-        # Sits inside Cave6 sector 148350.
-        self.assertLessEqual(
-            CAVE6_MERIT_ROW_TELEPORT_WRAPPER_RAM
-            + len(ROM_MERIT_ROW_TELEPORT_WRAPPER_BYTES),
-            0x80096800,
-        )
-        words = struct.unpack(
-            "<17I", ROM_MERIT_ROW_TELEPORT_WRAPPER_BYTES,
-        )
-        # Word 1: beq r1, r0, +7 (branch to ext_path at word 9 = 0x24)
-        self.assertEqual(words[1] & 0xFFFF, 7)
-        self.assertEqual((words[1] >> 26) & 0x3F, 0x04)
-        # Words 7 and 15: j ROM_MERIT_ROW_RETURN_RAM
-        for j_word_idx in (7, 15):
-            jw = words[j_word_idx]
-            self.assertEqual((jw >> 26) & 0x3F, 0x02)
-            self.assertEqual(
-                (jw & 0x03FFFFFF) << 2,
-                ROM_MERIT_ROW_RETURN_RAM & 0x0FFFFFFC,
+    def test_teleport_machinery_is_retired(self) -> None:
+        # The Cave6 teleport wrappers and their inline patch constants
+        # must not resurface — the relocation's plain reader-word
+        # patches replace them.
+        from ..data import addresses
+        for name in (
+            "CAVE6_ITEM_PARA_EXT_RAM",
+            "CAVE6_ITEM_PARA_EXT_BIN_OFFSET",
+            "CAVE6_MERIT_SCAN_TELEPORT_WRAPPER_RAM",
+            "CAVE6_MERIT_NAME_TELEPORT_WRAPPER_RAM",
+            "CAVE6_MERIT_ROW_TELEPORT_WRAPPER_RAM",
+            "CAVE6_MERIT_DEDUCT_TELEPORT_WRAPPER_RAM",
+            "ROM_MERIT_SCAN_TELEPORT_WRAPPER_BYTES",
+            "ROM_MERIT_NAME_TELEPORT_WRAPPER_BYTES",
+            "ROM_MERIT_ROW_TELEPORT_WRAPPER_BYTES",
+            "ROM_MERIT_DEDUCT_TELEPORT_WRAPPER_BYTES",
+            "ROM_MERIT_SCAN_BASE_PATCH_BYTES",
+            "ROM_MERIT_NAME_PATCH_BYTES",
+            "ROM_MERIT_ROW_PATCH_BYTES",
+            "ROM_MERIT_DEDUCT_PATCH_BYTES",
+        ):
+            self.assertFalse(
+                hasattr(addresses, name),
+                f"retired constant {name} resurfaced",
             )
-        # Delay slots (words 8 and 16) must be nops, not stray code.
-        self.assertEqual(words[8], 0)
-        self.assertEqual(words[16], 0)
-
-    def test_row_teleport_ext_offset_const_correct(self) -> None:
-        """The ext-path lui+addiu must produce cave6 - vanilla - 144*32.
-
-        That's the magic offset that, added to ``slot*32``, gives
-        ``(slot-144)*32 + (cave6 - vanilla)`` — exactly what we need
-        to write into r17 so downstream sibling reads land in Cave6.
-        """
-        from ..data.addresses import (
-            CAVE6_ITEM_PARA_EXT_RAM,
-            ROM_MERIT_ROW_TELEPORT_WRAPPER_BYTES,
-        )
-        words = struct.unpack(
-            "<17I", ROM_MERIT_ROW_TELEPORT_WRAPPER_BYTES,
-        )
-        # Words 9 and 10: lui $at, hi; addiu $at, $at, lo.
-        lui_hi = words[9] & 0xFFFF
-        addiu_lo_raw = words[10] & 0xFFFF
-        # Sign-extend the addiu immediate.
-        addiu_lo = addiu_lo_raw if addiu_lo_raw < 0x8000 else addiu_lo_raw - 0x10000
-        constructed = ((lui_hi << 16) + addiu_lo) & 0xFFFFFFFF
-        expected = (CAVE6_ITEM_PARA_EXT_RAM - 0x801269DC - 144 * 32) & 0xFFFFFFFF
-        self.assertEqual(
-            constructed, expected,
-            f"row wrapper ext constant 0x{constructed:08X} != expected 0x{expected:08X}",
-        )
-
-    def test_row_patch_jumps_to_row_teleport_wrapper(self) -> None:
-        from ..data.addresses import (
-            CAVE6_MERIT_ROW_TELEPORT_WRAPPER_RAM,
-            ROM_MERIT_ROW_PATCH_BYTES,
-            ROM_MERIT_ROW_PATCH_RAM,
-        )
-        self.assertEqual(ROM_MERIT_ROW_PATCH_RAM, 0x800FE7F4)
-        # 12 bytes (not 16) — leaves the 4th word
-        # (``addu r17, r3, r0`` at 0x000FE800) intact because the
-        # wrapper ``j``s to 0x000FE804 and never executes it. Also
-        # avoids straddling sector 148558's user-data boundary at
-        # .bin 0x14D394B8.
-        self.assertEqual(len(ROM_MERIT_ROW_PATCH_BYTES), 12)
-        j_word, nop1, nop2 = struct.unpack(
-            "<3I", ROM_MERIT_ROW_PATCH_BYTES,
-        )
-        self.assertEqual((j_word >> 26) & 0x3F, 0x02)
-        self.assertEqual(
-            (j_word & 0x03FFFFFF) << 2,
-            CAVE6_MERIT_ROW_TELEPORT_WRAPPER_RAM & 0x0FFFFFFC,
-        )
-        self.assertEqual(nop1, 0)
-        self.assertEqual(nop2, 0)
-
-    def test_deduct_teleport_wrapper_size_and_placement(self) -> None:
-        from ..data.addresses import (
-            CAVE6_MERIT_DEDUCT_TELEPORT_WRAPPER_RAM,
-            CAVE6_MERIT_ROW_TELEPORT_WRAPPER_RAM,
-            ROM_MERIT_DEDUCT_TELEPORT_WRAPPER_BYTES,
-            ROM_MERIT_ROW_TELEPORT_WRAPPER_BYTES,
-        )
-        self.assertEqual(len(ROM_MERIT_DEDUCT_TELEPORT_WRAPPER_BYTES), 68)
-        # Sits directly after the row teleport wrapper in Cave6.
-        self.assertEqual(
-            CAVE6_MERIT_DEDUCT_TELEPORT_WRAPPER_RAM,
-            CAVE6_MERIT_ROW_TELEPORT_WRAPPER_RAM
-            + len(ROM_MERIT_ROW_TELEPORT_WRAPPER_BYTES),
-        )
-        # Stays inside sector 148350 (ends at 0x80096800).
-        self.assertLessEqual(
-            CAVE6_MERIT_DEDUCT_TELEPORT_WRAPPER_RAM
-            + len(ROM_MERIT_DEDUCT_TELEPORT_WRAPPER_BYTES),
-            0x80096800,
-        )
-
-    def test_deduct_teleport_returns_to_lhu(self) -> None:
-        # The wrapper returns to PC 0x800FB028 — the original ``lhu``
-        # immediately after the 4 patched instructions.
-        from ..data.addresses import (
-            CAVE6_ITEM_PARA_EXT_RAM,
-            ROM_MERIT_DEDUCT_RETURN_RAM,
-            ROM_MERIT_DEDUCT_TELEPORT_WRAPPER_BYTES,
-        )
-        self.assertEqual(ROM_MERIT_DEDUCT_RETURN_RAM, 0x800FB028)
-        words = struct.unpack(
-            "<17I", ROM_MERIT_DEDUCT_TELEPORT_WRAPPER_BYTES,
-        )
-        for j_word_idx in (7, 15):
-            jw = words[j_word_idx]
-            self.assertEqual((jw >> 26) & 0x3F, 0x02)
-            self.assertEqual(
-                (jw & 0x03FFFFFF) << 2,
-                ROM_MERIT_DEDUCT_RETURN_RAM & 0x0FFFFFFC,
-            )
-        # Delay slots must be nops.
-        self.assertEqual(words[8], 0)
-        self.assertEqual(words[16], 0)
-        # Words 11/12 = lui/addiu of CAVE6_ITEM_PARA_EXT_RAM.
-        self.assertEqual(words[11] & 0xFFFF, (CAVE6_ITEM_PARA_EXT_RAM >> 16) & 0xFFFF)
-        self.assertEqual(words[12] & 0xFFFF, CAVE6_ITEM_PARA_EXT_RAM & 0xFFFF)
-
-    def test_deduct_patch_jumps_to_deduct_teleport_wrapper(self) -> None:
-        from ..data.addresses import (
-            CAVE6_MERIT_DEDUCT_TELEPORT_WRAPPER_RAM,
-            ROM_MERIT_DEDUCT_PATCH_BYTES,
-            ROM_MERIT_DEDUCT_PATCH_RAM,
-        )
-        self.assertEqual(ROM_MERIT_DEDUCT_PATCH_RAM, 0x800FB018)
-        self.assertEqual(len(ROM_MERIT_DEDUCT_PATCH_BYTES), 16)
-        j_word, nop1, nop2, nop3 = struct.unpack(
-            "<4I", ROM_MERIT_DEDUCT_PATCH_BYTES,
-        )
-        self.assertEqual((j_word >> 26) & 0x3F, 0x02)
-        self.assertEqual(
-            (j_word & 0x03FFFFFF) << 2,
-            CAVE6_MERIT_DEDUCT_TELEPORT_WRAPPER_RAM & 0x0FFFFFFC,
-        )
-        self.assertEqual(nop1, 0)
-        self.assertEqual(nop2, 0)
-        self.assertEqual(nop3, 0)
 
 
-class TestCave6MultiSegmentPatcherOn(DigimonWorldTestBase):
-    """Patcher emits the Cave6 multi-segment token writes."""
+class TestExtSeedPatcherOn(DigimonWorldTestBase):
+    """Merit option ON: ext entries land in the seed block; the former
+    teleport patch sites carry plain relocated reader words."""
 
     options: ClassVar[dict[str, Any]] = {"merit_shop_locations": 1}
 
@@ -956,175 +698,105 @@ class TestCave6MultiSegmentPatcherOn(DigimonWorldTestBase):
         super().setUp()
         self.tokens, self.procedure = _CapturedPatch.run(self.world)
         self.observed_last: dict[int, bytes] = {}
+        self.ordered: list[tuple[int, bytes]] = []
         for _t, off, data in self.tokens:
             self.observed_last[off] = data
+            self.ordered.append((off, data))
 
-    def test_teleport_wrapper_bytes_written(self) -> None:
+    def test_ext_slots_written_inside_seed_block(self) -> None:
         from ..data.addresses import (
-            CAVE6_MERIT_SCAN_TELEPORT_WRAPPER_OFFSET,
-            ROM_MERIT_SCAN_TELEPORT_WRAPPER_BYTES,
+            EXT_ITEM_PARA_SEED_BIN_OFFSET,
+            EXT_ITEM_PARA_SEED_SIZE,
         )
-        self.assertIn(
-            CAVE6_MERIT_SCAN_TELEPORT_WRAPPER_OFFSET, self.observed_last,
-        )
-        self.assertEqual(
-            self.observed_last[CAVE6_MERIT_SCAN_TELEPORT_WRAPPER_OFFSET],
-            ROM_MERIT_SCAN_TELEPORT_WRAPPER_BYTES,
-        )
-
-    def test_scan_base_patch_bytes_written(self) -> None:
-        from ..data.addresses import (
-            ROM_MERIT_SCAN_BASE_PATCH_BYTES,
-            ROM_MERIT_SCAN_BASE_PATCH_OFFSET,
-        )
-        self.assertIn(ROM_MERIT_SCAN_BASE_PATCH_OFFSET, self.observed_last)
-        self.assertEqual(
-            self.observed_last[ROM_MERIT_SCAN_BASE_PATCH_OFFSET],
-            ROM_MERIT_SCAN_BASE_PATCH_BYTES,
-        )
-
-    def test_name_teleport_wrapper_bytes_written(self) -> None:
-        from ..data.addresses import (
-            CAVE6_MERIT_NAME_TELEPORT_WRAPPER_OFFSET,
-            ROM_MERIT_NAME_TELEPORT_WRAPPER_BYTES,
-        )
-        self.assertIn(
-            CAVE6_MERIT_NAME_TELEPORT_WRAPPER_OFFSET, self.observed_last,
-        )
-        self.assertEqual(
-            self.observed_last[CAVE6_MERIT_NAME_TELEPORT_WRAPPER_OFFSET],
-            ROM_MERIT_NAME_TELEPORT_WRAPPER_BYTES,
-        )
-
-    def test_name_patch_bytes_written(self) -> None:
-        from ..data.addresses import (
-            ROM_MERIT_NAME_PATCH_BYTES,
-            ROM_MERIT_NAME_PATCH_OFFSET,
-        )
-        self.assertIn(ROM_MERIT_NAME_PATCH_OFFSET, self.observed_last)
-        self.assertEqual(
-            self.observed_last[ROM_MERIT_NAME_PATCH_OFFSET],
-            ROM_MERIT_NAME_PATCH_BYTES,
-        )
-
-    def test_row_teleport_wrapper_bytes_written(self) -> None:
-        from ..data.addresses import (
-            CAVE6_MERIT_ROW_TELEPORT_WRAPPER_OFFSET,
-            ROM_MERIT_ROW_TELEPORT_WRAPPER_BYTES,
-        )
-        self.assertIn(
-            CAVE6_MERIT_ROW_TELEPORT_WRAPPER_OFFSET, self.observed_last,
-        )
-        self.assertEqual(
-            self.observed_last[CAVE6_MERIT_ROW_TELEPORT_WRAPPER_OFFSET],
-            ROM_MERIT_ROW_TELEPORT_WRAPPER_BYTES,
-        )
-
-    def test_row_patch_bytes_written(self) -> None:
-        from ..data.addresses import (
-            ROM_MERIT_ROW_PATCH_BYTES,
-            ROM_MERIT_ROW_PATCH_OFFSET,
-        )
-        self.assertIn(ROM_MERIT_ROW_PATCH_OFFSET, self.observed_last)
-        self.assertEqual(
-            self.observed_last[ROM_MERIT_ROW_PATCH_OFFSET],
-            ROM_MERIT_ROW_PATCH_BYTES,
-        )
-
-    def test_deduct_teleport_wrapper_bytes_written(self) -> None:
-        from ..data.addresses import (
-            CAVE6_MERIT_DEDUCT_TELEPORT_WRAPPER_OFFSET,
-            ROM_MERIT_DEDUCT_TELEPORT_WRAPPER_BYTES,
-        )
-        self.assertIn(
-            CAVE6_MERIT_DEDUCT_TELEPORT_WRAPPER_OFFSET, self.observed_last,
-        )
-        self.assertEqual(
-            self.observed_last[CAVE6_MERIT_DEDUCT_TELEPORT_WRAPPER_OFFSET],
-            ROM_MERIT_DEDUCT_TELEPORT_WRAPPER_BYTES,
-        )
-
-    def test_deduct_patch_bytes_written(self) -> None:
-        from ..data.addresses import (
-            ROM_MERIT_DEDUCT_PATCH_BYTES,
-            ROM_MERIT_DEDUCT_PATCH_OFFSET,
-        )
-        self.assertIn(ROM_MERIT_DEDUCT_PATCH_OFFSET, self.observed_last)
-        self.assertEqual(
-            self.observed_last[ROM_MERIT_DEDUCT_PATCH_OFFSET],
-            ROM_MERIT_DEDUCT_PATCH_BYTES,
-        )
-
-    def test_cave6_ext_slots_144_to_148_written(self) -> None:
-        """All 5 Cave6-segment merit slots get ITEM_PARA entries."""
-        for slot in range(144, 149):
+        for slot in MERIT_SHOP_AP_ITEM_IDS:
             offset = ext_item_para_slot_bin_offset(slot)
-            self.assertIn(
-                offset, self.observed_last,
-                f"slot {slot} (Cave6 ext) not patched",
-            )
+            self.assertIn(offset, self.observed_last, f"slot {slot} not written")
             self.assertEqual(len(self.observed_last[offset]), 32)
+            self.assertGreaterEqual(offset, EXT_ITEM_PARA_SEED_BIN_OFFSET)
+            self.assertLessEqual(
+                offset + 32,
+                EXT_ITEM_PARA_SEED_BIN_OFFSET + EXT_ITEM_PARA_SEED_SIZE,
+            )
+
+    def test_seed_zero_fill_precedes_ext_entries(self) -> None:
+        from ..data.addresses import (
+            EXT_ITEM_PARA_SEED_BIN_OFFSET,
+            EXT_ITEM_PARA_SEED_SIZE,
+        )
+        zero_index = None
+        first_entry_index = None
+        for i, (off, data) in enumerate(self.ordered):
+            if off == EXT_ITEM_PARA_SEED_BIN_OFFSET and len(data) == EXT_ITEM_PARA_SEED_SIZE:
+                zero_index = i
+                self.assertEqual(data, b"\x00" * EXT_ITEM_PARA_SEED_SIZE)
+            if (len(data) == 32 and first_entry_index is None
+                    and EXT_ITEM_PARA_SEED_BIN_OFFSET
+                    <= off < EXT_ITEM_PARA_SEED_BIN_OFFSET + EXT_ITEM_PARA_SEED_SIZE):
+                first_entry_index = i
+        self.assertIsNotNone(zero_index, "seed zero-fill token missing")
+        self.assertIsNotNone(first_entry_index, "no ext entry token found")
+        self.assertLess(zero_index, first_entry_index,
+                        "zero-fill must precede ext entry tokens")
+
+    def test_former_teleport_sites_carry_relocated_reader_words(self) -> None:
+        # The four merit reader sites that used to receive 12/16-byte
+        # ``j teleport; nop...`` patches now receive plain 4-byte
+        # re-based lui words from the always-on relocation.
+        from ..data.addresses import _slus_ram_to_bin_offset
+        for lui_ram, expected_lui in (
+            (0x8010732C, 0x3C09801C),   # merit scan (r9)
+            (0x80101A4C, 0x3C02801C),   # name renderer (r2)
+            (0x800FE7F4, 0x3C02801C),   # row display (r2)
+            (0x800FB018, 0x3C02801C),   # purchase deduct (r2)
+        ):
+            offset = _slus_ram_to_bin_offset(lui_ram)
+            self.assertIn(offset, self.observed_last, hex(lui_ram))
+            data = self.observed_last[offset]
+            self.assertEqual(len(data), 4,
+                             f"site 0x{lui_ram:08X} got a {len(data)}-byte write "
+                             f"(teleport-style patch resurfaced?)")
+            self.assertEqual(struct.unpack("<I", data)[0], expected_lui)
+
+    def test_scan_bound_reaches_slot_148(self) -> None:
+        final = struct.unpack(
+            "<I", self.observed_last[ROM_MERIT_SCAN_BOUND_OFFSET],
+        )[0]
+        self.assertEqual(final, 0x2CA10095)
 
 
-class TestCave6MultiSegmentPatcherOff(DigimonWorldTestBase):
-    """When MeritShopLocations is off, no Cave6 multi-segment tokens fire."""
+class TestExtSeedPatcherOff(DigimonWorldTestBase):
+    """Merit option OFF: the always-on relocation still zero-fills the
+    seed block, but no 32-byte ext entries are staged."""
 
-    options: ClassVar[dict[str, Any]] = {"merit_shop_locations": 0}
+    options: ClassVar[dict[str, Any]] = {
+        "merit_shop_locations": 0,
+        "recycle_shop_locations": 0,
+    }
 
     def setUp(self) -> None:
         super().setUp()
-        self.tokens, _ = _CapturedPatch.run(self.world)
-        self.observed_offsets = {off for _t, off, _d in self.tokens}
+        self.tokens, self.procedure = _CapturedPatch.run(self.world)
 
-    def test_teleport_wrapper_not_written(self) -> None:
-        from ..data.addresses import CAVE6_MERIT_SCAN_TELEPORT_WRAPPER_OFFSET
-        self.assertNotIn(
-            CAVE6_MERIT_SCAN_TELEPORT_WRAPPER_OFFSET, self.observed_offsets,
+    def test_seed_block_zero_filled_but_no_entries(self) -> None:
+        from ..data.addresses import (
+            EXT_ITEM_PARA_SEED_BIN_OFFSET,
+            EXT_ITEM_PARA_SEED_SIZE,
         )
+        seed_lo = EXT_ITEM_PARA_SEED_BIN_OFFSET
+        seed_hi = seed_lo + EXT_ITEM_PARA_SEED_SIZE
+        zero_fills = [
+            data for _t, off, data in self.tokens
+            if off == seed_lo and len(data) == EXT_ITEM_PARA_SEED_SIZE
+        ]
+        self.assertEqual(len(zero_fills), 1, "always-on zero-fill missing")
+        self.assertEqual(zero_fills[0], b"\x00" * EXT_ITEM_PARA_SEED_SIZE)
+        entry_writes = [
+            (off, data) for _t, off, data in self.tokens
+            if seed_lo <= off < seed_hi and len(data) == 32
+        ]
+        self.assertEqual(entry_writes, [],
+                         "ext entries staged with both shop options off")
 
-    def test_scan_base_patch_not_written(self) -> None:
-        from ..data.addresses import ROM_MERIT_SCAN_BASE_PATCH_OFFSET
-        self.assertNotIn(
-            ROM_MERIT_SCAN_BASE_PATCH_OFFSET, self.observed_offsets,
-        )
-
-    def test_name_teleport_wrapper_not_written(self) -> None:
-        from ..data.addresses import CAVE6_MERIT_NAME_TELEPORT_WRAPPER_OFFSET
-        self.assertNotIn(
-            CAVE6_MERIT_NAME_TELEPORT_WRAPPER_OFFSET, self.observed_offsets,
-        )
-
-    def test_name_patch_not_written(self) -> None:
-        from ..data.addresses import ROM_MERIT_NAME_PATCH_OFFSET
-        self.assertNotIn(
-            ROM_MERIT_NAME_PATCH_OFFSET, self.observed_offsets,
-        )
-
-    def test_row_teleport_wrapper_not_written(self) -> None:
-        from ..data.addresses import CAVE6_MERIT_ROW_TELEPORT_WRAPPER_OFFSET
-        self.assertNotIn(
-            CAVE6_MERIT_ROW_TELEPORT_WRAPPER_OFFSET, self.observed_offsets,
-        )
-
-    def test_row_patch_not_written(self) -> None:
-        from ..data.addresses import ROM_MERIT_ROW_PATCH_OFFSET
-        self.assertNotIn(
-            ROM_MERIT_ROW_PATCH_OFFSET, self.observed_offsets,
-        )
-
-    def test_deduct_teleport_wrapper_not_written(self) -> None:
-        from ..data.addresses import CAVE6_MERIT_DEDUCT_TELEPORT_WRAPPER_OFFSET
-        self.assertNotIn(
-            CAVE6_MERIT_DEDUCT_TELEPORT_WRAPPER_OFFSET, self.observed_offsets,
-        )
-
-    def test_deduct_patch_not_written(self) -> None:
-        from ..data.addresses import ROM_MERIT_DEDUCT_PATCH_OFFSET
-        self.assertNotIn(
-            ROM_MERIT_DEDUCT_PATCH_OFFSET, self.observed_offsets,
-        )
-
-    def test_cave6_ext_slots_not_written(self) -> None:
-        for slot in range(144, 174):
-            offset = ext_item_para_slot_bin_offset(slot)
-            self.assertNotIn(offset, self.observed_offsets)
+    def test_scan_bound_not_patched(self) -> None:
+        offsets = {off for _t, off, _d in self.tokens}
+        self.assertNotIn(ROM_MERIT_SCAN_BOUND_OFFSET, offsets)

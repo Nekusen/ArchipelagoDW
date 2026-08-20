@@ -1,6 +1,20 @@
 # Cave6 multi-segment ITEM_PARA
 
-**Status**: implemented (2026-05-13). Adds 30 ITEM_PARA slots (144..173)
+**Status**: RETIRED (2026-08-21) — superseded by the always-on
+**ITEM_PARA 256-slot relocation** onto the heap-claimed region
+`0x801BFB70..0x801C1B70` (lab mission
+`work/dw1_re/decomp/item_para_reloc/NOTES.md`; production section
+"ITEM_PARA 256-slot relocation" in `data/addresses.py`, always-on
+token writer `_write_item_para_relocation_tokens` in `rom.py`). The
+scan/name/row/deduct teleport wrappers described below are gone (plain
+re-based reader words replaced them), ext slots live contiguously at
+natural positions in the relocated table, and the Cave6 ext segment's
+footprint at `0x80096800` now stores the .bin-backed EXT_ITEM_PARA
+seed block (30 slots, 128..157) that the boot hook copies in. This
+document is kept as historical record of the shipped 2026-05-13
+design.
+
+Originally: implemented (2026-05-13). Adds 30 ITEM_PARA slots (144..173)
 to the AP-extension range, lifting the previous 16-slot ceiling
 without relocating any existing data.
 
