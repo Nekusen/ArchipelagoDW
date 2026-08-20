@@ -33,6 +33,8 @@
 *.BIN
 *.puml
 references/
+work/
+*.apdw1
 setups
 build
 bundle/components.wxs

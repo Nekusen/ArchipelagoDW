@@ -164,6 +164,15 @@ These come from [docs/style.md](docs/style.md) and the ruff config and override 
   [worlds/digimon_world/data/addresses.py](worlds/digimon_world/data/addresses.py)
   and is the **single source of truth** — Phase 3 (patcher) and Phase 4
   (client) import from there, never from `references/` directly.
+- **RE lab**: PCSX-Redux + Ghidra workbench for automated reverse engineering
+  (watchpoints, REST-driven RAM access, analyzed SLUS project). Tools live in
+  `C:\opt\tools\`, harness scripts and the full guide in
+  [worlds/digimon_world/tools/TOOLING.md](worlds/digimon_world/tools/TOOLING.md).
+  Game-derived artifacts go to `work/` (gitignored), never into the repo.
+- **Function decomp**: standardized, pilot-verified pipeline in
+  [worlds/digimon_world/tools/DECOMP_PROCESS.md](worlds/digimon_world/tools/DECOMP_PROCESS.md)
+  (bar: 100% replay of emulator-captured call vectors). Batch via the `dw1-decomp`
+  agent + `dw1-decomp-batch` workflow. Decomp output stays in `work/` — never commit it.
 - **Conventions**:
   - All code, identifiers, commit messages, and committed documentation in
     English.
