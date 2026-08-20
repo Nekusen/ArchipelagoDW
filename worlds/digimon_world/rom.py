@@ -69,8 +69,19 @@ from .data.addresses import (
     ROM_AP_ITEM_ENTRY_OFFSET,
     ROM_BIN_BYTES,
     ROM_BIN_SHA1,
+    ROM_BIRDRA_FLIGHT_GCANYON_PATCHES,
+    ROM_BIRDRA_FLIGHT_PRICE_OFFSETS,
+    ROM_BIRDRA_FLIGHT_PRICE_ZERO,
     ROM_BIRDRA_FLIGHT_TABLE_FORMAT,
     ROM_BIRDRA_FLIGHT_TABLE_PATCHES,
+    ROM_TRANSITION_GATE_HOOK_BYTES,
+    ROM_TRANSITION_GATE_WRAPPER_BYTES,
+    SCRIPT_GATE_PATCHES,
+    TRANSITION_GATE_HOOK_OFFSET,
+    TRANSITION_GATE_TABLE_OFFSET,
+    TRANSITION_GATE_WRAPPER_OFFSET,
+    build_transition_gate_table,
+    script_vm_to_bin_offset,
     ROM_CHANGEMAP_PATCH_FORMAT,
     ROM_CHANGEMAP_PATCH_OFFSET,
     ROM_CHANGEMAP_PATCH_VALUE,
@@ -1428,6 +1439,88 @@ def _write_great_canyon_cutscene_tokens(patch: DigimonWorldProcedurePatch) -> No
 # QoL patcher helpers (Phase 5 polish; opt-in via player options)
 # =============================================================================
 
+def _write_region_gate_tokens(
+    patch: DigimonWorldProcedurePatch,
+    world: DigimonWorldWorld,
+) -> None:
+    """Physically enforce ``region_locking`` in the ROM (lab-validated).
+
+    Emits per-seed gate data for exactly the regions that
+    :func:`options.get_locked_regions` reports as locked — the same
+    derivation :func:`rules._apply_region_locks` uses — so the ROM
+    gates and the AP logic stay in lockstep. No-op when nothing is
+    locked.
+
+    Three token families (all addresses/bytes from the region-gate
+    section of :mod:`.data.addresses`; see the lab NOTES in
+    ``work/dw1_re/decomp/_scan_transition_gate`` + ``_scan_script_gates``
+    for the three-net validation story):
+
+    1. **Walk-on gates** — the Cave6 post-memcpy wrapper, the per-seed
+       gate table (only rows whose gating region is locked), and the
+       ``jal`` redirect at loadMapEntities' memcpy callsite. Blocked
+       crossings loop back to the same mouth (normal fade, no message);
+       the wrapper re-runs on every screen load, so the gate survives
+       all reloads. Skipped entirely when the filtered table has no
+       rows (e.g. only Beetle Land / Factorial Town locked — both are
+       script-entry-only regions).
+    2. **Script-class gates** — the market west/east gates + Beetle Land
+       return ferry (Native Forest), the Whamon ferry (Factorial Town),
+       and the Blue Flute pier + post-friendship ride (Beetle Land).
+       Each locked region's group rewrites one-or-two u16 jump targets
+       into stubs placed over script slot-tail residue; blocked flows
+       take existing vanilla decline paths.
+    3. **G Canyon Top flight redirect** — when Great Canyon is locked,
+       entry 0 of both flight-table copies is re-triggered from the
+       vanilla 221 (Birdramon recruit) to the AP bit 878, which the
+       client pins on ``Birdramon Recruit AND Great Canyon Region
+       Access``.
+    """
+
+    from .options import get_locked_regions
+
+    locked = get_locked_regions(world.options)
+    if not locked:
+        return
+
+    # 1. Walk-on wrapper + per-seed table + hook.
+    table_bytes = build_transition_gate_table(locked)
+    if len(table_bytes) > 4:  # more than the bare terminator
+        patch.write_token(
+            APTokenTypes.WRITE,
+            TRANSITION_GATE_WRAPPER_OFFSET,
+            ROM_TRANSITION_GATE_WRAPPER_BYTES,
+        )
+        patch.write_token(
+            APTokenTypes.WRITE, TRANSITION_GATE_TABLE_OFFSET, table_bytes,
+        )
+        patch.write_token(
+            APTokenTypes.WRITE,
+            TRANSITION_GATE_HOOK_OFFSET,
+            ROM_TRANSITION_GATE_HOOK_BYTES,
+        )
+
+    # 2. Script-class gates for the locked regions that have them.
+    for region, gate_patches in SCRIPT_GATE_PATCHES.items():
+        if region not in locked:
+            continue
+        for entry in gate_patches:
+            patch.write_token(
+                APTokenTypes.WRITE,
+                script_vm_to_bin_offset(entry.script, entry.vm_offset),
+                entry.data,
+            )
+
+    # 3. G Canyon Top flight-slot trigger redirect.
+    if "Great Canyon" in locked:
+        for offset, new_trigger_id in ROM_BIRDRA_FLIGHT_GCANYON_PATCHES:
+            patch.write_token(
+                APTokenTypes.WRITE,
+                offset,
+                struct.pack(ROM_BIRDRA_FLIGHT_TABLE_FORMAT, new_trigger_id),
+            )
+
+
 def _write_birdra_flight_table_tokens(patch: DigimonWorldProcedurePatch) -> None:
     """Redirect Birdramon-Messenger flight gate triggers to AP-controlled bits.
 
@@ -1460,6 +1553,15 @@ def _write_birdra_flight_table_tokens(patch: DigimonWorldProcedurePatch) -> None
             APTokenTypes.WRITE,
             offset,
             struct.pack(ROM_BIRDRA_FLIGHT_TABLE_FORMAT, new_trigger_id),
+        )
+
+    # QoL (unconditional, user-confirmed 2026-08-21): zero the u32 price
+    # field of all 6 destination entries in BOTH table copies (vanilla
+    # fares 1000..2500 bits). The engine handles price 0, so every
+    # flight becomes free once its trigger bit is delivered.
+    for offset in ROM_BIRDRA_FLIGHT_PRICE_OFFSETS:
+        patch.write_token(
+            APTokenTypes.WRITE, offset, ROM_BIRDRA_FLIGHT_PRICE_ZERO,
         )
 
 
@@ -2212,6 +2314,12 @@ def write_patch(world: DigimonWorldWorld, output_directory: str) -> None:
     _write_field_spawn_trigger_patches(patch)  # Plan A: per-Digimon
     _write_gettopcity_trigger_patches(patch)  # Plan A: Top City variants
     _write_birdra_flight_table_tokens(patch)
+    # Region-gate enforcement — no-op unless region_locking locks
+    # something this seed. Must run AFTER _write_birdra_flight_table_tokens
+    # so the Great-Canyon entry-0 trigger redirect isn't clobbered
+    # (token order = insertion order; the two families write disjoint
+    # offsets today, but keep the ordering contract anyway).
+    _write_region_gate_tokens(patch, world)
     _write_old_fishrod_remap_tokens(patch)  # always-on; decouples cutscene from rod ownership
     _write_mansion_key_neuter_tokens(patch)  # always-on; vanilla key give -> AP location signal
     _write_frig_key_neuter_tokens(patch)  # always-on; same shape as Mansion Key

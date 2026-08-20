@@ -237,11 +237,12 @@ class TestItemDeliveryRoutes(DigimonWorldTestBase):
             self.assertIn(prog_name, ITEM_DELIVERY_ROUTES, prog_name)
 
     def test_all_region_access_items_have_routes(self) -> None:
-        """``<Region> Region Access`` items (PR 2 region-locking) are
-        pure-logic items with no in-game effect — they still need a
-        no-op delivery route so the items_received counter advances and
-        the client doesn't spam ``"No delivery route"`` warnings each
-        time the player receives one."""
+        """``<Region> Region Access`` items own a ROM-read trigger bit
+        since the region-gate feature (2026-08-21): delivery must OR the
+        bit in (keyitem semantics) so the walk-on wrapper / script-gate
+        stubs see the unlock, and the route's presence keeps the
+        items_received counter advancing without ``"No delivery route"``
+        warnings."""
 
         from ..regions import LOCKABLE_REGIONS, region_access_item_name
         for region in LOCKABLE_REGIONS:

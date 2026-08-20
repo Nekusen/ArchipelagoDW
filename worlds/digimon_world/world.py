@@ -147,6 +147,13 @@ class DigimonWorldWorld(World):
         slot_data["vanilla_grant_chests"] = sorted(
             name for name, grant in self.chest_grants.items() if grant.vanilla_grant
         )
+        # Locked-region set for the client's region-gate bit reconciler:
+        # Region Access trigger bits are pinned only for these regions,
+        # and the Birdramon flight bits compose with the destination's
+        # Region Access item only when the destination appears here.
+        # Mirrors rules._apply_region_locks / rom._write_region_gate_tokens.
+        from .options import get_locked_regions
+        slot_data["locked_regions"] = sorted(get_locked_regions(self.options))
         return slot_data
 
     def generate_output(self, output_directory: str) -> None:

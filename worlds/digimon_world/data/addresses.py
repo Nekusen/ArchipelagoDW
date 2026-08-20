@@ -3394,9 +3394,11 @@ ROM_RAIN_PLANT_GIVEITEM_NEUTER_VALUE: Final = bytes((
 # Guardian's Blue Flute!" — see commit notes). Two giveItem sites in
 # the single copy. The .bin gap between primary (0x13FE1D4E) and
 # retry (0x13FE1F00) is wider than the script-relative gap (434 vs
-# 130 bytes); the disassembler's offset numbering for this script's
-# textboxes does not map 1:1 to .bin byte offsets. We trust the .bin
-# scan and patch both sites directly.
+# 130 bytes) because a 2048-B user-data sector boundary sits between
+# them — in USER space the disassembler's offsets map 1:1 (see
+# :data:`SCRIPT_ARCHIVE_USER_BASE`); flat-offset deltas across sectors
+# include the 304 B of header+EDC interleave. We trust the .bin scan
+# and patch both sites directly.
 
 ROM_BLUE_FLUTE_GIVEITEM_OFFSETS: Final = (
     0x13FE1D4E,  # Primary (script-offset 2006 in dumper output; preceded by setTrigger 210 + addToPStat)
@@ -6881,7 +6883,16 @@ def _slus_ram_to_bin_offset(ram_addr: int) -> int:
 #   0x80095940..0x8009597C  recycle shop giveItem wrapper (60 B, opt-in)
 #   0x80095980..0x80095D80  RELOC_ITEM_DESC_PTR (1024 B, opt-in) <- this section
 #   0x80095D80..0x80095F40  AP_DESC_STRINGS (448 B, opt-in)       <-
-#   0x80095F40..0x80096BCC  ~3.1 KB free for future expansion
+#   0x80095F40..0x80096BCC  tail, claimed piecemeal by later features:
+#     - merit-shop ext wrapper (0x80096380..0x800965BC) and the
+#       scan/name/row/deduct teleport wrappers ending at 0x800966C4
+#       (see the merit sections below)
+#     - transition-gate wrapper + table 0x800966C4..0x800967F0
+#       (region-gate section at the bottom of this file), 16 B spare
+#       before the sector-148350 boundary at 0x80096800
+#     - Cave6 ITEM_PARA ext segment 0x80096800..0x80096BC0
+#     Remaining free: 0x800967F0..0x80096800 (16 B) and
+#     0x80096BC0..0x80096BCC (12 B).
 #
 # Recycle-shop usage adds 1472 bytes inside Cave6, well within the
 # remaining headroom. An assertion at the bottom of this block enforces
@@ -8739,3 +8750,691 @@ ROM_MERIT_SCAN_BOUND_VALUE: Final = (
 assert ROM_MERIT_SCAN_BOUND_VALUE == 0x2CA10000 | _MERIT_SCAN_BOUND_NEW_IMM, (
     hex(ROM_MERIT_SCAN_BOUND_VALUE)
 )
+
+
+# =============================================================================
+# Region-gate feature (physical enforcement of the ``region_locking`` option)
+# =============================================================================
+#
+# Lab-validated 2026-08-20/21 (three nets each) in
+# ``work/dw1_re/decomp/_scan_transition_gate/`` (walk-on MapWarps wrapper +
+# gate table) and ``work/dw1_re/decomp/_scan_script_gates/`` (script-class
+# gates), spec builders ``work/dw1_re/patches/transition_gate_spec.py`` /
+# ``script_gates_spec.py``. This section is the faithful production port:
+# same bytes, same addresses, same trigger ids.
+#
+# Mechanism summary:
+#
+# * **Walk-on crossings** — MAP_WARPS (0x78 B @ RAM 0x80138730) is rebuilt
+#   from disc data on EVERY screen load by loadMapEntities' first action,
+#   ``memcpy(0x80138730, buffer, 0x78)`` = the ``jal memcpy`` at RAM
+#   0x800A9AA0. We redirect that jal into a Cave6 wrapper that calls memcpy
+#   with the original args, then walks a gate table of
+#   ``{u8 screen, u8 slot, u16 trigger}`` rows (terminator screen=0xFF):
+#   for each row matching the mapId being loaded (callee-saved ``s5`` at
+#   the callsite), if ``isTriggerSet(trigger)`` is false the row's slot is
+#   shorted into a loop-back (``targetMap[slot] = mapId``,
+#   ``targetExit[slot] = slot``) — crossing the mouth fades and reloads the
+#   same screen at the same mouth. Synchronous, race-free, survives every
+#   reload (the self-reload re-runs the wrapper).
+# * **Script-class crossings** (market gates, Whamon ferry, Blue Flute
+#   pier/ride, Beetle Land return ferry) never consult MAP_WARPS; they are
+#   gated by retargeting ONE u16 per flow (a setSelection target / IF jump
+#   target / section head) into a small stub written over the script slot's
+#   tail residue: ``if trigger(RA) == false then <vanilla decline path>``
+#   + ``jumpTo <vanilla continue>``. Blocked behavior is always an existing
+#   vanilla path (prompt closes / NPC walks back / section ends).
+#
+# Region Access trigger ids (one bit per LOCKABLE_REGION; the client sets
+# the bit when AP delivers the "<Region> Region Access" item and reconciles
+# it every tick):
+#
+# * 12 walk-on regions sit in the free tail of the historical 880..935 AP
+#   pool: 926/927 = byte 0x001BE040 bits 6/7 (after merit 912..925);
+#   928..935 = byte 0x001BE041 (documented free); 911 = byte 0x001BE03E
+#   bit 7; 896 = byte 0x001BE03D bit 0 (reclaimed from the never-shipped
+#   "Gear Savanna MP Stand" vending reservation).
+# * 897 Factorial Town = byte 0x001BE03D bit 1 (the vending-skip bit — the
+#   last free bit of the historical pool).
+# * 879 Beetle Land = byte 0x001BE03A bit 7, OUTSIDE the historical pool
+#   (the pool's 13 free bits cover only 13 of the 14 LOCKABLE_REGIONS).
+#   Audited clean 2026-08-21: vanilla scripts reference trigger ids only up
+#   to 713 (full DW1Script.txt scan); engine-side constant callers of the
+#   trigger family (getTriggerOffsets/isTriggerSet/setTrigger/unsetTrigger)
+#   max out at trigger 640 with zero uses of 856..879 (4 live RAM images,
+#   86 callsites each); zero direct-address accesses to 0x801BE03A and zero
+#   save-block-relative +0x162 accesses anywhere in the .bin or resident
+#   code. Same audit covers 878 (bit 6, the G Canyon Top flight bit below).
+#
+# Triggers >= 936 are FORBIDDEN — byte 0x001BE042 is
+# :data:`RAM_MERAMON_TUNNEL_DRIMOGEMON_STATE`.
+
+REGION_ACCESS_TRIGGER_IDS: Final[dict[str, int]] = {
+    "Ancient Dino Region": 926,
+    "Beetle Land":         879,
+    "Drill Tunnel":        927,
+    "Factorial Town":      897,
+    "Freezeland":          928,
+    "Gear Savanna":        929,
+    "Geko Swamp":          930,
+    "Great Canyon":        931,
+    "Misty Trees":         932,
+    "Mt. Panorama":        933,
+    "Native Forest":       934,
+    "Overdell":            935,
+    "Toy Town":            911,
+    "Tropical Jungle":     896,
+}
+
+# Per-region (byte, bit) targets for the client's trigger-bit delivery,
+# derived via the canonical setTrigger formula
+# ``(AP_TRIGGER_ARRAY_BASE + N // 8, N % 8)``.
+REGION_ACCESS_RAM_BITS: Final[dict[str, tuple[int, int]]] = {
+    region: (AP_TRIGGER_ARRAY_BASE + trigger // 8, trigger % 8)
+    for region, trigger in REGION_ACCESS_TRIGGER_IDS.items()
+}
+
+# --- G Canyon Top flight-slot redirect (region_locking integration) ---------
+#
+# The 6th Birdramon-Messenger destination (G Canyon Top, table entry 0)
+# keeps its vanilla trigger 221 (= Birdramon recruit) in normal seeds — it
+# auto-unlocks with the Birdramon Recruit AP item. Under region locking
+# with Great Canyon locked that would bypass the Great Canyon Region
+# Access item, so the patcher redirects entry 0's trigger u16 (both .bin
+# table copies) to a fresh AP bit the client pins on
+# ``Birdramon Recruit AND Great Canyon Region Access``.
+#
+# Trigger 878 = byte 0x001BE03A bit 6 — outside the historical 880..935
+# pool, which is fully allocated (flight 880-884, arena cups 885-889,
+# vending 890-895 + 898-901, rods 902/903, recycle 904-910, merit 912-925,
+# Region Access 896/897/911/926-935). Covered by the same 856..879 audit
+# as Beetle Land's 879 (see above). NOTE: the lab handoff suggested id 885
+# for this bit; 885 is :data:`ARENA_CUP_GRADE_D_TRIGGER_ID` (shipped), so
+# the production allocation moved to 878 — the one renumbering in this port.
+BIRDRA_FLIGHT_GCANYON_TRIGGER_ID: Final = 878
+BIRDRA_FLIGHT_GCANYON_RAM_BIT: Final[tuple[int, int]] = (
+    AP_TRIGGER_ARRAY_BASE + BIRDRA_FLIGHT_GCANYON_TRIGGER_ID // 8,
+    BIRDRA_FLIGHT_GCANYON_TRIGGER_ID % 8,
+)
+assert BIRDRA_FLIGHT_GCANYON_RAM_BIT == (0x001BE03A, 6), BIRDRA_FLIGHT_GCANYON_RAM_BIT
+
+# Flight destination table bases (entry format ``<u16 trigger, u32 price,
+# u16 label>``, 6 entries x 8 B, two identical .bin copies). Entry 0 =
+# G Canyon Top (vanilla trigger 221; vanilla prices for entries 0..5 are
+# 1000/1000/1500/2000/2500/2500 bits — "free" in the older flight notes
+# referred to the trigger auto-unlocking with Birdramon's recruit, not
+# the fare).
+ROM_BIRDRA_FLIGHT_TABLE_BASES: Final[tuple[int, int]] = (0x14B8B698, 0x14D725C6)
+# Consistency with the shipped per-entry trigger patches (entry n trigger
+# sits at ``base + 8 * n``; the shipped tuples start at entry 1).
+assert ROM_BIRDRA_FLIGHT_TABLE_PATCHES[0][0] == ROM_BIRDRA_FLIGHT_TABLE_BASES[0] + 8
+assert ROM_BIRDRA_FLIGHT_TABLE_PATCHES[5][0] == ROM_BIRDRA_FLIGHT_TABLE_BASES[1] + 8
+
+# Entry-0 trigger u16 rewrite sites (only written when Great Canyon is
+# locked this seed). Vanilla value at both sites: 221 (0xDD 0x00).
+ROM_BIRDRA_FLIGHT_GCANYON_PATCHES: Final[tuple[tuple[int, int], ...]] = tuple(
+    (base, BIRDRA_FLIGHT_GCANYON_TRIGGER_ID) for base in ROM_BIRDRA_FLIGHT_TABLE_BASES
+)
+ROM_BIRDRA_FLIGHT_GCANYON_VANILLA_TRIGGER: Final = 221
+
+# --- Flight price zeroing (unconditional QoL, user-confirmed) ---------------
+#
+# Zero the u32 price field of all 6 destination entries in BOTH table
+# copies. The engine handles price 0 fine (G Canyon Top is free in
+# vanilla). Written unconditionally by the patcher — no option.
+ROM_BIRDRA_FLIGHT_PRICE_OFFSETS: Final[tuple[int, ...]] = tuple(
+    base + 8 * entry + 2
+    for base in ROM_BIRDRA_FLIGHT_TABLE_BASES
+    for entry in range(6)
+)
+ROM_BIRDRA_FLIGHT_PRICE_ZERO: Final = b"\x00\x00\x00\x00"
+# Flat token writes only — none of the 4-byte price writes (nor the 2-byte
+# entry-0 trigger writes) may cross a Mode2/2352 user-data boundary
+# (header 24 B, user data bytes 24..2071 of each 2352-B sector).
+for _off, _ln in (
+    *((o, 4) for o in ROM_BIRDRA_FLIGHT_PRICE_OFFSETS),
+    *((o, 2) for o, _t in ROM_BIRDRA_FLIGHT_GCANYON_PATCHES),
+):
+    _pos = _off % 2352
+    assert 24 <= _pos and _pos + _ln <= 2072, (
+        f"flight-table write at 0x{_off:09X} straddles a sector boundary"
+    )
+del _off, _ln, _pos
+
+
+# --- Walk-on transition-gate wrapper + table (Cave6) ------------------------
+#
+# Cave6 space claim: the free gap between the merit purchase-deduct
+# teleport wrapper (ends at 0x800966C4) and the Cave6 ITEM_PARA ext
+# segment (starts at 0x80096800), fully inside sector 148350's user-data
+# window — wrapper 164 B @ 0x800966C4..0x80096768, full table 136 B @
+# 0x80096768..0x800967F0, 16 B spare.
+TRANSITION_GATE_WRAPPER_RAM: Final = 0x800966C4
+assert TRANSITION_GATE_WRAPPER_RAM == (
+    CAVE6_MERIT_DEDUCT_TELEPORT_WRAPPER_RAM
+    + len(ROM_MERIT_DEDUCT_TELEPORT_WRAPPER_BYTES)
+), "Cave6 gap start drifted — re-check the merit wrapper chain"
+TRANSITION_GATE_WRAPPER_OFFSET: Final = _slus_ram_to_bin_offset(
+    TRANSITION_GATE_WRAPPER_RAM,
+)
+
+# Hook: loadMapEntities' first action is ``jal memcpy`` at 0x800A9AA0
+# (vanilla word 0x0C024493 = jal 0x8009124C, verified vs live RAM and the
+# .bin). At that callsite s5 = the mapId being loaded (set at 0x800A9A8C,
+# callee-saved).
+TRANSITION_GATE_HOOK_RAM: Final = 0x800A9AA0
+TRANSITION_GATE_HOOK_OFFSET: Final = _slus_ram_to_bin_offset(
+    TRANSITION_GATE_HOOK_RAM,
+)
+TRANSITION_GATE_HOOK_VANILLA_WORD: Final = 0x0C024493
+_TRANSITION_GATE_MEMCPY_RAM: Final = 0x8009124C
+assert (
+    ((TRANSITION_GATE_HOOK_VANILLA_WORD & 0x03FFFFFF) << 2) | 0x80000000
+) == _TRANSITION_GATE_MEMCPY_RAM
+ROM_TRANSITION_GATE_HOOK_BYTES: Final = struct.pack(
+    "<I", 0x0C000000 | ((TRANSITION_GATE_WRAPPER_RAM >> 2) & 0x03FFFFFF),
+)
+
+_TRANSITION_GATE_ISTRIGGERSET_RAM: Final = 0x8010643C   # VERIFIED decomp unit
+_TRANSITION_GATE_TARGETMAP_RAM: Final = 0x80138780      # MAP_WARPS.targetMap[10]
+
+# File City market clones TWNB01..24 (screens 180..203) share byte-identical
+# warp tables; the wrapper canonicalizes s5 in [180, 203] -> 180 for table
+# MATCHING only (loop-back writes still store the REAL mapId), so the ROM
+# table carries 2 rows for screen 180 instead of 48.
+_TWNB_FIRST: Final = 180
+_TWNB_LAST: Final = 203
+_TWNB_CANONICAL: Final = 180
+
+
+def _build_transition_gate_wrapper_bytes() -> bytes:
+    """Assemble the 41-word post-memcpy transition-gate wrapper.
+
+    Entry (redirected jal): a0=0x80138730, a1=staging buffer, a2=0x78,
+    ra=0x800A9AA8, s5=mapId being loaded. Calls memcpy with the original
+    args, then walks the gate table at :data:`TRANSITION_GATE_TABLE_RAM`.
+    Contract: preserves s*/sp/gp/ra and returns v0 = memcpy's return
+    value. o32 frame 0x20 with 16 B home space; R3000 load-delay and
+    branch-delay rules honored (annotated below). Byte-identical to the
+    lab-validated ``transition_gate.json`` wrapper (Net 1: delay-slot-
+    faithful interpreter replay over screens 0..254 x 3 random trigger
+    states vs an independent model; Net 2 live; Net 3 disc build).
+    """
+
+    zero, at, v0, a0 = 0, 1, 2, 4
+    t1, t3, t4, t5 = 9, 11, 12, 13
+    s0, s1, s5 = 16, 17, 21
+    sp, ra = 29, 31
+
+    def lw(rt: int, rs: int, imm: int) -> int:
+        return 0x8C000000 | (rs << 21) | (rt << 16) | (imm & 0xFFFF)
+
+    def lbu(rt: int, rs: int, imm: int) -> int:
+        return 0x90000000 | (rs << 21) | (rt << 16) | (imm & 0xFFFF)
+
+    def lhu(rt: int, rs: int, imm: int) -> int:
+        return 0x94000000 | (rs << 21) | (rt << 16) | (imm & 0xFFFF)
+
+    def sw(rt: int, rs: int, imm: int) -> int:
+        return 0xAC000000 | (rs << 21) | (rt << 16) | (imm & 0xFFFF)
+
+    def sh(rt: int, rs: int, imm: int) -> int:
+        return 0xA4000000 | (rs << 21) | (rt << 16) | (imm & 0xFFFF)
+
+    def lui(rt: int, imm: int) -> int:
+        return 0x3C000000 | (rt << 16) | (imm & 0xFFFF)
+
+    def addiu(rt: int, rs: int, imm: int) -> int:
+        return 0x24000000 | (rs << 21) | (rt << 16) | (imm & 0xFFFF)
+
+    def sltiu(rt: int, rs: int, imm: int) -> int:
+        return 0x2C000000 | (rs << 21) | (rt << 16) | (imm & 0xFFFF)
+
+    def or_(rd: int, rs: int, rt: int) -> int:
+        return (rs << 21) | (rt << 16) | (rd << 11) | 0x25
+
+    def sll(rd: int, rt: int, sa: int) -> int:
+        return (rt << 16) | (rd << 11) | ((sa & 31) << 6)
+
+    def addu(rd: int, rs: int, rt: int) -> int:
+        return (rs << 21) | (rt << 16) | (rd << 11) | 0x21
+
+    def beq(rs: int, rt: int, off: int) -> int:
+        return 0x10000000 | (rs << 21) | (rt << 16) | (off & 0xFFFF)
+
+    def bne(rs: int, rt: int, off: int) -> int:
+        return 0x14000000 | (rs << 21) | (rt << 16) | (off & 0xFFFF)
+
+    def jr(rs: int) -> int:
+        return (rs << 21) | 0x08
+
+    def jal(target: int) -> int:
+        return 0x0C000000 | ((target >> 2) & 0x03FFFFFF)
+
+    nop = 0
+
+    t_hi, t_lo = _decompose_kuseg(TRANSITION_GATE_TABLE_RAM)
+    tm_hi, tm_lo = _decompose_kuseg(_TRANSITION_GATE_TARGETMAP_RAM)
+    twnb_span = _TWNB_LAST - _TWNB_FIRST + 1                # 24
+
+    words = [
+        addiu(sp, sp, -0x20),               # 0  prologue
+        sw(ra, sp, 0x1C),                   # 1
+        sw(s0, sp, 0x18),                   # 2
+        sw(s1, sp, 0x14),                   # 3
+        jal(_TRANSITION_GATE_MEMCPY_RAM),   # 4  vanilla memcpy(a0,a1,a2)
+        nop,                                # 5  (jal delay)
+        sw(v0, sp, 0x10),                   # 6  preserve memcpy's return
+        or_(s1, s5, zero),                  # 7  s1 = mapId (match key)
+        addiu(t1, s5, -_TWNB_FIRST),        # 8  t1 = mapId - 180
+        sltiu(at, t1, twnb_span),           # 9  at = mapId in [180, 203]
+        beq(at, zero, 2),                   # 10 not a TWNB clone -> L_setup
+        nop,                                # 11 (branch delay)
+        addiu(s1, zero, _TWNB_CANONICAL),   # 12 TWNB fold: match as 180
+        # L_setup (13):
+        lui(s0, t_hi),                      # 13 s0 = gate table cursor
+        addiu(s0, s0, t_lo),                # 14
+        # L_loop (15):
+        lbu(t1, s0, 0),                     # 15 t1 = row.screen
+        addiu(at, zero, 0xFF),              # 16 (fills t1 load-delay)
+        beq(t1, at, 17),                    # 17 terminator -> L_done (35)
+        nop,                                # 18 (branch delay)
+        bne(t1, s1, 13),                    # 19 row not for this screen -> L_next
+        nop,                                # 20 (branch delay)
+        lhu(a0, s0, 2),                     # 21 a0 = row.trigger
+        jal(_TRANSITION_GATE_ISTRIGGERSET_RAM),  # 22 v0 = isTriggerSet(a0)
+        nop,                                # 23 (jal delay)
+        bne(v0, zero, 8),                   # 24 item delivered -> vanilla -> L_next
+        nop,                                # 25 (branch delay)
+        lbu(t3, s0, 1),                     # 26 t3 = row.slot
+        lui(t4, tm_hi),                     # 27 (fills t3 load-delay)
+        addiu(t4, t4, tm_lo),               # 28 t4 = targetMap base
+        sll(t5, t3, 1),                     # 29 t5 = 2*slot
+        addu(t4, t4, t5),                   # 30 &targetMap[slot]
+        sh(s5, t4, 0),                      # 31 targetMap[slot] = REAL mapId
+        sh(t3, t4, 0x14),                   # 32 targetExit[slot] = slot
+        # L_next (33):
+        beq(zero, zero, -19),               # 33 -> L_loop (15)
+        addiu(s0, s0, 4),                   # 34 (branch delay: cursor += 4)
+        # L_done (35):
+        lw(v0, sp, 0x10),                   # 35 restore memcpy's return
+        lw(ra, sp, 0x1C),                   # 36
+        lw(s0, sp, 0x18),                   # 37 (fills ra load-delay)
+        lw(s1, sp, 0x14),                   # 38 (delay slot = jr, no consumer)
+        jr(ra),                             # 39
+        addiu(sp, sp, 0x20),                # 40 (jr delay: epilogue)
+    ]
+    assert len(words) == 41
+    return b"".join(struct.pack("<I", w) for w in words)
+
+
+TRANSITION_GATE_TABLE_RAM: Final = TRANSITION_GATE_WRAPPER_RAM + 41 * 4      # 0x80096768
+assert TRANSITION_GATE_TABLE_RAM == 0x80096768, hex(TRANSITION_GATE_TABLE_RAM)
+TRANSITION_GATE_TABLE_OFFSET: Final = _slus_ram_to_bin_offset(
+    TRANSITION_GATE_TABLE_RAM,
+)
+
+ROM_TRANSITION_GATE_WRAPPER_BYTES: Final = _build_transition_gate_wrapper_bytes()
+assert len(ROM_TRANSITION_GATE_WRAPPER_BYTES) == 164, (
+    len(ROM_TRANSITION_GATE_WRAPPER_BYTES)
+)
+
+# The full folded walk-on gate table: one row per gated crossing direction,
+# ``(source screen, MapWarps slot, gating region)``. Derived from the
+# lab's ``gate_table.json`` (79 raw rows; the 48 byte-identical TWNB01..24
+# clone rows are folded into the 2 screen-180 rows — the wrapper's TWNB
+# canonicalization covers 181..203). MUST stay sorted by (screen, slot):
+# the per-seed encoder emits rows in this order and the full-locked
+# encoding is asserted byte-identical to the lab spec by the test suite.
+#
+# Region names reference :data:`REGION_ACCESS_TRIGGER_IDS` keys (=
+# ``regions.LOCKABLE_REGIONS`` entries; cross-checked in regions.py).
+TRANSITION_GATE_ROWS: Final[tuple[tuple[int, int, str], ...]] = (
+    (7,   0, "Native Forest"),        # MAYO11    s0 -> MAYO02_2 (Drill border)
+    (9,   2, "Tropical Jungle"),      # MAYO08A   s2 -> TROP00
+    (11,  0, "Native Forest"),        # TROP00    s0 -> MAYO08A
+    (17,  1, "Ancient Dino Region"),  # TROP06    s1 -> KODA00
+    (18,  0, "Native Forest"),        # MIHA00    s0 -> MAYO02_2 (NF/Mt.P border)
+    (22,  1, "Gear Savanna"),         # MIHA04A   s1 -> GIAS00
+    (23,  1, "Gear Savanna"),         # MIHA04B   s1 -> GIAS00
+    (34,  0, "Overdell"),             # DGHA01    s0 -> DGHA02
+    (35,  1, "Tropical Jungle"),      # DGHA02    s1 -> DGHA01
+    (36,  1, "Great Canyon"),         # GCAN01    s1 -> GCAN09
+    (38,  1, "Freezeland"),           # GCAN03    s1 -> FRZL01
+    (39,  1, "Freezeland"),           # GCAN04    s1 -> FRZL01
+    (44,  0, "Tropical Jungle"),      # GCAN09    s0 -> GCAN01
+    (69,  0, "Mt. Panorama"),         # GIAS00    s0 -> MIHA04A
+    (77,  3, "Geko Swamp"),           # GIAS08    s3 -> STIC01
+    (79,  0, "Tropical Jungle"),      # KODA00    s0 -> TROP06
+    (88,  1, "Great Canyon"),         # FRZL01    s1 -> GCAN04
+    (88,  2, "Great Canyon"),         # FRZL01    s2 -> GCAN03
+    (95,  1, "Misty Trees"),          # FRZL08    s1 -> MIST07
+    (110, 2, "Drill Tunnel"),         # MAYO01_2  s2 -> MAYO11
+    (111, 1, "Mt. Panorama"),         # MAYO02_2  s1 -> MIHA00 (NF/Mt.P border)
+    (111, 2, "Drill Tunnel"),         # MAYO02_2  s2 -> MAYO11
+    (112, 0, "Native Forest"),        # TRAI00    s0 -> MAYO00
+    (115, 0, "Geko Swamp"),           # MIST01    s0 -> STIC02
+    (119, 2, "Toy Town"),             # MIST05    s2 -> OMOC01
+    (121, 2, "Freezeland"),           # MIST07    s2 -> FRZL08
+    (127, 1, "Freezeland"),           # GCAN04_2  s1 -> FRZL01
+    (138, 0, "Gear Savanna"),         # STIC01    s0 -> GIAS08
+    (139, 2, "Misty Trees"),          # STIC02    s2 -> MIST01
+    (144, 0, "Misty Trees"),          # OMOC01    s0 -> MIST05
+    (156, 1, "Gear Savanna"),         # FACT05    s1 -> GIAS02 (one-way back gate)
+    (180, 0, "Native Forest"),        # TWNB01..24 s0 -> MAYO00  [folded x24]
+    (180, 2, "Native Forest"),        # TWNB01..24 s2 -> MAYO08A [folded x24]
+)
+assert len(TRANSITION_GATE_ROWS) == 33, len(TRANSITION_GATE_ROWS)
+assert list(TRANSITION_GATE_ROWS) == sorted(TRANSITION_GATE_ROWS), (
+    "TRANSITION_GATE_ROWS must stay sorted by (screen, slot)"
+)
+for _scr, _slot, _region in TRANSITION_GATE_ROWS:
+    assert 0 <= _scr < 255 and 0 <= _slot < 10, (_scr, _slot)
+    assert _scr not in range(_TWNB_FIRST + 1, _TWNB_LAST + 1), (
+        f"screen {_scr}: TWNB clones fold onto {_TWNB_CANONICAL}; individual "
+        f"clone rows would be dead weight the wrapper never matches"
+    )
+    assert _region in REGION_ACCESS_TRIGGER_IDS, _region
+del _scr, _slot, _region
+
+
+def build_transition_gate_table(locked_regions: frozenset[str] | set[str]) -> bytes:
+    """Encode the per-seed walk-on gate table.
+
+    Emits only the rows whose gating region is in ``locked_regions``
+    (mirroring how ``rules._apply_region_locks`` derives the locked set
+    from the ``region_locking`` option), each as
+    ``{u8 screen, u8 slot, u16 trigger}``, followed by the 4-byte
+    ``0xFF`` terminator. Returns just the terminator when no row is
+    locked (the patcher skips installing the hook in that case).
+    """
+
+    out = bytearray()
+    for screen, slot, region in TRANSITION_GATE_ROWS:
+        if region not in locked_regions:
+            continue
+        out += struct.pack("<BBH", screen, slot, REGION_ACCESS_TRIGGER_IDS[region])
+    out += struct.pack("<BBH", 0xFF, 0, 0)
+    return bytes(out)
+
+
+# Layout invariants: wrapper + full table must fit the claimed gap and
+# stay inside sector 148350's user-data window (which ends at RAM
+# 0x80096800 = the Cave6 ITEM_PARA ext base), so both tokens are flat
+# single-sector writes.
+_TRANSITION_GATE_FULL_TABLE_LEN: Final = (len(TRANSITION_GATE_ROWS) + 1) * 4  # 136
+assert (
+    TRANSITION_GATE_TABLE_RAM + _TRANSITION_GATE_FULL_TABLE_LEN
+    <= CAVE6_ITEM_PARA_EXT_RAM
+), "transition gate table overflows into the Cave6 ITEM_PARA ext segment"
+assert TRANSITION_GATE_WRAPPER_OFFSET % 2352 + len(ROM_TRANSITION_GATE_WRAPPER_BYTES) \
+    <= 2072, "transition gate wrapper write straddles a sector boundary"
+assert TRANSITION_GATE_TABLE_OFFSET % 2352 + _TRANSITION_GATE_FULL_TABLE_LEN \
+    <= 2072, "transition gate table write straddles a sector boundary"
+assert TRANSITION_GATE_HOOK_OFFSET % 2352 + 4 <= 2072
+
+
+# --- Script-class transition gates ------------------------------------------
+#
+# The script archive lives CONTIGUOUS in the .bin's 2048-B/sector
+# user-data space at user base 0x1167E800 (lab structural find,
+# byte-verified on five independent sites): script N sits at its archive
+# slot (the hex value in DW1Script.txt's ``== Script ID N ==`` headers)
+# and script-VM offsets are in-slot byte offsets — the disassembler's
+# offset numbering maps 1:1 to user-space bytes (flat-offset deltas
+# across sectors are the arithmetic artifact older comments tripped
+# over). Script file layout: ``[u16 table_len][{u16 section, u16 off} x N]
+# [FF FF][bytecode ...][FF 00 terminator][residue to the 0x800-aligned
+# slot end]``. The residue is referenced by nothing (leftovers of
+# neighboring builds) and is loaded into RAM with the script whenever it
+# shares the script's final 2048-B block — free patch space for the
+# gate stubs.
+#
+# Slot tails claimed by the stubs (all after the FF00 terminator, inside
+# the script's final 2048-B block): script 163 @ 7976..8016, script 162
+# @ 8780..8796, script 7 @ 3872..3904, script 101 @ 672..688.
+SCRIPT_ARCHIVE_USER_BASE: Final = 0x1167E800
+_SCRIPT_ARCHIVE_SLOTS: Final[dict[int, int]] = {
+    7: 0xA800,      # Dragon Eye Lake (screen 6): Blue Flute pier + ride offer
+    101: 0x45800,   # Beetle Land pad (screen 105): return ferry
+    162: 0x73000,   # File City TWNA variants: Whamon ferry dock
+    163: 0x75800,   # File City market TWNB variants: west/east gates
+}
+_SCRIPT_ARCHIVE_SLOT_SIZES: Final[dict[int, int]] = {
+    7: 0x1000, 101: 0x800, 162: 0x2800, 163: 0x2000,
+}
+
+
+def script_vm_to_bin_offset(script: int, vm_offset: int) -> int:
+    """Translate a script-VM offset to its raw Mode2/2352 .bin offset.
+
+    ``user = SCRIPT_ARCHIVE_USER_BASE + archive_slot + vm_offset`` counts
+    2048-byte user-data sectors; the flat offset re-interleaves the
+    24-byte sector headers.
+    """
+
+    user = SCRIPT_ARCHIVE_USER_BASE + _SCRIPT_ARCHIVE_SLOTS[script] + vm_offset
+    return (user // 2048) * 2352 + 24 + user % 2048
+
+
+def _encode_script_if_trigger_unset(trigger_id: int, target: int) -> bytes:
+    """``if trigger(id) == false then jump target`` (12 B single-cond IF).
+
+    Ground-truthed form (clone of Script 163 vm 7592):
+    ``19 00 | mode u16 | id u16 | 18 00 | target u16 | 19 00`` with
+    mode 0 = jump when the trigger is UNSET.
+    """
+
+    return struct.pack("<HHHHHH", 0x0019, 0x0000, trigger_id, 0x0018, target, 0x0019)
+
+
+def _encode_script_jump_to(target: int) -> bytes:
+    """``jumpTo target`` (4 B): ``16 00 | target u16``."""
+
+    return struct.pack("<HH", 0x0016, target)
+
+
+# ``entityWalkTo 253 -3000 492 false`` — the market west gate's vanilla
+# section head, replayed inside stub-W so the unlocked path keeps the
+# vanilla walk-out animation.
+_SCRIPT_GATE_ENTITY_WALK_WEST: Final = bytes.fromhex("4EFD48F4EC010000")
+
+
+class ScriptGatePatch(NamedTuple):
+    """One script-archive byte rewrite of the region-gate family."""
+
+    script: int
+    vm_offset: int
+    data: bytes
+    vanilla: bytes | None   # retarget sites only; stubs overwrite residue
+    note: str
+
+
+# Script-class gate patches, grouped by the LOCKABLE_REGION whose lock
+# state enables them (the patcher emits a group iff its region is locked
+# this seed). Every u16 target below is a vanilla VM offset inside the
+# same script (decline/continue paths verified in the lab replay + live).
+#
+# Blocked behaviors are all graceful vanilla paths: the market gates end
+# their section (player stays at the mouth; the east gate additionally
+# needs Kunemon in town to be visually open — its vanilla trigger-232 IF
+# is untouched and composes with the AP recruit remap); Whamon's
+# "Factorial Town" choice behaves like "Nowhere"; the flute prompts close
+# like "I won't play" / "Don't play"; the ride offer behaves like
+# "No, maybe later".
+SCRIPT_GATE_PATCHES: Final[dict[str, tuple[ScriptGatePatch, ...]]] = {
+    "Native Forest": (
+        # A-west: S51 entry head (entityWalkTo) -> jumpTo stub-W
+        # (bytes 7568..7571 become dead).
+        ScriptGatePatch(
+            163, 7564, _encode_script_jump_to(7976), bytes.fromhex("4EFD48F4"),
+            "market west gate: S51 head -> stub-W",
+        ),
+        # A-east: S53 "if trigger(232) == true then 7592" jump target -> stub-E.
+        ScriptGatePatch(
+            163, 7586, struct.pack("<H", 8000), struct.pack("<H", 7592),
+            "market east gate: S53 IF target -> stub-E",
+        ),
+        # stub-W: if !NF-RA -> endSection@7576; else vanilla walk + jumpTo
+        # the warpTo-109 continuation @7572.
+        ScriptGatePatch(
+            163, 7976,
+            _encode_script_if_trigger_unset(
+                REGION_ACCESS_TRIGGER_IDS["Native Forest"], 7576,
+            ) + _SCRIPT_GATE_ENTITY_WALK_WEST + _encode_script_jump_to(7572),
+            None,
+            "stub-W over Script 163 slot-tail residue",
+        ),
+        # stub-E: if !NF-RA -> endSection@7590; else jumpTo the vanilla
+        # bridge-variant IF @7592.
+        ScriptGatePatch(
+            163, 8000,
+            _encode_script_if_trigger_unset(
+                REGION_ACCESS_TRIGGER_IDS["Native Forest"], 7590,
+            ) + _encode_script_jump_to(7592),
+            None,
+            "stub-E over Script 163 slot-tail residue",
+        ),
+        # C3: Beetle Land RETURN ferry (Script 101 S81 "Play" selection
+        # target 242 -> stub-R), gated on Native Forest RA per user ruling
+        # (the return re-enters Native Forest territory). A player who
+        # FLIES into Beetle Land without NF RA cannot use the return
+        # ferry; the sanctioned escape is the Auto Pilot item (warps to
+        # File City) — accepted trap, documented in the player guide.
+        ScriptGatePatch(
+            101, 192, struct.pack("<H", 672), struct.pack("<H", 242),
+            "Beetle Land return ferry: S81 selection[0] -> stub-R",
+        ),
+        # stub-R: if !NF-RA -> "Don't play" endSection@238; else jumpTo
+        # the vanilla delay + warpTo-6 ride @242.
+        ScriptGatePatch(
+            101, 672,
+            _encode_script_if_trigger_unset(
+                REGION_ACCESS_TRIGGER_IDS["Native Forest"], 238,
+            ) + _encode_script_jump_to(242),
+            None,
+            "stub-R over Script 101 slot-tail residue",
+        ),
+    ),
+    "Factorial Town": (
+        # B: Whamon ferry S55 setSelection target[0] ("Factorial Town")
+        # 6864 -> stub-B. The ferry is the ONLY script entrance into
+        # Factorial Town (lab-exhaustive scan); flight has its own gate.
+        ScriptGatePatch(
+            162, 6766, struct.pack("<H", 8780), struct.pack("<H", 6864),
+            "Whamon ferry: S55 selection[0] -> stub-B",
+        ),
+        # stub-B: if !FT-RA -> "Nowhere" path@6872; else jumpTo warpTo-152
+        # @6864.
+        ScriptGatePatch(
+            162, 8780,
+            _encode_script_if_trigger_unset(
+                REGION_ACCESS_TRIGGER_IDS["Factorial Town"], 6872,
+            ) + _encode_script_jump_to(6864),
+            None,
+            "stub-B over Script 162 slot-tail residue",
+        ),
+    ),
+    "Beetle Land": (
+        # C1: Blue Flute pier S81 setSelection target[0] ("I'll play")
+        # 246 -> stub-C1.
+        ScriptGatePatch(
+            7, 184, struct.pack("<H", 3872), struct.pack("<H", 246),
+            "flute pier: S81 selection[0] -> stub-C1",
+        ),
+        # C2: post-friendship ride offer S82 setSelection target[0]
+        # ("Yeah, I'll go") 3600 -> stub-C2. Without this the ride offer
+        # is unconditional — Beetle Land reachable without any item.
+        ScriptGatePatch(
+            7, 2656, struct.pack("<H", 3888), struct.pack("<H", 3600),
+            "ride offer: S82 selection[0] -> stub-C2",
+        ),
+        # stub-C1: if !BL-RA -> "I won't play" endSection@244; else jumpTo
+        # the summon cutscene @246.
+        ScriptGatePatch(
+            7, 3872,
+            _encode_script_if_trigger_unset(
+                REGION_ACCESS_TRIGGER_IDS["Beetle Land"], 244,
+            ) + _encode_script_jump_to(246),
+            None,
+            "stub-C1 over Script 7 slot-tail residue",
+        ),
+        # stub-C2: if !BL-RA -> "No, maybe later"@3784; else jumpTo the
+        # ride @3600.
+        ScriptGatePatch(
+            7, 3888,
+            _encode_script_if_trigger_unset(
+                REGION_ACCESS_TRIGGER_IDS["Beetle Land"], 3784,
+            ) + _encode_script_jump_to(3600),
+            None,
+            "stub-C2 over Script 7 slot-tail residue",
+        ),
+    ),
+}
+
+# Structural invariants: retarget payloads keep their vanilla length, no
+# write leaves its script slot, and no write crosses a 2048-B sector
+# user-data boundary (script tokens are flat single-sector writes).
+for _patches in SCRIPT_GATE_PATCHES.values():
+    for _p in _patches:
+        if _p.vanilla is not None:
+            assert len(_p.data) == len(_p.vanilla), _p.note
+        assert _p.vm_offset + len(_p.data) <= _SCRIPT_ARCHIVE_SLOT_SIZES[_p.script], _p.note
+        _user = SCRIPT_ARCHIVE_USER_BASE + _SCRIPT_ARCHIVE_SLOTS[_p.script] + _p.vm_offset
+        assert _user % 2048 + len(_p.data) <= 2048, (
+            f"script-gate write crosses a sector boundary: {_p.note}"
+        )
+del _patches, _p, _user
+
+
+# --- Region-gate trigger-allocation invariants ------------------------------
+#
+# The 14 Region Access ids + the G Canyon Top flight bit must stay
+# disjoint from every other shipped trigger allocation. Collected from
+# the live manifest constants, not hardcoded lists, so any future
+# reallocation trips this at module-load time.
+
+def _trigger_id_of(ram_bit: tuple[int, int]) -> int:
+    byte_addr, bit_index = ram_bit
+    return (byte_addr - AP_TRIGGER_ARRAY_BASE) * 8 + bit_index
+
+
+_REGION_GATE_TAKEN_TRIGGERS: frozenset[int] = frozenset(
+    # Birdramon flight destination bits 880..884 (table trigger rewrites).
+    {new_id for _off, new_id in ROM_BIRDRA_FLIGHT_TABLE_PATCHES}
+    # Arena cup-win bits 885..889.
+    | {trig for _tier, _bit, trig, _pp in ARENA_CUP_TIERS}
+    # Vending purchase bits (890..895 + 898..901).
+    | {item.trigger_id for machine in VENDING_MACHINES for item in machine.items}
+    # Rod pickup-location bits 902/903.
+    | {
+        _trigger_id_of(OLD_FISHROD_LOCATION_BIT),
+        _trigger_id_of(AMAZING_ROD_LOCATION_BIT),
+    }
+    # Recycle-shop purchase bits 904..910 and merit-shop bits 912..925.
+    | set(RECYCLE_SHOP_TRIGGER_IDS)
+    | set(MERIT_SHOP_TRIGGER_IDS)
+)
+
+_REGION_GATE_NEW_TRIGGERS: frozenset[int] = frozenset(
+    REGION_ACCESS_TRIGGER_IDS.values()
+) | {BIRDRA_FLIGHT_GCANYON_TRIGGER_ID}
+
+assert len(REGION_ACCESS_TRIGGER_IDS) == 14
+assert len(_REGION_GATE_NEW_TRIGGERS) == 15, "region-gate trigger ids must be distinct"
+assert not (_REGION_GATE_NEW_TRIGGERS & _REGION_GATE_TAKEN_TRIGGERS), (
+    f"region-gate trigger collision: "
+    f"{sorted(_REGION_GATE_NEW_TRIGGERS & _REGION_GATE_TAKEN_TRIGGERS)}"
+)
+for _trig in _REGION_GATE_NEW_TRIGGERS:
+    # Hard ceiling: nothing at or past byte 0x001BE042 (Meramon-tunnel
+    # Drimogemon state bytes).
+    assert (
+        AP_TRIGGER_ARRAY_BASE + _trig // 8 < RAM_MERAMON_TUNNEL_DRIMOGEMON_STATE
+    ), f"trigger {_trig} lands in the danger zone"
+    # Outside the recruit isTriggerSet-wrapper intercept range (203..258)
+    # and above the vanilla-script ceiling (713) / engine-constant ceiling
+    # (640, audited 2026-08-21).
+    assert not 203 <= _trig <= 258, _trig
+    assert _trig > 713, _trig
+del _trig

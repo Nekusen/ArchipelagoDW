@@ -138,6 +138,25 @@ def _apply_region_locks(world: DigimonWorldWorld) -> None:
         entrance = world.multiworld.get_entrance(entrance_name, world.player)
         add_rule(entrance, access_rule, combine="and")
 
+    # Special case (lab C3 gate, 2026-08-21): the Beetle Land return
+    # ferry is ROM-gated on **Native Forest** Region Access when Native
+    # Forest is locked — the ride re-enters Native Forest territory, and
+    # Greatlake itself is not lockable, so the generic target-region pass
+    # above never adds this term. Without it, logic would let a player
+    # who flew into Beetle Land ferry back to Greatlake (and its fishing
+    # / Blue Flute Pickup locations) while the in-game ferry declines.
+    # The Auto Pilot item remains the sanctioned out-of-logic escape from
+    # a flown-into Beetle Land (see regions.py).
+    if "Native Forest" in locked:
+        entrance = world.multiworld.get_entrance(
+            "Beetle Land to Greatlake", world.player,
+        )
+        add_rule(
+            entrance,
+            Has(region_access_item_name("Native Forest")).resolve(world),
+            combine="and",
+        )
+
 
 # ---------------------------------------------------------------------------
 # Entrance rules
@@ -275,6 +294,21 @@ def _set_entrance_rules(world: DigimonWorldWorld) -> None:
             world, "Drill Tunnel", "Meramon Tunnel",
             Has("Lava Cave Access"),
         )
+    # Native Forest ↔ Mt. Panorama: the walk-on border MAYO02_2 s1 ↔
+    # MIHA00 s0 (see regions.py). Both directions carry the Lava-Cave-
+    # Access requirement composed exactly like the Drill ↔ Meramon
+    # boulder edges (rule only in shuffled mode) PLUS
+    # ``CanReachRegion("Drill Tunnel")`` — the MAYO02_2 screen variant
+    # that has the Mt. Panorama mouth only exists once the Drill Tunnel
+    # story state is active. ``world.set_rule`` on an entrance
+    # auto-registers the CanReachRegion indirect condition
+    # (AutoWorld._register_rule_indirects), satisfying the
+    # register_indirect_condition requirement for entrance can_reach.
+    nf_mtp_rule = CanReachRegion("Drill Tunnel")
+    if lava_mode == _LCA_SHUFFLED:
+        nf_mtp_rule = Has("Lava Cave Access") & nf_mtp_rule
+    _set_entrance_rule(world, "Native Forest", "Mt. Panorama", nf_mtp_rule)
+    _set_entrance_rule(world, "Mt. Panorama", "Native Forest", nf_mtp_rule)
     # vanilla mode: free (Champion partner is player problem; no AP rule)
     # Meramon Tunnel → Mt. Panorama: free in AP logic. Meramon physically
     # blocks the forward corridor until beaten in the wild, but the
@@ -532,14 +566,20 @@ _OGREMON_QUEST_CHEST_LOCATIONS: tuple[str, ...] = (
 # a Digimon that opens the Secret Item Shop" — Ninjamon stands in
 # the Secret Shop after recruit. The Secret Shop is unlocked
 # progressively via ``Progressive Secret Shop`` (see
-# ``items.PROGRESSIVE_BUNDLES``); receiving 1 copy is enough.
+# ``items.PROGRESSIVE_BUNDLES``); receiving 1 copy is enough. The
+# Secret Shop's only physical entrance is THROUGH the second item
+# shop, so ``Has("Progressive Item Shop", count=2)`` is required as
+# well (fix 2026-08-21 — previously the secret-shop term alone let
+# logic expect Ninjamon before the T2 item shop existed).
 #
 # Only emit the bridge rule when ``bridge_unlock`` is in shuffled
 # mode — in always_open the ``Tropical Jungle Bridge`` AP item isn't
 # in the pool, so ``Has`` would never be satisfied and the recruit
 # would become permanently unreachable.
 def _ninjamon_extra(world: DigimonWorldWorld):
-    secret_shop_rule = Has("Progressive Secret Shop")
+    secret_shop_rule = (
+        Has("Progressive Secret Shop") & Has("Progressive Item Shop", count=2)
+    )
     if int(world.options.bridge_unlock.value) == _OPT_SHUFFLED:
         return Has("Tropical Jungle Bridge") & secret_shop_rule
     return secret_shop_rule

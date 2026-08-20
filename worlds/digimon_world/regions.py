@@ -82,6 +82,8 @@ from typing import TYPE_CHECKING, Final
 
 from BaseClasses import Region
 
+from .data.addresses import REGION_ACCESS_TRIGGER_IDS
+
 if TYPE_CHECKING:
     from .world import DigimonWorldWorld
 
@@ -216,7 +218,26 @@ _EDGES: Final[tuple[tuple[str, str], ...]] = (
     # Left chain: Native Forest → Drill Tunnel → Meramon Tunnel → Mt. Panorama → ...
     ("Native Forest", "Drill Tunnel"),
     ("Drill Tunnel", "Meramon Tunnel"),  # Mode-gated (Lava Cave Access)
+    # Meramon Tunnel → Mt. Panorama is a SCRIPT-class transition in-game
+    # (TUNN09 has no walk-on slot into MIHA04B), so the walk-on gate
+    # wrapper cannot physically enforce Mt. Panorama Region Access on
+    # this edge — accepted, logic-only enforcement here (the region-lock
+    # pass still ANDs the RA item onto it). Mt. Panorama's walk-on
+    # borders (Gear Savanna GIAS00 s0 and Native Forest MAYO02_2 s1)
+    # ARE physically gated. See the region-gate section of
+    # data/addresses.py and GATE_TABLE caveat #1.
     ("Meramon Tunnel", "Mt. Panorama"),
+    # Native Forest ↔ Mt. Panorama: a real walk-on border in the map
+    # data (MAYO02_2 slot 1 ↔ MIHA00 slot 0, both directions) that the
+    # wiki-derived model missed — found by the 2026-08-20 transition-
+    # graph extraction and gated in both directions by the walk-on gate
+    # rows (18/0 and 111/1). Declared here so AP logic can USE the
+    # route. Rules in :mod:`.rules`: Lava-Cave-Access composed exactly
+    # like the Drill↔Meramon boulder edges PLUS CanReach(Drill Tunnel)
+    # (the MAYO02_2 variant only exists once the Drill Tunnel story
+    # state is active).
+    ("Native Forest", "Mt. Panorama"),
+    ("Mt. Panorama", "Native Forest"),
     ("Mt. Panorama", "Gear Savanna"),
     ("Gear Savanna", "Geko Swamp"),
     ("Geko Swamp", "Misty Trees"),
@@ -293,6 +314,14 @@ _EDGES: Final[tuple[tuple[str, str], ...]] = (
     ("Grey Lord's Mansion", "Overdell"),  # free reverse (key already obtained to enter)
     ("Ancient Dino Region", "Tropical Jungle"),
     ("Greatlake", "Native Forest"),
+    # Beetle Land → Greatlake: Blue Flute (same as forward). Under
+    # region locking with Native Forest locked, the in-game return
+    # ferry is additionally gated on Native Forest Region Access (the
+    # ride re-enters Native Forest territory — lab C3 gate); rules.py's
+    # region-lock pass ANDs that term onto this edge. A player who
+    # FLIES into Beetle Land without NF RA therefore cannot ferry out;
+    # the sanctioned out-of-logic escape is the Auto Pilot item (warps
+    # to File City) — documented, not modeled as an edge.
     ("Beetle Land", "Greatlake"),           # Blue Flute (same as forward)
     ("Great Canyon", "Tropical Jungle"),    # GC-Bridge gated (both ways)
     ("Freezeland", "Great Canyon"),
@@ -303,6 +332,15 @@ _EDGES: Final[tuple[tuple[str, str], ...]] = (
 assert set(LOCKABLE_REGIONS).issubset(REGION_NAMES), (
     "LOCKABLE_REGIONS contains names that aren't real regions: "
     f"{set(LOCKABLE_REGIONS) - set(REGION_NAMES)}"
+)
+
+# The ROM-side region-gate manifest must cover exactly the lockable set —
+# one trigger bit per lockable region, spelled identically. Checked here
+# (not in data/addresses.py) so the data package stays standalone.
+assert set(LOCKABLE_REGIONS) == set(REGION_ACCESS_TRIGGER_IDS), (
+    "regions.LOCKABLE_REGIONS and addresses.REGION_ACCESS_TRIGGER_IDS "
+    "disagree: "
+    f"{set(LOCKABLE_REGIONS) ^ set(REGION_ACCESS_TRIGGER_IDS)}"
 )
 
 

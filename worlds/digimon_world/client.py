@@ -77,6 +77,7 @@ from .data.addresses import (
     AP_CHEST_SENTINEL_ITEM_ID,
     AP_RECRUIT_ITEM_DIGIMON,
     BEATEN_RAM_BITS,
+    BIRDRA_FLIGHT_GCANYON_RAM_BIT,
     BIRDRAMON_FLIGHT_RAM_BITS,
     CARD_BLOCK_BASE,
     CARD_BLOCK_SIZE,
@@ -154,6 +155,7 @@ from .data.addresses import (
     RAM_STAT_GAIN_MULT,
     RAM_TROPICAL_JUNGLE_BRIDGE_FIXED,
     RECRUIT_RAM_BITS,
+    REGION_ACCESS_RAM_BITS,
     tech_mastery_bit,
     STAT_CAP_FLAG_TARGET,
     STAT_CAP_TARGET,
@@ -171,14 +173,29 @@ from .items import (
 )
 from .regions import LOCKABLE_REGIONS, region_access_item_name
 
-# Frozen set of every ``<Region> Region Access`` item name. Used by
-# :func:`_build_item_delivery_routes` to attach a no-op deliverer to
-# the pure-logic region-locking items (no in-game effect; the
-# items_received counter still needs to advance on receive so the
-# client doesn't log "No delivery route" warnings).
-_REGION_ACCESS_ITEM_NAMES: frozenset[str] = frozenset(
-    region_access_item_name(region) for region in LOCKABLE_REGIONS
-)
+# ``<Region> Region Access`` item name -> its AP trigger-array bit.
+# Since the region-gate feature (2026-08-21) these items are no longer
+# pure-logic: the ROM's walk-on wrapper and script-gate stubs read the
+# per-region trigger bits, so delivery sets the bit (keyitem-style
+# OR-write) and :meth:`DigimonWorldClient._reconcile_region_gate_bits`
+# pins it every tick.
+_REGION_ACCESS_RAM_BITS_BY_ITEM: dict[str, tuple[int, int]] = {
+    region_access_item_name(region): REGION_ACCESS_RAM_BITS[region]
+    for region in LOCKABLE_REGIONS
+}
+
+# Birdramon flight item -> its destination region (the part after the
+# ``"Birdramon Flight: "`` prefix is the region name by construction).
+# Used by the region-gate reconciler to compose each flight bit with the
+# destination's Region Access item when that region is locked.
+_FLIGHT_DESTINATION_REGION: dict[str, str] = {
+    name: name.removeprefix("Birdramon Flight: ")
+    for name in BIRDRAMON_FLIGHT_RAM_BITS
+}
+assert all(
+    region in REGION_ACCESS_RAM_BITS
+    for region in _FLIGHT_DESTINATION_REGION.values()
+), _FLIGHT_DESTINATION_REGION
 
 if TYPE_CHECKING:
     from .context import DigimonWorldClientContext
@@ -757,14 +774,19 @@ def _build_item_delivery_routes() -> dict[str, ItemDeliverer]:
         if name == KEYCHAIN_ITEM_NAME:
             routes[name] = _make_progressive_bundle_deliverer()
             continue
-        # ``<Region> Region Access`` items (PR 2 region-locking) are
-        # pure-logic AP items — no in-game effect, the gate is purely
-        # in AP placement logic. They need a no-op deliverer so the
-        # items_received counter advances cleanly; without one, the
-        # client would log "No delivery route" every time AP sends
-        # one. Same shape as the Progressive Bundle deliverers.
-        if name in _REGION_ACCESS_ITEM_NAMES:
-            routes[name] = _make_progressive_bundle_deliverer()
+        # ``<Region> Region Access`` items: since the region-gate
+        # feature (2026-08-21) each one owns a trigger-array bit that
+        # the ROM's walk-on wrapper / script-gate stubs read, so
+        # delivery ORs the bit in immediately (keyitem semantics) and
+        # ``_reconcile_region_gate_bits`` re-pins it every tick. If the
+        # item arrives while the player is standing on a gated screen,
+        # the CURRENT MapWarps table is still gated — the first crossing
+        # loops back once (its self-reload re-runs the wrapper, which
+        # now installs vanilla), the second crossing goes through.
+        # Benign, documented in the player guide.
+        if name in _REGION_ACCESS_RAM_BITS_BY_ITEM:
+            byte_addr, bit_index = _REGION_ACCESS_RAM_BITS_BY_ITEM[name]
+            routes[name] = _make_keyitem_bit_deliverer(byte_addr, bit_index)
             continue
         # Key items live as trigger-array bits, not bank slots — must be
         # checked before the 2000-block bank route below or AP would
@@ -775,11 +797,15 @@ def _build_item_delivery_routes() -> dict[str, ItemDeliverer]:
             routes[name] = _make_keyitem_bit_deliverer(byte_addr, bit_index)
             continue
         # Birdramon flight destination items: each unlocks one entry in
-        # the patched callRoutine 10 destination table. Reuses the
-        # keyitem bit deliverer (same byte+bit OR semantics).
+        # the patched callRoutine 10 destination table. No-op route
+        # (counter advance only) — the actual bit write is owned by
+        # ``_reconcile_region_gate_bits``, because under region locking
+        # a flight bit is pinned on ``flight item AND destination
+        # Region Access`` and a direct OR-write here could open a
+        # locked destination for a tick before the reconciler corrects
+        # it.
         if name in BIRDRAMON_FLIGHT_RAM_BITS:
-            byte_addr, bit_index = BIRDRAMON_FLIGHT_RAM_BITS[name]
-            routes[name] = _make_keyitem_bit_deliverer(byte_addr, bit_index)
+            routes[name] = _make_progressive_bundle_deliverer()
             continue
         # Technique mastery items: bit-OR into the partner save block.
         # The immediate write is what _make_technique_bit_deliverer
@@ -973,6 +999,14 @@ class DigimonWorldClient:
         # silently, so any fish already in inventory at connect time
         # does NOT fire the location.
         self._last_fish_counts: dict[int, int] | None = None
+        # Locked-region set from slot_data (``region_locking``-derived,
+        # see world.fill_slot_data). Drives which Region Access trigger
+        # bits get pinned and whether each Birdramon flight bit composes
+        # with its destination's Region Access item. ``None`` = slot_data
+        # not yet received (the region-gate reconciler no-ops); pre-
+        # region-gate seeds default to the empty set (flight bits pin on
+        # the flight item alone, exactly the old behavior).
+        self._locked_regions: frozenset[str] | None = None
         # Arena enforcer activity flag. The actual recruit-block
         # snapshot lives in PSX RAM at
         # :data:`ARENA_ENFORCER_SNAPSHOT_BASE` (gated by the magic byte
@@ -1095,6 +1129,13 @@ class DigimonWorldClient:
             self._fishing_locations = bool(
                 ctx.slot_data.get("fishing_locations", 0),
             )
+        if self._locked_regions is None and ctx.slot_data is not None:
+            # Default empty — pre-region-gate seeds have no ROM gates,
+            # so nothing composes with Region Access and no RA bit is
+            # pinned.
+            self._locked_regions = frozenset(
+                ctx.slot_data.get("locked_regions", ()),
+            )
 
         try:
             # Run the arena enforcer FIRST -- it snapshots/restores
@@ -1106,6 +1147,7 @@ class DigimonWorldClient:
             await self._deliver_items(ctx)
             await self._reconcile_recruits(ctx)
             await self._reconcile_keyitem_flags(ctx)
+            await self._reconcile_region_gate_bits(ctx)
             await self._reconcile_technique_bits(ctx)
             await self._reconcile_merit_shop_sentinel(ctx)
             if self._recycle_shop_locations:
@@ -1502,6 +1544,109 @@ class DigimonWorldClient:
             should_be_set = item_name in received_keyitem_names
             targets_by_byte.setdefault(byte_addr, []).append((bit_index, should_be_set))
 
+        try:
+            blocks = await bizhawk.read(
+                ctx.bizhawk_ctx,
+                [(addr, 1, DOMAIN_MAIN_RAM) for addr in targets_by_byte],
+            )
+        except bizhawk.RequestFailedError:
+            return
+        if any(len(b) != 1 for b in blocks):
+            return
+
+        writes: list[RamWrite] = []
+        for (byte_addr, bits), block in zip(
+            targets_by_byte.items(), blocks, strict=True,
+        ):
+            current = block[0]
+            new_value = current
+            for bit_index, should_be_set in bits:
+                mask = 1 << bit_index
+                if should_be_set:
+                    new_value |= mask
+                else:
+                    new_value &= ~mask & 0xFF
+            if new_value != current:
+                writes.append((byte_addr, [new_value], DOMAIN_MAIN_RAM))
+        if writes:
+            await bizhawk.write(ctx.bizhawk_ctx, writes)
+
+    async def _reconcile_region_gate_bits(self, ctx: DigimonWorldClientContext) -> None:
+        """Pin the region-gate trigger bits to AP-delivered state each tick.
+
+        Three bit families (all AP-allocated, see the region-gate section
+        of :mod:`.data.addresses`):
+
+        * **Region Access bits** — one per LOCKED region (slot_data
+          ``locked_regions``): set iff the ``"<Region> Region Access"``
+          item has been received. The ROM's walk-on wrapper and
+          script-gate stubs read these bits on every screen load /
+          gated script flow. Regions that aren't locked this seed are
+          left untouched (their bits gate nothing).
+        * **Birdramon flight bits** (880..884) — set iff the flight item
+          has been received AND, when the destination region is locked,
+          its Region Access item has been received too. Pinned (set AND
+          cleared) so a stale save-state bit can't open a flight the
+          player hasn't earned.
+        * **G Canyon Top flight bit** (878) — only when Great Canyon is
+          locked (the patcher redirects flight-table entry 0 to this bit
+          in that case): set iff ``Birdramon Recruit`` AND ``Great
+          Canyon Region Access`` have both been received.
+
+        Player-facing note (documented in the guide): if a Region Access
+        item arrives while the player is standing ON a gated screen, the
+        already-installed MapWarps table is still gated — the first
+        crossing loops back once (the self-reload re-runs the wrapper,
+        which now leaves vanilla), and the second crossing goes through.
+
+        No-ops until slot_data has arrived. Idempotent: one batched read,
+        writes only bytes whose value differs from the target.
+        """
+
+        if self._locked_regions is None:
+            return
+
+        received_names = {
+            ctx.item_names.lookup_in_game(item.item, ctx.game)
+            for item in ctx.items_received
+        }
+
+        targets_by_byte: dict[int, list[tuple[int, bool]]] = {}
+
+        def pin(ram_bit: tuple[int, int], should_be_set: bool) -> None:
+            byte_addr, bit_index = ram_bit
+            targets_by_byte.setdefault(byte_addr, []).append(
+                (bit_index, should_be_set),
+            )
+
+        # Region Access bits for the locked regions.
+        for region in self._locked_regions:
+            ram_bit = REGION_ACCESS_RAM_BITS.get(region)
+            if ram_bit is None:
+                continue  # unknown region name in slot_data — ignore
+            pin(ram_bit, region_access_item_name(region) in received_names)
+
+        # The 5 patched Birdramon flight bits.
+        for flight_item, ram_bit in BIRDRAMON_FLIGHT_RAM_BITS.items():
+            target = flight_item in received_names
+            destination = _FLIGHT_DESTINATION_REGION[flight_item]
+            if destination in self._locked_regions:
+                target = target and (
+                    region_access_item_name(destination) in received_names
+                )
+            pin(ram_bit, target)
+
+        # G Canyon Top (flight-table entry 0) — redirected to bit 878
+        # only when Great Canyon is locked.
+        if "Great Canyon" in self._locked_regions:
+            pin(
+                BIRDRA_FLIGHT_GCANYON_RAM_BIT,
+                "Birdramon Recruit" in received_names
+                and region_access_item_name("Great Canyon") in received_names,
+            )
+
+        if not targets_by_byte:
+            return
         try:
             blocks = await bizhawk.read(
                 ctx.bizhawk_ctx,
