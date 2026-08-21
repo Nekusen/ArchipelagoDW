@@ -190,8 +190,10 @@ class TestChestDispatch(DigimonWorldTestBase):
         # 20 arena cup checks (5 grade tiers x 4 per tier).
         # 1 boss-defeat event (Meteormon).
         # 25 item shop + 12 secret shop rows (shopsanity, 2026-08-21).
+        # 1 Piximon's Training Manual (opt-in, trigger 877, 2026-08-21).
         self.assertEqual(
-            len(LOCATION_RAM_BITS), 42 + 63 + 8 + 10 + 7 + 14 + 25 + 12 + 5 + 20 + 1,
+            len(LOCATION_RAM_BITS),
+            42 + 63 + 8 + 10 + 7 + 14 + 25 + 12 + 5 + 20 + 1 + 1,
         )
 
 

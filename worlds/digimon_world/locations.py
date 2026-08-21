@@ -49,6 +49,7 @@ from .data.addresses import (
     ITEM_SHOP_LOCATION_NAMES,
     MERIT_SHOP_LOCATION_NAMES,
     NANIMON_QUEST_LOCATION_RAM_BITS,
+    PIXIMON_MANUAL_LOCATION_NAME,
     RECYCLE_SHOP_LOCATION_NAMES,
     SECRET_SHOP_LOCATION_NAMES,
     VENDING_LOCATION_NAMES,
@@ -455,6 +456,25 @@ _KEYITEM_LOCATIONS: Final[dict[str, LocationEntry]] = {
 
 
 # =============================================================================
+# Piximon's Training Manual (1, opt-in)
+# =============================================================================
+# Piximon's random-visit offer in the File City item-shop building
+# (screen 216): 50,000 Bits for the Training Manual. Opt-in via
+# :class:`worlds.digimon_world.options.PiximonManualLocation`; the
+# patcher swaps Script 176 §82's ``giveItem 33`` for ``setTrigger 877``
+# (see ``PIXIMON_MANUAL_*`` in :mod:`.data.addresses`). Region =
+# ``File City`` (the shop building's physical home); :mod:`.rules`
+# layers the ``Progressive Item Shop`` x3 gate on top (tier-3 opens the
+# building AND puts Piximon — a T3-bundled recruit — in the city so his
+# 2-in-10 visit roll can fire). ID extends the ``69_004_xxx`` key-item
+# pickup block.
+
+_PIXIMON_MANUAL_LOCATIONS: Final[dict[str, LocationEntry]] = {
+    PIXIMON_MANUAL_LOCATION_NAME: LocationEntry(69_004_012, "File City"),
+}
+
+
+# =============================================================================
 # Card-vending locations (66, opt-in)
 # =============================================================================
 # DW1's two card vending machines (Gear Savanna, post-Betamon+Patamon
@@ -719,6 +739,7 @@ _LOCATION_TABLE: Final[dict[str, LocationEntry]] = {
        for name in RECRUIT_NAMES},
     **_CHEST_LOCATIONS,
     **_KEYITEM_LOCATIONS,
+    **_PIXIMON_MANUAL_LOCATIONS,
     **_CARD_LOCATIONS,
     **_VENDING_LOCATIONS,
     **_RECYCLE_SHOP_LOCATIONS,
@@ -738,7 +759,10 @@ LOCATION_NAME_TO_ID: Final[dict[str, int]] = {
 LOCATION_NAME_GROUPS: Final[dict[str, set[str]]] = {
     "Recruits": set(RECRUIT_NAMES),
     "Chests": set(_CHEST_LOCATIONS),
-    "Key Items": set(_KEYITEM_LOCATIONS),
+    # Piximon's Manual rides the Key Items group: it shares the
+    # 69_004_xxx id block and the "in-game pickup turned check" shape
+    # (option-gated membership, like the Cards / Vending groups).
+    "Key Items": set(_KEYITEM_LOCATIONS) | set(_PIXIMON_MANUAL_LOCATIONS),
     "Cards": set(_CARD_LOCATIONS),
     "Vending": set(_VENDING_LOCATIONS),
     "Recycle Shop": set(_RECYCLE_SHOP_LOCATIONS),
@@ -794,6 +818,11 @@ def create_all_locations(world: DigimonWorldWorld) -> None:
     # AP locations are excluded from the pool.
     if not int(world.options.fishing_locations.value):
         skip_locations.update(_FISHING_LOCATIONS)
+    # PiximonManualLocation: opt-in, default off. When off, Piximon's
+    # Training Manual offer stays entirely on the vanilla path (the
+    # patcher emits no §82 neuter token either).
+    if not int(world.options.piximon_manual_location.value):
+        skip_locations.update(_PIXIMON_MANUAL_LOCATIONS)
     # ChestRandomization: default ON. When OFF, the 65 chest AP
     # locations are excluded from the pool — chests retain vanilla
     # items and don't fire AP checks.

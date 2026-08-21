@@ -404,6 +404,48 @@ class SpawnRateBoost(Range):
     default = 50
 
 
+class CardTradeMultiplier(Range):
+    """Multiply the Merit Points ShogunGekomon pays per traded Digimon card.
+
+    Vanilla DW1 values cards at 100 / 30 / 10 / 5 / 1 Merit Points by
+    rarity tier, which makes earning merits by card-trading very slow.
+    This option rewrites the per-card value table in the ROM so every
+    card pays ``vanilla value x multiplier``.
+
+    Note the in-game merit counter caps at **9999** — boosted trades
+    still stop accumulating there (a single trade is also clamped so it
+    can never display more than 9999). Default 1 leaves the table at
+    vanilla values. Pure QoL: AP logic never depends on merit totals.
+    """
+
+    display_name = "Card Trade Value Multiplier"
+    range_start = 1
+    range_end = 20
+    default = 1
+
+
+class PiximonManualLocation(Toggle):
+    """Make buying Piximon's Training Manual an AP location.
+
+    Piximon occasionally staffs the File City item-shop **building**
+    (the tier-3 shop) and offers a Training Manual for 50,000 Bits.
+    His visit is a 2-in-10 roll each time the building screen loads
+    (and only once Piximon is in the city, which the ``Progressive
+    Item Shop`` tier-3 delivery handles) — if he isn't in, leave and
+    re-enter the building until he shows up.
+
+    With this on, paying his 50,000 Bits fires the ``Piximon's
+    Training Manual`` AP location instead of delivering the vanilla
+    Manual. The Manual is a genuinely useful item you're giving up in
+    the exchange — the AP item pool compensates (a ``Trn. manual``
+    copy ships among the pool's useful items), and whatever AP placed
+    at the location is delivered normally. Logic gates the location on
+    ``Progressive Item Shop`` x3.
+    """
+
+    display_name = "Piximon Training Manual Location"
+
+
 class ChestRandomization(DefaultOnToggle):
     """Whether DW1's 65 chests participate in AP randomization.
 
@@ -1010,6 +1052,8 @@ class DigimonWorldOptions(PerGameCommonOptions):
     starter_allow_ultimate: StarterAllowUltimate
     starter_use_weakest_tech: StarterUseWeakestTech
     card_locations: CardLocations
+    card_trade_multiplier: CardTradeMultiplier
+    piximon_manual_location: PiximonManualLocation
     vending_locations: VendingLocations
     recycle_shop_locations: RecycleShopLocations
     merit_shop_locations: MeritShopLocations
@@ -1042,7 +1086,7 @@ option_groups: list[OptionGroup] = [
         "Locations",
         [CardLocations, VendingLocations, RecycleShopLocations, MeritShopLocations,
          ItemShopLocations, SecretShopLocations, ShopPriceMode, ShopPriceMin,
-         ShopPriceMax, FishingLocations],
+         ShopPriceMax, FishingLocations, PiximonManualLocation],
     ),
     OptionGroup(
         "Quality of Life",
@@ -1051,6 +1095,7 @@ option_groups: list[OptionGroup] = [
             TypeLockUnlocks, BridgeUnlock, GreatCanyonUnlock, LavaCaveAccess,
             RegionLocking, RegionLockingList, StartingRegion,
             SpawnRateBoost, StatGainMultiplier, CombatStatMultiplier,
+            CardTradeMultiplier,
         ],
     ),
     OptionGroup("Testing", [GodMode]),

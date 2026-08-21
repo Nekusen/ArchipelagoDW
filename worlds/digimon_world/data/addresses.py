@@ -8960,9 +8960,10 @@ _SCRIPT_ARCHIVE_SLOTS: Final[dict[int, int]] = {
     101: 0x45800,   # Beetle Land pad (screen 105): return ferry
     162: 0x73000,   # File City TWNA variants: Whamon ferry dock
     163: 0x75800,   # File City market TWNB variants: west/east gates
+    176: 0x84800,   # File City item-shop building interior (screen 216)
 }
 _SCRIPT_ARCHIVE_SLOT_SIZES: Final[dict[int, int]] = {
-    7: 0x1000, 101: 0x800, 162: 0x2800, 163: 0x2000,
+    7: 0x1000, 101: 0x800, 162: 0x2800, 163: 0x2000, 176: 0x1800,
 }
 
 
@@ -9253,7 +9254,8 @@ del _trig
 #
 #   ids 149..164 -> trigger id+635 = 784..799 (bytes 0x1BE02F/0x1BE030)
 #   ids 165..185 -> trigger id+691 = 856..876 (bytes 0x1BE038..0x1BE03A b0-4)
-#   877 spare; 878/879 = region-gate bits (above).
+#   877 = Piximon Training Manual location (see ``PIXIMON_MANUAL_*`` at
+#   the end of this module); 878/879 = region-gate bits (above).
 #
 # **The >=800-is-pstat rule**: trigger ids >= 800 overlap the byte-valued
 # pstat array (``pstat(N)`` lives at 0x1BE031+N, i.e. triggers 800+8N ..
@@ -9858,3 +9860,184 @@ for _trig in SHOP_AP_TRIGGER_IDS:
     assert _trig not in _REGION_GATE_TAKEN_TRIGGERS, _trig
     assert _trig not in _REGION_GATE_NEW_TRIGGERS, _trig
 del _trig
+
+
+# =============================================================================
+# Card-trade value multiplier (QoL, option-gated data rewrite)
+# =============================================================================
+#
+# ShogunGekomon's Merit Shop trades Digimon cards for Merit Points via a
+# static per-card value table in the SLUS data segment. Lab-mapped and
+# live-proven 2026-08-20 (``work/dw1_re/decomp/_scratch_merit_card_trade/
+# CARD_TRADE_NOTES.md``): the value flows table -> gp-scratch
+# (0x8013500C) -> ``merits += value`` with **no transform** and only a
+# post-add cap at 9999 (``slti at, v0, 0x2710`` @ 0x8010BE54). A live
+# whole-column poke to 777 produced a "777points" dialog and a 777-merit
+# deposit end to end, so rewriting the value column is sufficient to
+# scale card-trade earnings.
+#
+# Table geometry (byte-verified against the source .bin 2026-08-21):
+#
+# * Base: RAM ``0x8012FFDA`` = .bin flat ``0x14D72222`` (pinned through
+#   :func:`_slus_ram_to_bin_offset` below).
+# * 65 entries x 4 bytes: ``(value_i16 @ +0, cardRef_i16 @ +2)``. The
+#   value is read ``lh`` with an ``index * 4`` addressing pattern; the
+#   cardRef halfword is never touched by this patch.
+# * Entry 0 is a zero-value placeholder row; entries 1..64 carry the 64
+#   tradeable cards' values in the vanilla distribution
+#   ``100 x5, 30 x20, 10 x25, 5 x10, 1 x4``.
+# * The table ends at entry 64: the next two user bytes are ``00 00``
+#   alignment padding, then a 4-byte-aligned pointer array begins at RAM
+#   ``0x801300E0`` (first pointer 0x80134554) — a clean structural
+#   terminator, so 65 is the whole table.
+# * A Mode2/2352 sector boundary splits the table between entries 9 and
+#   10 (38 user bytes remain in the base sector). Per-entry offsets are
+#   therefore computed sector-aware; no 2-byte value halfword ever
+#   straddles a boundary (audited at module load below).
+#
+# The patcher (:func:`worlds.digimon_world.rom._write_card_trade_multiplier_tokens`)
+# multiplies each nonzero vanilla value by the ``card_trade_multiplier``
+# option, clamped to :data:`CARD_TRADE_VALUE_CAP` (the merit counter's own
+# in-game cap, so a higher table value could never show anyway). Zero
+# rows are skipped — 0 x K = 0, no token needed.
+
+CARD_TRADE_VALUE_TABLE_RAM: Final = 0x8012FFDA
+CARD_TRADE_VALUE_TABLE_BIN_OFFSET: Final = 0x14D72222
+assert CARD_TRADE_VALUE_TABLE_BIN_OFFSET == _slus_ram_to_bin_offset(
+    CARD_TRADE_VALUE_TABLE_RAM,
+), hex(_slus_ram_to_bin_offset(CARD_TRADE_VALUE_TABLE_RAM))
+
+CARD_TRADE_ENTRY_STRIDE: Final = 4
+CARD_TRADE_TABLE_ENTRIES: Final = 65
+CARD_TRADE_VALUE_CAP: Final = 9999  # merit counter's own in-game cap
+
+# The vanilla value column, extracted once from the canonical SLUS-01032
+# dump (entry order = table order). Tests re-verify this against the
+# source .bin on machines that have it (auto-skip elsewhere).
+CARD_TRADE_VANILLA_VALUES: Final[tuple[int, ...]] = (
+    (0,) + (100,) * 5 + (30,) * 20 + (10,) * 25 + (5,) * 10 + (1,) * 4
+)
+assert len(CARD_TRADE_VANILLA_VALUES) == CARD_TRADE_TABLE_ENTRIES
+assert sum(CARD_TRADE_VANILLA_VALUES) == 1404  # 500 + 600 + 250 + 50 + 4
+
+
+def card_trade_value_bin_offset(index: int) -> int:
+    """Sector-aware .bin offset of table entry ``index``'s value halfword."""
+
+    assert 0 <= index < CARD_TRADE_TABLE_ENTRIES, index
+    return _slus_ram_to_bin_offset(
+        CARD_TRADE_VALUE_TABLE_RAM + index * CARD_TRADE_ENTRY_STRIDE,
+    )
+
+
+# Boundary audit: the sector hop lands between entries 9 and 10 (flat
+# delta 4 + 304 interleave bytes), and no value halfword straddles a
+# user-data window edge.
+assert card_trade_value_bin_offset(9) == CARD_TRADE_VALUE_TABLE_BIN_OFFSET + 36
+assert card_trade_value_bin_offset(10) == CARD_TRADE_VALUE_TABLE_BIN_OFFSET + 40 + 304
+for _i in range(CARD_TRADE_TABLE_ENTRIES):
+    _off = card_trade_value_bin_offset(_i)
+    assert 24 <= _off % 2352 <= 2072 - 2, (_i, hex(_off))
+del _i, _off
+
+
+# =============================================================================
+# Piximon Training Manual location (opt-in) — Script 176 §82 giveItem neuter
+# =============================================================================
+#
+# Piximon occasionally visits the File City item-shop building (screen
+# 216, Script 176). The visit is rolled by the screen loader (Script 0
+# §216): priority goes to a recruited-but-unintroduced staffer, else a
+# 2-in-10 random Piximon visit — requires trigger 255 (Piximon
+# recruited), loads his model, and sets the **transient** trigger 69
+# (§51 ``unsetTrigger 69`` clears it again on every screen entry). See
+# ``work/dw1_re/decomp/_scan_item_shop_versions/NOTES.md``.
+#
+# His dialog (Script 176 Section_82, gated on trigger 69) sells one
+# Training Manual (item 33) for a flat 50,000 Bits, outside the shop
+# stock engine. Flow (DW1Script.txt:27966..27995, byte-verified):
+#
+#     003646 if trigger(69) == true then 3660      <-- visit gate
+#     004244 setSelection 4282 4544                <-- Buy / Don't buy
+#     004282 if getMoney < 50000 then 4308         <-- "not enough bits" path
+#     004298 reduceMoney 50000
+#     004304 jumpTo 4372
+#     004372 giveItem 33 1                         <-- THE single give site
+#     004376 if trigger(0) == false then 4480      <-- give-failed check
+#     004388..004478 [full-inventory path: "you have lots of stuff",
+#                     addMoney 50000 refund, endSection]
+#     004480 playSound 1280 + "I got a Training Manual!" textbox
+#
+# Unlike the Blue Flute cutscene there is NO retry giveItem — the
+# failure branch refunds the 50,000 Bits instead. One give site total,
+# confirmed by an exhaustive user-space scan of the source .bin for the
+# ``28 00 21 01`` opcode: 8 hits, exactly one in script context (the
+# archive-slot site below; the other 7 are unrelated code/data). The
+# vending-pattern swap (``giveItem`` -> ``setTrigger 877``) keeps the
+# payment, fires the AP location, and delivers no vanilla Manual; the
+# stale-``trigger(0)`` follow-up check picks the success textbox in the
+# normal case (same accepted semantics as the shipped Blue Flute patch).
+#
+# Trigger 877 was the audited spare of the shopsanity band (856..877,
+# byte 0x001BE03A bit 5) — see the allocation comment in the shopsanity
+# section and the audit asserts below.
+
+PIXIMON_MANUAL_LOCATION_NAME: Final = "Piximon's Training Manual"
+PIXIMON_MANUAL_TRIGGER_ID: Final = 877
+PIXIMON_MANUAL_LOCATION_BIT: Final[tuple[int, int]] = (
+    AP_TRIGGER_ARRAY_BASE + PIXIMON_MANUAL_TRIGGER_ID // 8,
+    PIXIMON_MANUAL_TRIGGER_ID % 8,
+)
+assert PIXIMON_MANUAL_LOCATION_BIT == (0x001BE03A, 5), PIXIMON_MANUAL_LOCATION_BIT
+
+# Client poll table (merged into ``client.LOCATION_RAM_BITS``). Polling
+# is unconditional — with the option off the ROM keeps vanilla
+# ``giveItem 33`` and trigger 877 is never set, and the server filters
+# out ids that don't exist in the seed anyway.
+PIXIMON_MANUAL_LOCATION_RAM_BITS: Final[dict[str, tuple[int, int]]] = {
+    PIXIMON_MANUAL_LOCATION_NAME: PIXIMON_MANUAL_LOCATION_BIT,
+}
+
+PIXIMON_MANUAL_GIVEITEM_SCRIPT: Final = 176
+PIXIMON_MANUAL_GIVEITEM_VM_OFFSET: Final = 4372
+ROM_PIXIMON_MANUAL_GIVEITEM_OFFSETS: Final = (
+    script_vm_to_bin_offset(
+        PIXIMON_MANUAL_GIVEITEM_SCRIPT, PIXIMON_MANUAL_GIVEITEM_VM_OFFSET,
+    ),
+)
+# Pin the derived offset to the byte-verified literal so an archive-slot
+# regression trips loudly at module load.
+assert ROM_PIXIMON_MANUAL_GIVEITEM_OFFSETS == (0x1406EAAC,), (
+    tuple(hex(_o) for _o in ROM_PIXIMON_MANUAL_GIVEITEM_OFFSETS)
+)
+
+# Vanilla bytes at the site (``giveItem 33 1``) and the 4-byte
+# replacement (``setTrigger 877``).
+ROM_PIXIMON_MANUAL_GIVEITEM_VANILLA: Final = bytes((0x28, 0x00, 33, 0x01))
+ROM_PIXIMON_MANUAL_NEUTER_VALUE: Final = encode_set_trigger(PIXIMON_MANUAL_TRIGGER_ID)
+assert ROM_PIXIMON_MANUAL_NEUTER_VALUE == bytes((0x1C, 0x00, 0x6D, 0x03))
+assert len(ROM_PIXIMON_MANUAL_NEUTER_VALUE) == len(ROM_PIXIMON_MANUAL_GIVEITEM_VANILLA)
+
+# Containment + boundary audit: the write stays inside Script 176's
+# archive slot and inside one Mode2/2352 user-data window.
+assert (
+    PIXIMON_MANUAL_GIVEITEM_VM_OFFSET + len(ROM_PIXIMON_MANUAL_NEUTER_VALUE)
+    <= _SCRIPT_ARCHIVE_SLOT_SIZES[PIXIMON_MANUAL_GIVEITEM_SCRIPT]
+)
+assert 24 <= ROM_PIXIMON_MANUAL_GIVEITEM_OFFSETS[0] % 2352 <= 2072 - 4
+
+# Trigger-allocation audit (same shape as the shopsanity/region-gate
+# audits): trigger 877 must stay inside the audited-free band and
+# disjoint from every shipped allocation.
+assert 856 <= PIXIMON_MANUAL_TRIGGER_ID <= 877
+assert not 800 <= PIXIMON_MANUAL_TRIGGER_ID <= 855
+assert PIXIMON_MANUAL_TRIGGER_ID < 936
+assert (
+    AP_TRIGGER_ARRAY_BASE + PIXIMON_MANUAL_TRIGGER_ID // 8
+    < RAM_MERAMON_TUNNEL_DRIMOGEMON_STATE
+)
+assert not 203 <= PIXIMON_MANUAL_TRIGGER_ID <= 258
+assert PIXIMON_MANUAL_TRIGGER_ID > 713
+assert PIXIMON_MANUAL_TRIGGER_ID not in _REGION_GATE_TAKEN_TRIGGERS
+assert PIXIMON_MANUAL_TRIGGER_ID not in _REGION_GATE_NEW_TRIGGERS
+assert PIXIMON_MANUAL_TRIGGER_ID not in SHOP_AP_TRIGGER_IDS

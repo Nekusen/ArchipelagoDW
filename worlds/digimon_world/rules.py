@@ -47,6 +47,7 @@ from .data.addresses import (
     FISHING_LOCATION_NAMES,
     ITEM_SHOP_LOCATION_NAMES,
     ITEM_SHOP_TIER_COUNTS,
+    PIXIMON_MANUAL_LOCATION_NAME,
     SECRET_SHOP_ITEMS_PER_CLERK,
     SECRET_SHOP_LOCATION_NAMES,
 )
@@ -104,6 +105,7 @@ def set_all_rules(world: DigimonWorldWorld) -> None:
     _set_nanimon_quest_rules(world)
     _set_arena_cup_rules(world)
     _set_shop_rules(world)
+    _set_piximon_manual_rule(world)
     _set_ogremon_quest_chest_rules(world)
     _set_chest_rules(world)
     _apply_pp_cutoffs(world)
@@ -1028,6 +1030,30 @@ def _set_shop_rules(world: DigimonWorldWorld) -> None:
             Has("Progressive Secret Shop", count=secret_count)
             & Has("Progressive Item Shop", count=2),
         )
+
+
+def _set_piximon_manual_rule(world: DigimonWorldWorld) -> None:
+    """Gate ``Piximon's Training Manual`` on ``Progressive Item Shop`` x3.
+
+    The offer only exists inside the item-shop **building** (screen
+    216, the tier-3 shop) and only while Piximon is visiting — his
+    2-in-10 visit roll requires his recruit bit, which is delivered by
+    the tier-3 bundle (Piximon is a ``Progressive Item Shop`` T3
+    recruit; see :data:`worlds.digimon_world.items.PROGRESSIVE_BUNDLES`).
+    One item requirement therefore covers both preconditions. The
+    50,000-Bit price is money, which AP logic never models (same
+    convention as the shopsanity rows).
+
+    When the ``piximon_manual_location`` option is off the location
+    doesn't exist; the ``KeyError`` guard skips it (same pattern as
+    the arena cup / shop rules).
+    """
+
+    try:
+        location = world.get_location(PIXIMON_MANUAL_LOCATION_NAME)
+    except KeyError:
+        return  # option off — the location doesn't exist this seed
+    world.set_rule(location, Has("Progressive Item Shop", count=3))
 
 
 # ---------------------------------------------------------------------------

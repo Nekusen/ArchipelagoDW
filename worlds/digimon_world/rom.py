@@ -278,6 +278,11 @@ from .data.addresses import (
     ROM_UNLOCK_TOY_TOWN_VALUE,
     ROM_UNLOCK_TYPE_LOCK_FORMAT,
     VENDING_MACHINES,
+    CARD_TRADE_VALUE_CAP,
+    CARD_TRADE_VANILLA_VALUES,
+    card_trade_value_bin_offset,
+    ROM_PIXIMON_MANUAL_GIVEITEM_OFFSETS,
+    ROM_PIXIMON_MANUAL_NEUTER_VALUE,
     ITEM_PARA_MERIT_VALUE_OFFSET,
     ROM_ITEM_TABLE_ENTRY_SIZE,
     _table_byte_to_bin_flat,
@@ -1791,6 +1796,62 @@ def _write_vending_tokens(
     )
 
 
+def _write_card_trade_multiplier_tokens(
+    patch: DigimonWorldProcedurePatch, multiplier: int,
+) -> None:
+    """Scale the Merit Shop's per-card trade-value table.
+
+    Option-gated (``card_trade_multiplier`` > 1). For each of the 65
+    entries of the static card-value table at .bin
+    :data:`CARD_TRADE_VALUE_TABLE_BIN_OFFSET` (RAM ``0x8012FFDA``),
+    overwrite the ``value_i16`` halfword with
+    ``min(vanilla * multiplier, CARD_TRADE_VALUE_CAP)``. Zero-value
+    placeholder rows are skipped (0 x K = 0 — no token needed) and the
+    ``cardRef`` halfword at entry offset +2 is never touched.
+
+    Offsets come from :func:`card_trade_value_bin_offset`, which is
+    sector-aware — a Mode2/2352 boundary splits the table between
+    entries 9 and 10. Live proof of the mechanism (whole-column poke
+    -> boosted dialog + boosted merit deposit) is on record in
+    ``work/dw1_re/decomp/_scratch_merit_card_trade/CARD_TRADE_NOTES.md``.
+    """
+
+    if multiplier <= 1:
+        return  # vanilla — caller gates on this too; defensive
+    for index, vanilla in enumerate(CARD_TRADE_VANILLA_VALUES):
+        if vanilla == 0:
+            continue  # placeholder rows stay zero
+        boosted = min(vanilla * multiplier, CARD_TRADE_VALUE_CAP)
+        patch.write_token(
+            APTokenTypes.WRITE,
+            card_trade_value_bin_offset(index),
+            struct.pack("<h", boosted),
+        )
+
+
+def _write_piximon_manual_tokens(patch: DigimonWorldProcedurePatch) -> None:
+    """Replace Script 176 §82's single ``giveItem 33 1`` (Piximon's
+    Training Manual sale in the File City item-shop building) with
+    ``setTrigger 877``.
+
+    Option-gated (``piximon_manual_location``). Same shape as the
+    vending-machine neuters: the player still pays the 50,000 Bits and
+    sees the vanilla dialog, but no Training Manual is delivered — the
+    AP location fires via trigger 877 and the AP-placed item arrives
+    through the standard delivery path instead.
+
+    Unlike the Blue Flute cutscene, §82 has no retry ``giveItem`` —
+    its give-failed branch refunds the payment instead — so one .bin
+    site covers the whole flow (exhaustive user-space scan on record;
+    see the ``PIXIMON_MANUAL_*`` block in :mod:`.data.addresses`).
+    """
+
+    for offset in ROM_PIXIMON_MANUAL_GIVEITEM_OFFSETS:
+        patch.write_token(
+            APTokenTypes.WRITE, offset, ROM_PIXIMON_MANUAL_NEUTER_VALUE,
+        )
+
+
 def _write_item_para_relocation_tokens(patch: DigimonWorldProcedurePatch) -> None:
     """Install the always-on ITEM_PARA 256-slot relocation.
 
@@ -2476,6 +2537,15 @@ def write_patch(world: DigimonWorldWorld, output_directory: str) -> None:
     )
     if int(options.vending_locations.value):
         _write_vending_tokens(patch, world)
+    # Card-trade merit multiplier — pure QoL data rewrite; 1 = vanilla
+    # table, no tokens.
+    if int(options.card_trade_multiplier.value) > 1:
+        _write_card_trade_multiplier_tokens(
+            patch, int(options.card_trade_multiplier.value),
+        )
+    # Piximon's Training Manual location — opt-in §82 giveItem neuter.
+    if int(options.piximon_manual_location.value):
+        _write_piximon_manual_tokens(patch)
 
     # Shopsanity (recycle / item / secret / merit, each off | coexist |
     # replace). The common infrastructure — extended boot hook, builder
