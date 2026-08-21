@@ -83,6 +83,11 @@ class DigimonWorldWorld(World):
         Region Access`` for a Freezeland start).
         """
 
+        from .options import validate_shop_price_options
+        validate_shop_price_options(
+            self.options, self.multiworld.player_name[self.player],
+        )
+
         for name in items.get_bootstrap_items(self):
             self.multiworld.push_precollected(self.create_item(name))
 
@@ -142,6 +147,8 @@ class DigimonWorldWorld(World):
             "god_mode",
             "recycle_shop_locations",
             "merit_shop_locations",
+            "item_shop_locations",
+            "secret_shop_locations",
             "fishing_locations",
         ))
         slot_data["vanilla_grant_chests"] = sorted(

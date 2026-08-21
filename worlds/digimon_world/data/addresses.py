@@ -7043,14 +7043,23 @@ VANILLA_ITEM_DESC_PTR_ENTRIES: Final = ROM_ITEM_TABLE_ENTRY_COUNT          # 128
 def ext_item_para_slot_bin_offset(slot: int) -> int:
     """Sector-aware .bin offset of extended ITEM_PARA slot ``slot``.
 
-    Single contiguous segment: every ext slot in
-    ``128..EXT_ITEM_PARA_SEED_SLOT_LAST`` maps to its 32-byte entry in
-    the EXT_ITEM_PARA seed block (:data:`EXT_ITEM_PARA_SEED_BIN_OFFSET`
-    ``+ (slot - 128) * 32``). The boot hook copies the whole seed block
-    to :data:`ITEM_PARA_RELOC_EXT_KUSEG`, so a write here lands at the
-    slot's natural position in the relocated table at runtime. The seed
-    block is sector-aligned and 960 B < 2048 B, so the flat add never
-    crosses a Mode2/2352 user-data boundary.
+    Two contiguous segments:
+
+    * ``128..EXT_ITEM_PARA_SEED_SLOT_LAST`` (157) maps to its 32-byte
+      entry in the Cave6 EXT_ITEM_PARA seed block
+      (:data:`EXT_ITEM_PARA_SEED_BIN_OFFSET` ``+ (slot - 128) * 32``).
+      The boot hook copies the whole seed block to
+      :data:`ITEM_PARA_RELOC_EXT_KUSEG`, so a write here lands at the
+      slot's natural position in the relocated table at runtime. The
+      seed block is sector-aligned and 960 B < 2048 B, so the flat add
+      never crosses a Mode2/2352 user-data boundary.
+    * ``SHOP_AP_STAGING2_SLOT_BASE..SHOP_AP_STAGING2_SLOT_LAST``
+      (158..185, shopsanity) maps into the second .bin-backed seed
+      block staged at :data:`SHOP_AP_STAGING2_RAM`. The EXTENDED boot
+      hook copies it to relocated slots 158..185 and then re-zeroes the
+      staging region (it is a runtime-active workspace after boot). The
+      whole 896-B run sits inside one sector's user-data window
+      (asserted below), so flat adds are safe here too.
     """
 
     if EXT_ITEM_PARA_SEED_SLOT_BASE <= slot <= EXT_ITEM_PARA_SEED_SLOT_LAST:
@@ -7058,9 +7067,15 @@ def ext_item_para_slot_bin_offset(slot: int) -> int:
             (slot - EXT_ITEM_PARA_SEED_SLOT_BASE) * ROM_ITEM_TABLE_ENTRY_SIZE
         )
         return EXT_ITEM_PARA_SEED_BIN_OFFSET + seed_byte_offset
+    if SHOP_AP_STAGING2_SLOT_BASE <= slot <= SHOP_AP_STAGING2_SLOT_LAST:
+        staging_byte_offset = (
+            (slot - SHOP_AP_STAGING2_SLOT_BASE) * ROM_ITEM_TABLE_ENTRY_SIZE
+        )
+        return SHOP_AP_STAGING2_BIN_OFFSET + staging_byte_offset
     raise ValueError(
         f"Extended ITEM_PARA slot {slot} out of supported range "
-        f"[{EXT_ITEM_PARA_SEED_SLOT_BASE}, {EXT_ITEM_PARA_SEED_SLOT_LAST + 1})"
+        f"[{EXT_ITEM_PARA_SEED_SLOT_BASE}, {EXT_ITEM_PARA_SEED_SLOT_LAST + 1}) "
+        f"u [{SHOP_AP_STAGING2_SLOT_BASE}, {SHOP_AP_STAGING2_SLOT_LAST + 1})"
     )
 
 
@@ -9183,4 +9198,663 @@ for _trig in _REGION_GATE_NEW_TRIGGERS:
     # (640, audited 2026-08-21).
     assert not 203 <= _trig <= 258, _trig
     assert _trig > 713, _trig
+del _trig
+
+
+# =============================================================================
+# Shopsanity — File City item shop + Secret Shop + per-shop 3-mode config
+# =============================================================================
+#
+# Lab-validated 2026-08-21 (three nets) in
+# ``work/dw1_re/decomp/_scan_shopsanity/NOTES.md``, spec builder
+# ``work/dw1_re/patches/shopsanity_spec.py``. This section is the faithful
+# production port: same bytes, same addresses, same trigger ids.
+#
+# Mechanism summary:
+#
+# * **One screen-gated AP builder wrapper** at the money-shop dispatcher
+#   callsite (``jal build_shop_runtime_list`` @ 0x800FC6AC). Gates on the
+#   current screen: 131 = recycle, 181..188 / 216 = item shop (stall /
+#   building), 217 = secret shop; anything else (incl. the Arena-Lobby
+#   general shop) and the recycle buy-back dialog (trigger 3 set) fall to
+#   vanilla. Per-shop mode from the 4-byte config
+#   ``[recycle, item, secret, spare]`` (0 = off, 1 = coexist, 2 = replace):
+#   coexist calls the vanilla builder then appends AP ``[id, flag]`` pairs,
+#   replace emits only AP pairs. Flag = money >= relocated-table price.
+#   Item-shop AP row count = 5/15/25 keyed on the Progressive Item Shop
+#   tier-marker BEATEN bits (Betamon 724 / Patamon 751 / Biyomon 765);
+#   secret pool = the on-duty clerk's 3 slots keyed on pstat(24).
+# * **Extended giveItem wrapper** at the money-shop buy callsite
+#   (``jal giveItem`` @ 0x800FB410): AP ids fire their purchase trigger and
+#   return v0=1 with no inventory delivery (the shop already deducted
+#   money); everything else tail-jumps vanilla giveItem. Supersedes the
+#   retired v1 single-range recycle wrapper at 0x80095940 (that Cave6
+#   region is freed for future use) and the retired recycle init-epilogue
+#   wrapper (the builder wrapper renders AP rows synchronously).
+# * **Code space**: the freed vanilla ITEM_DESC_PTR region
+#   0x801279DC..0x80127BDC (512 B — dead code space once the desc-ptr
+#   relocation redirects all three reader callsites to Cave6). Builder
+#   wrapper 384 B @ 0x801279DC, giveItem ext 104 B @ 0x80127B5C, 24 B
+#   spare.
+# * **Ext seed staging**: item slots 149..157 fill the Cave6 seed block
+#   (now 30/30 full: recycle 7 + merit 14 + item 9); slots 158..185 stage
+#   in a second .bin-backed block at RAM 0x80115A4C (a 4216-B zero-init
+#   run; boot-order audited — only the BIOS EXE loader touches it before
+#   the hook site). The EXTENDED boot hook (55 words, grown in place at
+#   :data:`ITEM_PARA_BOOT_HOOK_RAM`) adds loop 4 (staging -> relocated
+#   slots 158..185) and loop 5 (re-zero staging, restoring the region's
+#   boot invariant before its runtime owner initializes).
+# * **Merit modes are data-only**: replace = the shipped 14 vanilla
+#   meritValue zero-outs; coexist = omit them (no new bytes). Merit is
+#   NOT in the config word — its callsite (0x8010BF3C) has its own
+#   shipped ext wrapper.
+#
+# Trigger allocation (audit: ``work/dw1_re/scan_trigger_free_pool.txt``):
+#
+#   ids 149..164 -> trigger id+635 = 784..799 (bytes 0x1BE02F/0x1BE030)
+#   ids 165..185 -> trigger id+691 = 856..876 (bytes 0x1BE038..0x1BE03A b0-4)
+#   877 spare; 878/879 = region-gate bits (above).
+#
+# **The >=800-is-pstat rule**: trigger ids >= 800 overlap the byte-valued
+# pstat array (``pstat(N)`` lives at 0x1BE031+N, i.e. triggers 800+8N ..
+# 807+8N). pstat(0)..pstat(6) are engine-used (readPStat/writePStat
+# constant-caller census, plus pstat(0) observed dynamically nonzero), so
+# triggers 800..855 are OFF LIMITS forever. Bytes 0x1BE038+ (pstat 7+)
+# audited free: vanilla scripts max out at trigger 713, engine constants
+# at 640, zero direct-address or save-block-relative accesses.
+
+ITEM_SHOP_AP_ITEM_ID_BASE: Final = 149
+ITEM_SHOP_AP_ITEM_ID_COUNT: Final = 25
+ITEM_SHOP_AP_ITEM_IDS: Final = tuple(
+    ITEM_SHOP_AP_ITEM_ID_BASE + i for i in range(ITEM_SHOP_AP_ITEM_ID_COUNT)
+)
+# Progressive Item Shop tier composition: T1 = first 5 slots, T2 = +10,
+# T3 = +10 (lab: T1 = ids 149..153, T2 = +154..163, T3 = +164..173).
+ITEM_SHOP_TIER_COUNTS: Final[tuple[int, int, int]] = (5, 10, 10)
+assert sum(ITEM_SHOP_TIER_COUNTS) == ITEM_SHOP_AP_ITEM_ID_COUNT
+
+SECRET_SHOP_AP_ITEM_ID_BASE: Final = 174
+SECRET_SHOP_AP_ITEM_ID_COUNT: Final = 12
+SECRET_SHOP_AP_ITEM_IDS: Final = tuple(
+    SECRET_SHOP_AP_ITEM_ID_BASE + i for i in range(SECRET_SHOP_AP_ITEM_ID_COUNT)
+)
+# On-duty clerk c (pstat(24)) sells ids 174+3c .. 176+3c.
+SECRET_SHOP_CLERKS: Final[tuple[str, ...]] = (
+    "Numemon", "Mojyamon", "Mamemon", "Devimon",
+)
+SECRET_SHOP_ITEMS_PER_CLERK: Final = 3
+assert len(SECRET_SHOP_CLERKS) * SECRET_SHOP_ITEMS_PER_CLERK == SECRET_SHOP_AP_ITEM_ID_COUNT
+
+assert ITEM_SHOP_AP_ITEM_ID_BASE == MERIT_SHOP_AP_ITEM_ID_LAST + 1
+assert SECRET_SHOP_AP_ITEM_ID_BASE == ITEM_SHOP_AP_ITEM_IDS[-1] + 1
+
+# --- Purchase-location triggers ----------------------------------------------
+
+SHOP_AP_TRIGGER_OFFSET_A: Final = 635          # ids 149..164 -> 784..799
+SHOP_AP_TRIGGER_RANGE_A: Final = (149, 164)
+SHOP_AP_TRIGGER_OFFSET_B: Final = 691          # ids 165..185 -> 856..876
+SHOP_AP_TRIGGER_RANGE_B: Final = (165, 185)
+
+
+def shop_ap_trigger_for_slot(slot: int) -> int:
+    """AP purchase trigger id for ext ITEM_PARA slot ``slot`` (149..185)."""
+
+    if SHOP_AP_TRIGGER_RANGE_A[0] <= slot <= SHOP_AP_TRIGGER_RANGE_A[1]:
+        return slot + SHOP_AP_TRIGGER_OFFSET_A
+    if SHOP_AP_TRIGGER_RANGE_B[0] <= slot <= SHOP_AP_TRIGGER_RANGE_B[1]:
+        return slot + SHOP_AP_TRIGGER_OFFSET_B
+    raise ValueError(f"slot {slot} has no shopsanity trigger")
+
+
+ITEM_SHOP_TRIGGER_IDS: Final = tuple(
+    shop_ap_trigger_for_slot(slot) for slot in ITEM_SHOP_AP_ITEM_IDS
+)
+SECRET_SHOP_TRIGGER_IDS: Final = tuple(
+    shop_ap_trigger_for_slot(slot) for slot in SECRET_SHOP_AP_ITEM_IDS
+)
+assert ITEM_SHOP_TRIGGER_IDS == tuple(range(784, 800)) + tuple(range(856, 865))
+assert SECRET_SHOP_TRIGGER_IDS == tuple(range(865, 877))
+
+ITEM_SHOP_LOCATION_NAMES: Final = tuple(
+    f"Item Shop #{i + 1}" for i in range(ITEM_SHOP_AP_ITEM_ID_COUNT)
+)
+# Clerk-identifiable secret-shop names: the pool shown in-game is the
+# on-duty clerk's; players can leave + re-enter to rotate clerks.
+SECRET_SHOP_LOCATION_NAMES: Final = tuple(
+    f"Secret Shop ({clerk}) #{j + 1}"
+    for clerk in SECRET_SHOP_CLERKS
+    for j in range(SECRET_SHOP_ITEMS_PER_CLERK)
+)
+
+ITEM_SHOP_LOCATION_RAM_BITS: Final[dict[str, tuple[int, int]]] = {
+    name: (
+        AP_TRIGGER_ARRAY_BASE + ITEM_SHOP_TRIGGER_IDS[i] // 8,
+        ITEM_SHOP_TRIGGER_IDS[i] % 8,
+    )
+    for i, name in enumerate(ITEM_SHOP_LOCATION_NAMES)
+}
+SECRET_SHOP_LOCATION_RAM_BITS: Final[dict[str, tuple[int, int]]] = {
+    name: (
+        AP_TRIGGER_ARRAY_BASE + SECRET_SHOP_TRIGGER_IDS[i] // 8,
+        SECRET_SHOP_TRIGGER_IDS[i] % 8,
+    )
+    for i, name in enumerate(SECRET_SHOP_LOCATION_NAMES)
+}
+
+# --- Per-shop mode config ----------------------------------------------------
+# 4 bytes ``[recycle, item, secret, spare]`` in the 16-B Cave6 gap between
+# the transition-gate table (ends 0x800967F0) and the EXT_ITEM_PARA seed
+# block (starts 0x80096800). Gen-time data token; the builder wrapper
+# reads it at runtime.
+
+SHOP_MODE_OFF: Final = 0
+SHOP_MODE_COEXIST: Final = 1
+SHOP_MODE_REPLACE: Final = 2
+
+SHOP_AP_CONFIG_RAM: Final = 0x800967F0
+SHOP_AP_CONFIG_BIN_OFFSET: Final = _slus_ram_to_bin_offset(SHOP_AP_CONFIG_RAM)
+assert TRANSITION_GATE_TABLE_RAM + _TRANSITION_GATE_FULL_TABLE_LEN <= SHOP_AP_CONFIG_RAM
+assert SHOP_AP_CONFIG_RAM + 4 <= EXT_ITEM_PARA_SEED_RAM
+# 4-byte write must not straddle the Mode2/2352 user-data window.
+assert 24 <= SHOP_AP_CONFIG_BIN_OFFSET % 2352 <= 2072 - 4
+
+
+def build_shop_ap_config_bytes(recycle_mode: int, item_mode: int, secret_mode: int) -> bytes:
+    """The 4-byte SHOP_AP_CONFIG payload ``[recycle, item, secret, 0]``."""
+
+    for mode in (recycle_mode, item_mode, secret_mode):
+        assert mode in (SHOP_MODE_OFF, SHOP_MODE_COEXIST, SHOP_MODE_REPLACE), mode
+    return bytes((recycle_mode, item_mode, secret_mode, 0))
+
+
+# --- Second seed block staging (slots 158..185) ------------------------------
+
+SHOP_AP_STAGING2_RAM: Final = 0x80115A4C
+SHOP_AP_STAGING2_SLOT_BASE: Final = 158
+SHOP_AP_STAGING2_SLOT_COUNT: Final = 28
+SHOP_AP_STAGING2_SLOT_LAST: Final = (
+    SHOP_AP_STAGING2_SLOT_BASE + SHOP_AP_STAGING2_SLOT_COUNT - 1             # 185
+)
+SHOP_AP_STAGING2_SIZE: Final = (
+    SHOP_AP_STAGING2_SLOT_COUNT * ROM_ITEM_TABLE_ENTRY_SIZE                  # 896
+)
+SHOP_AP_STAGING2_BIN_OFFSET: Final = _slus_ram_to_bin_offset(SHOP_AP_STAGING2_RAM)
+assert SHOP_AP_STAGING2_BIN_OFFSET == 0x14D53ED4, hex(SHOP_AP_STAGING2_BIN_OFFSET)
+assert SHOP_AP_STAGING2_SLOT_BASE == EXT_ITEM_PARA_SEED_SLOT_LAST + 1
+assert SHOP_AP_STAGING2_SLOT_LAST == SECRET_SHOP_AP_ITEM_IDS[-1]
+# The whole 896-B run must sit inside one sector's user-data window so the
+# per-slot flat adds in ext_item_para_slot_bin_offset never cross EDC/header
+# bytes.
+assert 24 <= SHOP_AP_STAGING2_BIN_OFFSET % 2352
+assert SHOP_AP_STAGING2_BIN_OFFSET % 2352 + SHOP_AP_STAGING2_SIZE <= 2072
+
+# --- MIPS word encoders (shopsanity-local complements of the shared set) -----
+
+
+def _mips_lbu(rt: int, rs: int, imm: int) -> int:
+    return 0x90000000 | (rs << 21) | (rt << 16) | (imm & 0xFFFF)
+
+
+def _mips_sb(rt: int, rs: int, imm: int) -> int:
+    return 0xA0000000 | (rs << 21) | (rt << 16) | (imm & 0xFFFF)
+
+
+def _mips_andi(rt: int, rs: int, imm: int) -> int:
+    return 0x30000000 | (rs << 21) | (rt << 16) | (imm & 0xFFFF)
+
+
+def _mips_xori(rt: int, rs: int, imm: int) -> int:
+    return 0x38000000 | (rs << 21) | (rt << 16) | (imm & 0xFFFF)
+
+
+def _mips_sltiu(rt: int, rs: int, imm: int) -> int:
+    return 0x2C000000 | (rs << 21) | (rt << 16) | (imm & 0xFFFF)
+
+
+def _mips_slt(rd: int, rs: int, rt: int) -> int:
+    return (rs << 21) | (rt << 16) | (rd << 11) | 0x2A
+
+
+def _mips_or(rd: int, rs: int, rt: int) -> int:
+    return (rs << 21) | (rt << 16) | (rd << 11) | 0x25
+
+
+def _mips_addu(rd: int, rs: int, rt: int) -> int:
+    return (rs << 21) | (rt << 16) | (rd << 11) | 0x21
+
+
+def _mips_sll(rd: int, rt: int, sa: int) -> int:
+    return (rt << 16) | (rd << 11) | (sa << 6) | 0x00
+
+
+def _mips_beq(rs: int, rt: int, off: int) -> int:
+    return 0x10000000 | (rs << 21) | (rt << 16) | (off & 0xFFFF)
+
+
+def _mips_j(target: int) -> int:
+    return 0x08000000 | ((target >> 2) & 0x03FFFFFF)
+
+
+def _mips_jr(rs: int) -> int:
+    return (rs << 21) | 0x08
+
+
+def _resolve_mips_labels(body: list) -> list[int]:
+    """Two passes: collect label indices, then encode symbolic branches.
+
+    Entry forms (faithful port of the lab spec builder's resolver):
+
+    * plain ``int`` — an already-encoded word;
+    * ``(label, entry)`` with ``label: str`` — defines ``label`` at this
+      index; ``entry`` is itself a plain word or a symbolic branch;
+    * ``(kind, rs, rt, label)`` with ``kind in {"beq", "bne"}`` — a
+      symbolic branch to ``label``.
+    """
+
+    labels: dict[str, int] = {}
+    flat: list = []
+    for entry in body:
+        if isinstance(entry, tuple) and isinstance(entry[0], str) and len(entry) == 2:
+            labels[entry[0]] = len(flat)
+            flat.append(entry[1])
+        else:
+            flat.append(entry)
+    out: list[int] = []
+    for idx, entry in enumerate(flat):
+        if isinstance(entry, tuple):
+            kind, rs, rt, label = entry
+            off = labels[label] - (idx + 1)
+            out.append(
+                _mips_beq(rs, rt, off) if kind == "beq" else _mips_bne(rs, rt, off)
+            )
+        else:
+            out.append(entry)
+    return out
+
+
+# --- AP builder wrapper ------------------------------------------------------
+# Callsite + callee facts (verified in the source .bin by the lab Net 1):
+# the money-shop dispatcher calls build_shop_runtime_list (0x800FA834, the
+# VERIFIED decomp unit) via ``jal`` at 0x800FC6AC; the buy path calls
+# giveItem (0x800C5240) via ``jal`` at 0x800FB410 (the same site the
+# retired v1 recycle wrapper hijacked). setTrigger = 0x801065C0.
+
+_SHOP_BUILD_RUNTIME_LIST_RAM: Final = 0x800FA834
+assert _SHOP_BUILD_RUNTIME_LIST_RAM == ROM_RECYCLE_SHOP_INIT_RAM
+_SHOP_GIVEITEM_RAM: Final = 0x800C5240
+_SHOP_SETTRIGGER_RAM: Final = 0x801065C0
+
+# gp-relative runtime state ($gp = 0x8013BB2C): current screen u8,
+# shop_obj ptr, money s32.
+_SHOP_SCREEN_GP_OFF: Final = -0x6D84           # 0x80134DA8
+_SHOP_SHOPOBJ_GP_OFF: Final = -0x6BC4          # 0x80134F68
+_SHOP_MONEY_GP_OFF: Final = -0x6C74            # 0x80134EB8
+assert 0x8013BB2C + _SHOP_SHOPOBJ_GP_OFF == 0x80000000 | RAM_RECYCLE_SHOP_GP_SLOT
+assert 0x8013BB2C + _SHOP_MONEY_GP_OFF == 0x80000000 | RAM_CURRENT_BITS
+
+_SHOP_TRIG0_ADDR: Final = 0x80000000 | AP_TRIGGER_ARRAY_BASE   # trigger 3 = bit 3
+_SHOP_PSTAT24_ADDR: Final = 0x801BE049
+# Progressive Item Shop tier markers = the BEATEN bits of the tier-1/2/3
+# marker Digimon (Betamon 724 / Patamon 751 / Biyomon 765).
+_SHOP_TIER_MARKERS: Final[tuple[tuple[int, int], ...]] = tuple(
+    (0x80000000 | byte_addr, 1 << bit)
+    for byte_addr, bit in (
+        BEATEN_RAM_BITS["Betamon"],
+        BEATEN_RAM_BITS["Patamon"],
+        BEATEN_RAM_BITS["Biyomon"],
+    )
+)
+assert _SHOP_TIER_MARKERS == (
+    (0x801BE027, 0x10), (0x801BE02A, 0x80), (0x801BE02C, 0x20),
+)
+# Relocated-table price field: value i32 @ entry+20.
+_SHOP_PRICE_BASE: Final = ITEM_PARA_RELOC_BASE_KUSEG + 20      # 0x801BFB84
+
+
+def _shop_neg16(addr: int) -> int:
+    """imm such that ``lui 0x801C`` + sign-extended imm == addr."""
+
+    return addr - 0x801C0000
+
+
+def _build_shop_ap_builder_wrapper_bytes() -> bytes:
+    """The 96-word screen-gated AP builder wrapper (lab-validated).
+
+    Faithful port of the lab's ``assemble_builder_wrapper`` (Net-1: 752
+    interpreter-replay cases of the ACTUAL assembled words vs an
+    independent model; Net-2 live battery; Net-3 disc boot). Do not
+    restructure — the byte-fidelity test pins the exact output.
+    """
+
+    zero, at, v0 = 0, 1, 2
+    t0, t1, t2, t3, t4, t5, t6, t7 = 8, 9, 10, 11, 12, 13, 14, 15
+    gp, sp, ra = 28, 29, 31
+
+    (beta_addr, beta_mask), (pata_addr, pata_mask), (biyo_addr, biyo_mask) = _SHOP_TIER_MARKERS
+    cfg_hi, cfg_lo = _decompose_kuseg(SHOP_AP_CONFIG_RAM)
+
+    l_van, l_rec, l_sec, l_itm, l_td = "van", "rec", "sec", "itm", "td"
+    l_have, l_rep, l_co, l_emit, l_loop = "have", "rep", "co", "emit", "loop"
+
+    body: list = [
+        _mips_lbu(t7, gp, _SHOP_SCREEN_GP_OFF),        # 0  screen
+        _mips_lui(t6, cfg_hi),                         # 1  (t7 delay)
+        _mips_addiu(t6, t6, cfg_lo),                   # 2  t6 = &config
+        _mips_lui(t4, 0x801C),                         # 3  t4 = hi base
+        _mips_lbu(t5, t4, _shop_neg16(_SHOP_TRIG0_ADDR)),   # 4  trigger byte 0
+        _mips_addiu(at, zero, 131),                    # 5  (t5 delay)
+        _mips_andi(t5, t5, 0x08),                      # 6  trigger 3 (buy-back)
+        ("bne", t5, zero, l_van),                      # 7
+        _mips_nop(),                                   # 8  (delay)
+        ("beq", t7, at, l_rec),                        # 9
+        _mips_addiu(at, t7, -181),                     # 10 (delay)
+        _mips_sltiu(at, at, 8),                        # 11 stall band 181..188
+        ("bne", at, zero, l_itm),                      # 12
+        _mips_addiu(at, zero, 216),                    # 13 (delay)
+        ("beq", t7, at, l_itm),                        # 14
+        _mips_addiu(at, zero, 217),                    # 15 (delay)
+        ("beq", t7, at, l_sec),                        # 16
+        _mips_nop(),                                   # 17 (delay)
+        (l_van, _mips_j(_SHOP_BUILD_RUNTIME_LIST_RAM)),  # 18 tail-jump, ra intact
+        _mips_nop(),                                   # 19 (delay)
+        (l_rec, _mips_lbu(t5, t6, 0)),                 # 20 mode = config[0]
+        _mips_addiu(t2, zero, RECYCLE_SHOP_AP_ITEM_ID_BASE),   # 21 (t5 delay)
+        ("beq", zero, zero, l_have),                   # 22
+        _mips_addiu(t3, zero, RECYCLE_SHOP_AP_ITEM_ID_COUNT),  # 23 count (delay)
+        (l_sec, _mips_lbu(t5, t6, 2)),                 # 24 mode = config[2]
+        _mips_lbu(t1, t4, _shop_neg16(_SHOP_PSTAT24_ADDR)),    # 25 pstat(24)
+        _mips_nop(),                                   # 26 (t1 delay)
+        _mips_sltiu(at, t1, 4),                        # 27
+        ("beq", at, zero, l_van),                      # 28 invalid clerk -> vanilla
+        _mips_sll(t2, t1, 1),                          # 29 (delay) 2*clerk
+        _mips_addu(t2, t2, t1),                        # 30 3*clerk
+        _mips_addiu(t2, t2, SECRET_SHOP_AP_ITEM_ID_BASE),      # 31 base = 174+3c
+        ("beq", zero, zero, l_have),                   # 32
+        _mips_addiu(t3, zero, SECRET_SHOP_ITEMS_PER_CLERK),    # 33 count (delay)
+        (l_itm, _mips_lbu(t5, t6, 1)),                 # 34 mode = config[1]
+        _mips_lbu(t1, t4, _shop_neg16(beta_addr)),     # 35 Betamon beaten byte
+        _mips_lbu(t0, t4, _shop_neg16(pata_addr)),     # 36 Patamon beaten byte
+        _mips_andi(t1, t1, beta_mask),                 # 37
+        ("beq", t1, zero, l_van),                      # 38 tier 0 -> vanilla
+        _mips_andi(t0, t0, pata_mask),                 # 39 (delay)
+        _mips_lbu(t1, t4, _shop_neg16(biyo_addr)),     # 40 Biyomon beaten byte
+        _mips_addiu(t3, zero, 5),                      # 41 count = 5 (t1 delay)
+        ("beq", t0, zero, l_td),                       # 42
+        _mips_andi(t1, t1, biyo_mask),                 # 43 (delay)
+        _mips_addiu(t3, zero, 15),                     # 44 count = 15
+        ("beq", t1, zero, l_td),                       # 45
+        _mips_nop(),                                   # 46 (delay)
+        _mips_addiu(t3, zero, 25),                     # 47 count = 25
+        (l_td, _mips_addiu(t2, zero, ITEM_SHOP_AP_ITEM_ID_BASE)),   # 48 base = 149
+        (l_have, ("beq", t5, zero, l_van)),            # 49 mode 0 -> off
+        _mips_addiu(at, zero, 1),                      # 50 (delay)
+        ("beq", t5, at, l_co),                         # 51
+        _mips_nop(),                                   # 52 (delay)
+        (l_rep, _mips_lw(t0, gp, _SHOP_SHOPOBJ_GP_OFF)),       # 53 shop_obj
+        _mips_addiu(v0, zero, 0),                      # 54 result = 0 (t0 delay)
+        _mips_lw(t1, t0, 0),                           # 55 cursor = array base
+        _mips_sb(t3, t0, 8),                           # 56 entry_count = count
+        ("beq", zero, zero, l_emit),                   # 57
+        _mips_nop(),                                   # 58 (delay)
+        (l_co, _mips_addiu(sp, sp, -0x20)),            # 59
+        _mips_sw(ra, sp, 0x1C),                        # 60
+        _mips_sw(t2, sp, 0x14),                        # 61
+        _mips_jal(_SHOP_BUILD_RUNTIME_LIST_RAM),       # 62
+        _mips_sw(t3, sp, 0x18),                        # 63 (jal delay — pre-call)
+        _mips_lw(t2, sp, 0x14),                        # 64
+        _mips_lw(t3, sp, 0x18),                        # 65
+        _mips_lw(ra, sp, 0x1C),                        # 66
+        _mips_addiu(sp, sp, 0x20),                     # 67
+        _mips_lw(t0, gp, _SHOP_SHOPOBJ_GP_OFF),        # 68 shop_obj
+        _mips_nop(),                                   # 69 (t0 delay)
+        _mips_lw(t1, t0, 0),                           # 70 array base
+        _mips_lbu(t4, t0, 8),                          # 71 vanilla entry_count
+        _mips_nop(),                                   # 72 (t4 delay)
+        _mips_sll(at, t4, 1),                          # 73
+        _mips_addu(t1, t1, at),                        # 74 cursor = base + 2*count
+        _mips_addu(t4, t4, t3),                        # 75
+        _mips_sb(t4, t0, 8),                           # 76 entry_count += AP count
+        (l_emit, _mips_sll(at, t2, 5)),                # 77 id*32
+        _mips_lui(t6, 0x801C),                         # 78
+        _mips_addiu(t6, t6, _shop_neg16(_SHOP_PRICE_BASE)),    # 79 0x801BFB84
+        _mips_addu(t6, t6, at),                        # 80 &price[base id]
+        _mips_lw(t7, gp, _SHOP_MONEY_GP_OFF),          # 81 money
+        (l_loop, _mips_sb(t2, t1, 0)),                 # 82 *cursor = id
+        _mips_lw(t4, t6, 0),                           # 83 price
+        _mips_addiu(t1, t1, 2),                        # 84 (t4 delay)
+        _mips_slt(at, t7, t4),                         # 85 money < price
+        _mips_xori(t4, at, 1),                         # 86 flag
+        _mips_or(v0, v0, t4),                          # 87
+        _mips_sb(t4, t1, -1),                          # 88 cursor[-1] = flag
+        _mips_addiu(t2, t2, 1),                        # 89
+        _mips_addiu(t6, t6, 32),                       # 90
+        _mips_addiu(t3, t3, -1),                       # 91
+        ("bne", t3, zero, l_loop),                     # 92
+        _mips_nop(),                                   # 93 (delay)
+        _mips_jr(ra),                                  # 94
+        _mips_nop(),                                   # 95 (delay)
+    ]
+    words = _resolve_mips_labels(body)
+    assert len(words) == 96, len(words)
+    return b"".join(struct.pack("<I", w & 0xFFFFFFFF) for w in words)
+
+
+def _mips_nop() -> int:
+    return 0
+
+
+def _build_shop_ap_giveitem_ext_bytes() -> bytes:
+    """The 26-word extended giveItem range-dispatch wrapper (lab-validated).
+
+    ids 128..134 -> setTrigger(id+776) [904..910, shipped recycle range],
+    ids 149..164 -> setTrigger(id+635) [784..799],
+    ids 165..185 -> setTrigger(id+691) [856..876],
+    else tail-jump vanilla giveItem. AP ids return v0=1 with no delivery.
+    """
+
+    zero, at, v0, a0 = 0, 1, 2, 4
+    t0, sp, ra = 8, 29, 31
+    l_fr, l_fa, l_fb, l_fire = "fr", "fa", "fb", "fire"
+
+    range_a_len = SHOP_AP_TRIGGER_RANGE_A[1] - SHOP_AP_TRIGGER_RANGE_A[0] + 1
+    range_b_len = SHOP_AP_TRIGGER_RANGE_B[1] - SHOP_AP_TRIGGER_RANGE_B[0] + 1
+
+    body: list = [
+        _mips_addiu(at, a0, -RECYCLE_SHOP_AP_ITEM_ID_BASE),        # 0
+        _mips_sltiu(t0, at, RECYCLE_SHOP_AP_ITEM_ID_COUNT),        # 1
+        ("bne", t0, zero, l_fr),                                   # 2  128..134
+        _mips_addiu(at, a0, -SHOP_AP_TRIGGER_RANGE_A[0]),          # 3  (delay)
+        _mips_sltiu(t0, at, range_a_len),                          # 4
+        ("bne", t0, zero, l_fa),                                   # 5  149..164
+        _mips_addiu(at, a0, -SHOP_AP_TRIGGER_RANGE_B[0]),          # 6  (delay)
+        _mips_sltiu(t0, at, range_b_len),                          # 7
+        ("bne", t0, zero, l_fb),                                   # 8  165..185
+        _mips_nop(),                                               # 9  (delay)
+        _mips_j(_SHOP_GIVEITEM_RAM),                               # 10 vanilla
+        _mips_nop(),                                               # 11 (delay)
+        (l_fr, ("beq", zero, zero, l_fire)),                       # 12
+        _mips_addiu(a0, a0, RECYCLE_SHOP_TRIGGER_BASE - RECYCLE_SHOP_AP_ITEM_ID_BASE),  # 13
+        (l_fa, ("beq", zero, zero, l_fire)),                       # 14
+        _mips_addiu(a0, a0, SHOP_AP_TRIGGER_OFFSET_A),             # 15 (delay)
+        (l_fb, ("beq", zero, zero, l_fire)),                       # 16
+        _mips_addiu(a0, a0, SHOP_AP_TRIGGER_OFFSET_B),             # 17 (delay)
+        (l_fire, _mips_addiu(sp, sp, -0x10)),                      # 18
+        _mips_sw(ra, sp, 0x0C),                                    # 19
+        _mips_jal(_SHOP_SETTRIGGER_RAM),                           # 20
+        _mips_nop(),                                               # 21 (delay)
+        _mips_lw(ra, sp, 0x0C),                                    # 22
+        _mips_addiu(sp, sp, 0x10),                                 # 23
+        _mips_jr(ra),                                              # 24
+        _mips_addiu(v0, zero, 1),                                  # 25 (delay)
+    ]
+    words = _resolve_mips_labels(body)
+    assert len(words) == 26, len(words)
+    return b"".join(struct.pack("<I", w & 0xFFFFFFFF) for w in words)
+
+
+# --- Wrapper placement (freed vanilla ITEM_DESC_PTR region) ------------------
+# Layout of the freed 512-B region at 0x801279DC (dead once the desc-ptr
+# relocation is installed — which the patcher does whenever ANY shop mode
+# is != off):
+#
+#   0x801279DC..0x80127B5C  AP builder wrapper (384 B = 96 words)
+#   0x80127B5C..0x80127BC4  extended giveItem wrapper (104 B = 26 words)
+#   0x80127BC4..0x80127BDC  24 B spare
+
+SHOP_AP_BUILDER_WRAPPER_RAM: Final = VANILLA_ITEM_DESC_PTR_RAM               # 0x801279DC
+SHOP_AP_BUILDER_WRAPPER_OFFSET: Final = _slus_ram_to_bin_offset(
+    SHOP_AP_BUILDER_WRAPPER_RAM,
+)
+SHOP_AP_BUILDER_WRAPPER_BYTES: Final = _build_shop_ap_builder_wrapper_bytes()
+assert len(SHOP_AP_BUILDER_WRAPPER_BYTES) == 384
+
+SHOP_AP_GIVEITEM_EXT_RAM: Final = SHOP_AP_BUILDER_WRAPPER_RAM + 0x180        # 0x80127B5C
+SHOP_AP_GIVEITEM_EXT_OFFSET: Final = _slus_ram_to_bin_offset(SHOP_AP_GIVEITEM_EXT_RAM)
+SHOP_AP_GIVEITEM_EXT_BYTES: Final = _build_shop_ap_giveitem_ext_bytes()
+assert len(SHOP_AP_GIVEITEM_EXT_BYTES) == 104
+
+_SHOP_AP_FREED_REGION_END_RAM: Final = SHOP_AP_BUILDER_WRAPPER_RAM + 512     # 0x80127BDC
+assert SHOP_AP_BUILDER_WRAPPER_RAM + len(SHOP_AP_BUILDER_WRAPPER_BYTES) <= SHOP_AP_GIVEITEM_EXT_RAM
+assert SHOP_AP_GIVEITEM_EXT_RAM + len(SHOP_AP_GIVEITEM_EXT_BYTES) <= _SHOP_AP_FREED_REGION_END_RAM
+
+# --- Callsite jal redirects --------------------------------------------------
+
+SHOP_AP_DISPATCHER_JAL_RAM: Final = 0x800FC6AC
+SHOP_AP_DISPATCHER_JAL_OFFSET: Final = _slus_ram_to_bin_offset(SHOP_AP_DISPATCHER_JAL_RAM)
+SHOP_AP_DISPATCHER_JAL_VANILLA: Final = 0x0C03EA0D           # jal build_shop_runtime_list
+assert SHOP_AP_DISPATCHER_JAL_VANILLA == _mips_jal(_SHOP_BUILD_RUNTIME_LIST_RAM)
+SHOP_AP_DISPATCHER_JAL_VALUE: Final = _mips_jal(SHOP_AP_BUILDER_WRAPPER_RAM)
+assert SHOP_AP_DISPATCHER_JAL_VALUE == 0x0C049E77, hex(SHOP_AP_DISPATCHER_JAL_VALUE)
+
+SHOP_AP_GIVEITEM_JAL_RAM: Final = 0x800FB410
+SHOP_AP_GIVEITEM_JAL_OFFSET: Final = _slus_ram_to_bin_offset(SHOP_AP_GIVEITEM_JAL_RAM)
+SHOP_AP_GIVEITEM_JAL_VANILLA: Final = 0x0C031490             # jal giveItem
+assert SHOP_AP_GIVEITEM_JAL_VANILLA == _mips_jal(_SHOP_GIVEITEM_RAM)
+SHOP_AP_GIVEITEM_JAL_VALUE: Final = _mips_jal(SHOP_AP_GIVEITEM_EXT_RAM)
+assert SHOP_AP_GIVEITEM_JAL_VALUE == 0x0C049ED7, hex(SHOP_AP_GIVEITEM_JAL_VALUE)
+# Same callsite the retired v1 recycle wrapper hijacked — the ext wrapper
+# subsumes it (and the .bin offset is byte-identical).
+assert SHOP_AP_GIVEITEM_JAL_OFFSET == ROM_RECYCLE_SHOP_PATCH_OFFSET
+
+# --- Extended boot hook (55 words) -------------------------------------------
+
+
+def _build_item_para_boot_hook_ext_bytes() -> bytes:
+    """The EXTENDED 55-word boot seed hook (lab-validated).
+
+    = the always-on 37-word hook (:func:`_build_item_para_boot_hook_bytes`)
+    with two extra loops spliced in before the epilogue:
+
+    * loop 4: copy the second seed block (896 B) from the staging region
+      at :data:`SHOP_AP_STAGING2_RAM` over relocated slots 158..185;
+    * loop 5: re-zero the staging region (restore the boot invariant —
+      the region is a runtime-active workspace whose owner starts
+      strictly after the hook site; boot-order evidence in the lab
+      NOTES).
+
+    Emitted (over the base hook token) whenever ANY shop mode != off.
+    """
+
+    zero, t0, t1, t2, t3 = 0, 8, 9, 10, 11
+
+    base_words = list(struct.unpack("<37I", ITEM_PARA_BOOT_HOOK_BYTES))
+    s2_hi, s2_lo = _decompose_kuseg(SHOP_AP_STAGING2_RAM)          # (0x8011, 0x5A4C)
+    seed2_dst = ITEM_PARA_RELOC_BASE_KUSEG + SHOP_AP_STAGING2_SLOT_BASE * ROM_ITEM_TABLE_ENTRY_SIZE
+    assert seed2_dst == 0x801C0F30, hex(seed2_dst)
+    dst_hi, dst_lo = _decompose_kuseg(seed2_dst)                   # (0x801C, 0x0F30)
+
+    words = [
+        *base_words[:33],
+        # loop 4: staging2 (896 B) -> RELOC slots 158..185
+        _mips_lui(t0, s2_hi), _mips_addiu(t0, t0, s2_lo),          # 33,34
+        _mips_lui(t1, dst_hi), _mips_addiu(t1, t1, dst_lo),        # 35,36
+        _mips_addiu(t2, zero, SHOP_AP_STAGING2_SIZE),              # 37
+        _mips_lw(t3, t0, 0),                                       # 38 L4:
+        _mips_addiu(t0, t0, 4),                                    # 39 (t3 delay)
+        _mips_sw(t3, t1, 0),                                       # 40
+        _mips_addiu(t2, t2, -4),                                   # 41
+        _mips_bne(t2, zero, 38 - 43),                              # 42 -> L4
+        _mips_addiu(t1, t1, 4),                                    # 43 (delay)
+        # loop 5: re-zero the staging region (restore boot invariant)
+        _mips_lui(t0, s2_hi), _mips_addiu(t0, t0, s2_lo),          # 44,45
+        _mips_addiu(t2, zero, SHOP_AP_STAGING2_SIZE),              # 46
+        _mips_sw(zero, t0, 0),                                     # 47 L5:
+        _mips_addiu(t2, t2, -4),                                   # 48
+        _mips_bne(t2, zero, 47 - 50),                              # 49 -> L5
+        _mips_addiu(t0, t0, 4),                                    # 50 (delay)
+        *base_words[33:],
+    ]
+    assert len(words) == 55, len(words)
+    return b"".join(struct.pack("<I", w) for w in words)
+
+
+ITEM_PARA_BOOT_HOOK_EXT_BYTES: Final = _build_item_para_boot_hook_ext_bytes()
+assert len(ITEM_PARA_BOOT_HOOK_EXT_BYTES) == 220
+# Grown in place: same prefix (loops 1..3) and same epilogue as the base
+# hook, still clear of the transition-gate wrapper at 0x800966C4.
+assert ITEM_PARA_BOOT_HOOK_EXT_BYTES[:33 * 4] == ITEM_PARA_BOOT_HOOK_BYTES[:33 * 4]
+assert ITEM_PARA_BOOT_HOOK_EXT_BYTES[51 * 4:] == ITEM_PARA_BOOT_HOOK_BYTES[33 * 4:]
+assert (
+    ITEM_PARA_BOOT_HOOK_RAM + len(ITEM_PARA_BOOT_HOOK_EXT_BYTES)
+    <= TRANSITION_GATE_WRAPPER_RAM
+), hex(ITEM_PARA_BOOT_HOOK_RAM + len(ITEM_PARA_BOOT_HOOK_EXT_BYTES))
+
+# --- Money-shop array capacity -----------------------------------------------
+# The money shop's runtime [id, flag] array (0x80088828) holds AT MOST 68
+# pairs — the next struct (the merit list_obj) starts at 0x800888B0. The
+# lab probed the 68-row boundary end-to-end (renders, scrolls, purchases,
+# zero spill). Planned worst case: 16 vanilla rows (item building,
+# pstat(26)=4 + Unimon bonus) + 25 AP rows = 41.
+
+SHOP_AP_MONEY_ARRAY_CAP: Final = 68
+SHOP_AP_WORST_VANILLA_ROWS: Final = 16
+assert SHOP_AP_WORST_VANILLA_ROWS + ITEM_SHOP_AP_ITEM_ID_COUNT <= SHOP_AP_MONEY_ARRAY_CAP
+
+# --- Tiered price defaults (lab NOTES) ---------------------------------------
+# Used by the patcher's ``tiered`` price mode. Recycle keeps its vanilla
+# money prices (RECYCLE_SHOP_VANILLA_PRICES); merit keeps its vanilla
+# merit prices (price options never touch merit).
+
+
+def item_shop_tiered_price(index: int) -> int:
+    """Tiered default price for item-shop slot index 0..24 (T1/T2/T3)."""
+
+    assert 0 <= index < ITEM_SHOP_AP_ITEM_ID_COUNT
+    if index < ITEM_SHOP_TIER_COUNTS[0]:
+        return 500
+    if index < ITEM_SHOP_TIER_COUNTS[0] + ITEM_SHOP_TIER_COUNTS[1]:
+        return 1000
+    return 2000
+
+
+def secret_shop_tiered_price(index: int) -> int:
+    """Tiered default price for secret-shop slot index 0..11 (per clerk)."""
+
+    assert 0 <= index < SECRET_SHOP_AP_ITEM_ID_COUNT
+    return 1000 * (index // 3 + 1) + 100 * (index % 3)
+
+
+# --- Shopsanity trigger-allocation audit -------------------------------------
+# Same shape as the region-gate audit above: derived from the live
+# manifest constants so any future reallocation trips at module load.
+
+SHOP_AP_TRIGGER_IDS: Final = ITEM_SHOP_TRIGGER_IDS + SECRET_SHOP_TRIGGER_IDS
+assert len(SHOP_AP_TRIGGER_IDS) == len(set(SHOP_AP_TRIGGER_IDS)) == 37
+
+for _trig in SHOP_AP_TRIGGER_IDS:
+    # Only the two audited-free bands.
+    assert 784 <= _trig <= 799 or 856 <= _trig <= 877, _trig
+    # The >=800-is-pstat rule: pstat(0)..pstat(6) bytes = triggers
+    # 800..855 are engine-owned. Nothing at or past byte 0x001BE042.
+    assert not 800 <= _trig <= 855, _trig
+    assert _trig < 936, _trig
+    assert (
+        AP_TRIGGER_ARRAY_BASE + _trig // 8 < RAM_MERAMON_TUNNEL_DRIMOGEMON_STATE
+    ), _trig
+    # Outside the recruit intercept band and above the script ceiling.
+    assert not 203 <= _trig <= 258, _trig
+    assert _trig > 713, _trig
+    # Disjoint from every shipped allocation (incl. region gates).
+    assert _trig not in _REGION_GATE_TAKEN_TRIGGERS, _trig
+    assert _trig not in _REGION_GATE_NEW_TRIGGERS, _trig
 del _trig

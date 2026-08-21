@@ -11,8 +11,18 @@ plumbing it correctly is a Phase 4+ topic.
 """
 
 from dataclasses import dataclass
+from typing import NamedTuple
 
-from Options import Choice, DefaultOnToggle, OptionGroup, OptionSet, PerGameCommonOptions, Range, Toggle
+from Options import (
+    Choice,
+    DefaultOnToggle,
+    OptionError,
+    OptionGroup,
+    OptionSet,
+    PerGameCommonOptions,
+    Range,
+    Toggle,
+)
 
 from .regions import LOCKABLE_REGIONS
 
@@ -490,25 +500,59 @@ class CardLocations(Toggle):
     display_name = "Card Vending Locations"
 
 
-class RecycleShopLocations(Toggle):
+class ShopLocationsChoice(Choice):
+    """Shared 3-mode base for the four shopsanity shop options.
+
+    * ``off`` — the shop is vanilla; no AP locations exist for it.
+    * ``coexist`` — the vanilla rows stay purchasable (delivering their
+      vanilla items) and the AP rows are appended after them.
+    * ``replace`` — only the AP rows are shown; the vanilla stock is
+      gone for the seed.
+
+    In both non-off modes each AP row is its own AP location: buying it
+    deducts the displayed price, fires the location check, and delivers
+    nothing in-game (AP routes whatever was placed there — your own
+    items land in the bank).
+
+    Legacy note: the pre-shopsanity ``recycle_shop_locations`` /
+    ``merit_shop_locations`` toggles map ``true`` → ``replace`` (the
+    shipped behavior of the old "on") and ``false`` → ``off``.
+    """
+
+    option_off = 0
+    option_coexist = 1
+    option_replace = 2
+    default = option_off
+    # Legacy toggle compatibility: bool True routes through
+    # ``from_text("true")`` and lands on replace; "false" auto-aliases
+    # to off via the option metaclass.
+    alias_true = option_replace
+
+
+class RecycleShopLocations(ShopLocationsChoice):
     """Add the Recycle Shop (Tinmon "Market Manager", Gear Savanna) as
     AP locations.
 
     DW1's recycle shop sells 7 fixed money-priced items
     (med.recovery / Medium MP / Off. Disk / Def. Disk / Hispeed dsk /
-    Auto Pilot / Giant Meat). With this on, each row becomes its own
-    AP location (7 total), and the shop UI displays the multiworld
-    AP item name + a "From <player>'s World" hover description.
+    Auto Pilot / Giant Meat). In ``coexist`` / ``replace`` mode each AP
+    row becomes its own AP location (7 total), and the shop UI displays
+    the multiworld AP item name + a "From <player>'s World" hover
+    description.
 
     Mechanics: a one-time gen-time relocation of DW1's
-    ``ITEM_DESC_PTR`` table out to free RAM frees up 16 ITEM_PARA
-    slots; we use 7 of them to hold per-shop-row AP names + prices.
-    A runtime poll rewrites the engine's shop array when the recycle
-    shop opens. A wrapper at the shop's ``giveItem`` callsite fires
-    the AP location signal and skips the vanilla item delivery so
-    the AP-placed item at that location is delivered to the player's
-    bank instead. Money is still deducted (vanilla shop logic
-    deducts before the give-item callsite).
+    ``ITEM_DESC_PTR`` table out to free RAM frees up extended ITEM_PARA
+    slots; we use 7 of them to hold per-shop-row AP names + prices. A
+    screen-gated ROM wrapper at the money-shop list-builder callsite
+    emits the AP rows synchronously when the shop opens (coexist
+    appends them after the vanilla rows; replace shows only AP rows).
+    A second wrapper at the shop's ``giveItem`` callsite fires the AP
+    location signal and skips the vanilla item delivery so the
+    AP-placed item at that location is delivered to the player's bank
+    instead. Money is still deducted (vanilla shop logic deducts
+    before the give-item callsite).
+
+    Legacy: the old toggle's ``true`` maps to ``replace``.
     """
 
     display_name = "Recycle Shop Locations"
@@ -538,16 +582,17 @@ class FishingLocations(Toggle):
     display_name = "Fishing Locations"
 
 
-class MeritShopLocations(Toggle):
+class MeritShopLocations(ShopLocationsChoice):
     """Add the Merit Shop (ShogunGekomon, Volume Villa) as AP locations.
 
     DW1's merit shop sells 14 fixed merit-priced items (sup.recovery,
     Sup.restore, 6 Chips, Rainbowhorn, 4 500-merit consumables, and
-    Amazing rod). With this on, each row becomes its own AP location
-    (``Merit Shop #1..#14``), and the shop UI displays the multiworld
-    AP item name + a "From <player>'s World" hover description. The
-    v1 ``Amazing Rod Pickup`` row at slot 83 (300 merits) is preserved
-    as a 15th row in the shop — its AP location is unchanged.
+    Amazing rod). In ``coexist`` / ``replace`` mode each AP row becomes
+    its own AP location (``Merit Shop #1..#14``), and the shop UI
+    displays the multiworld AP item name + a "From <player>'s World"
+    hover description. The v1 ``Amazing Rod Pickup`` row at slot 83
+    (300 merits) is preserved as an extra row in the shop — its AP
+    location is unchanged.
 
     Mechanics: extends the recycle shop's relocated-ITEM_DESC_PTR
     infrastructure. The merit-shop scan loop's hard upper bound (vanilla
@@ -555,13 +600,102 @@ class MeritShopLocations(Toggle):
     extended ITEM_PARA slots 135..148. The shop's existing
     ``giveItem``-callsite jal hijack (installed by v1) is re-targeted at
     an extended dispatch wrapper that handles 15 ``(item_id, trigger)``
-    pairs. Vanilla items' ``meritValue`` is zeroed so their rows
-    disappear; AP-slot ``meritValue`` is set to the vanilla price of
-    the slot it replaces (preserves displayed cost). Merits are still
-    deducted (vanilla shop logic deducts before the give-item callsite).
+    pairs. In ``replace`` mode the vanilla items' ``meritValue`` is
+    zeroed so their rows disappear; in ``coexist`` mode the vanilla
+    rows stay purchasable next to the AP rows. AP-slot ``meritValue``
+    is set to the vanilla price of the slot it mirrors (preserves the
+    displayed cost — the ``shop_price_*`` options never touch merit
+    prices). Merits are still deducted (vanilla shop logic deducts
+    before the give-item callsite).
+
+    Legacy: the old toggle's ``true`` maps to ``replace`` (the shipped
+    "on" behavior zeroed the vanilla rows).
     """
 
     display_name = "Merit Shop Locations"
+
+
+class ItemShopLocations(ShopLocationsChoice):
+    """Add the File City item shop (market stall + shop building) as AP
+    locations.
+
+    25 AP rows total, revealed with the ``Progressive Item Shop``
+    ladder: tier 1 shows the first 5 rows, tier 2 fifteen, tier 3 all
+    25. Both the early market stall and the later shop building share
+    the same AP rows (same in-game shop backend). AP logic gates the
+    row groups on ``Progressive Item Shop`` x1 / x2 / x3.
+
+    Prices come from the ``shop_price_mode`` option (tiered default:
+    500 / 1000 / 2000 bits per tier). ``coexist`` keeps the vanilla
+    stock purchasable alongside; ``replace`` sells only AP rows.
+    """
+
+    display_name = "Item Shop Locations"
+
+
+class SecretShopLocations(ShopLocationsChoice):
+    """Add the Secret Item Shop (the sewer under File City's second
+    item shop) as AP locations.
+
+    12 AP rows: 3 per clerk (Numemon / Mojyamon / Mamemon / Devimon).
+    The shop shows the on-duty clerk's 3 rows; leave and re-enter to
+    rotate clerks. AP logic gates the Numemon / Mojyamon pools on
+    ``Progressive Secret Shop`` x1 and the Mamemon / Devimon pools on
+    x2, always together with ``Progressive Item Shop`` x2 (the sewer is
+    only reachable through the second item shop).
+
+    Prices come from the ``shop_price_mode`` option (tiered default:
+    1000-3200 bits, scaling by clerk). ``coexist`` keeps the vanilla
+    stock purchasable alongside; ``replace`` sells only AP rows.
+    """
+
+    display_name = "Secret Shop Locations"
+
+
+class ShopPriceMode(Choice):
+    """How the AP shop rows are priced (recycle / item / secret shops).
+
+    * ``tiered`` — fixed defaults: recycle rows keep their vanilla
+      prices; item shop rows cost 500 / 1000 / 2000 bits by tier;
+      secret shop rows cost 1000-3200 bits scaling by clerk.
+    * ``randomized`` — each AP row's price is rolled uniformly in
+      ``[shop_price_min, shop_price_max]`` at generation time.
+
+    Prices are purely an in-game money sink — AP logic never depends
+    on affordability. Merit Shop prices are merit-currency and always
+    stay at their vanilla values.
+    """
+
+    display_name = "Shop Price Mode"
+    option_tiered = 0
+    option_randomized = 1
+    default = option_tiered
+
+
+class ShopPriceMin(Range):
+    """Lower bound (bits) for ``shop_price_mode: randomized``.
+
+    Must be <= ``shop_price_max`` (validated at generation). Ignored
+    under ``tiered``.
+    """
+
+    display_name = "Shop Price Minimum"
+    range_start = 1
+    range_end = 50_000
+    default = 100
+
+
+class ShopPriceMax(Range):
+    """Upper bound (bits) for ``shop_price_mode: randomized``.
+
+    Must be >= ``shop_price_min`` (validated at generation). Ignored
+    under ``tiered``.
+    """
+
+    display_name = "Shop Price Maximum"
+    range_start = 1
+    range_end = 50_000
+    default = 5000
 
 
 class ArenaLocations(Choice):
@@ -779,6 +913,50 @@ class GodMode(Toggle):
     display_name = "God Mode"
 
 
+class ShopModes(NamedTuple):
+    """Resolved per-shop 3-mode values (0 = off, 1 = coexist, 2 = replace)."""
+
+    recycle: int
+    item: int
+    secret: int
+    merit: int
+
+    @property
+    def any_enabled(self) -> bool:
+        return any(mode != 0 for mode in self)
+
+
+def get_shop_modes(options: "DigimonWorldOptions") -> ShopModes:
+    """Resolve the four shopsanity options to a :class:`ShopModes` tuple.
+
+    Single source of truth for :mod:`.rom` (token emission),
+    :mod:`.locations` (pool inclusion), and
+    :meth:`worlds.digimon_world.world.DigimonWorldWorld.fill_slot_data`.
+    """
+
+    return ShopModes(
+        recycle=int(options.recycle_shop_locations.value),
+        item=int(options.item_shop_locations.value),
+        secret=int(options.secret_shop_locations.value),
+        merit=int(options.merit_shop_locations.value),
+    )
+
+
+def validate_shop_price_options(options: "DigimonWorldOptions", player_name: str) -> None:
+    """Raise :class:`Options.OptionError` when the randomized price range
+    is inverted. Called from ``generate_early``."""
+
+    if int(options.shop_price_mode.value) != ShopPriceMode.option_randomized:
+        return
+    price_min = int(options.shop_price_min.value)
+    price_max = int(options.shop_price_max.value)
+    if price_min > price_max:
+        raise OptionError(
+            f"Player {player_name}: shop_price_min ({price_min}) must be "
+            f"<= shop_price_max ({price_max})",
+        )
+
+
 def get_locked_regions(options: "DigimonWorldOptions") -> frozenset[str]:
     """Resolve the region-locking option triple to a concrete name set.
 
@@ -835,6 +1013,11 @@ class DigimonWorldOptions(PerGameCommonOptions):
     vending_locations: VendingLocations
     recycle_shop_locations: RecycleShopLocations
     merit_shop_locations: MeritShopLocations
+    item_shop_locations: ItemShopLocations
+    secret_shop_locations: SecretShopLocations
+    shop_price_mode: ShopPriceMode
+    shop_price_min: ShopPriceMin
+    shop_price_max: ShopPriceMax
     fishing_locations: FishingLocations
     arena_locations: ArenaLocations
     technique_rewards: TechniqueRewards
@@ -858,7 +1041,8 @@ option_groups: list[OptionGroup] = [
     OptionGroup(
         "Locations",
         [CardLocations, VendingLocations, RecycleShopLocations, MeritShopLocations,
-         FishingLocations],
+         ItemShopLocations, SecretShopLocations, ShopPriceMode, ShopPriceMin,
+         ShopPriceMax, FishingLocations],
     ),
     OptionGroup(
         "Quality of Life",

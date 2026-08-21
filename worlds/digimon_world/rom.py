@@ -199,7 +199,6 @@ from .data.addresses import (
     ITEM_PARA_READER_WORD_PATCHES,
     MERIT_AP_DESC_STRINGS_BIN_OFFSET,
     MERIT_SHOP_AP_ITEM_ID_BASE,
-    MERIT_SHOP_AP_ITEM_ID_COUNT,
     MERIT_SHOP_LOCATION_NAMES,
     MERIT_SHOP_VANILLA_ENTRIES,
     _merit_shop_presale_name_offset,
@@ -219,19 +218,30 @@ from .data.addresses import (
     ROM_ICON_CLAMP_PATCH_VALUE,
     ROM_ICON_CLAMP_WRAPPER_BYTES,
     ROM_ICON_CLAMP_WRAPPER_OFFSET,
-    ROM_RECYCLE_SHOP_INIT_PATCH_FORMAT,
-    ROM_RECYCLE_SHOP_INIT_PATCH_OFFSET,
-    ROM_RECYCLE_SHOP_INIT_PATCH_VALUE,
-    ROM_RECYCLE_SHOP_INIT_WRAPPER_BYTES,
-    ROM_RECYCLE_SHOP_INIT_WRAPPER_OFFSET,
-    ROM_RECYCLE_SHOP_PATCH_FORMAT,
-    ROM_RECYCLE_SHOP_PATCH_OFFSET,
-    ROM_RECYCLE_SHOP_PATCH_VALUE,
-    ROM_RECYCLE_SHOP_WRAPPER_BYTES,
-    ROM_RECYCLE_SHOP_WRAPPER_OFFSET,
+    ITEM_PARA_BOOT_HOOK_EXT_BYTES,
+    ITEM_SHOP_AP_ITEM_ID_BASE,
+    ITEM_SHOP_AP_ITEM_IDS,
+    ITEM_SHOP_LOCATION_NAMES,
+    RECYCLE_SHOP_AP_ITEM_ID_BASE,
     RECYCLE_SHOP_AP_ITEM_ID_COUNT,
     RECYCLE_SHOP_LOCATION_NAMES,
     RECYCLE_SHOP_VANILLA_PRICES,
+    SECRET_SHOP_AP_ITEM_ID_BASE,
+    SECRET_SHOP_AP_ITEM_IDS,
+    SECRET_SHOP_LOCATION_NAMES,
+    SHOP_AP_BUILDER_WRAPPER_BYTES,
+    SHOP_AP_BUILDER_WRAPPER_OFFSET,
+    SHOP_AP_CONFIG_BIN_OFFSET,
+    SHOP_AP_DISPATCHER_JAL_OFFSET,
+    SHOP_AP_DISPATCHER_JAL_VALUE,
+    SHOP_AP_GIVEITEM_EXT_BYTES,
+    SHOP_AP_GIVEITEM_EXT_OFFSET,
+    SHOP_AP_GIVEITEM_JAL_OFFSET,
+    SHOP_AP_GIVEITEM_JAL_VALUE,
+    SHOP_MODE_REPLACE,
+    build_shop_ap_config_bytes,
+    item_shop_tiered_price,
+    secret_shop_tiered_price,
     RELOC_ITEM_DESC_PTR_ADDIU_VALUE,
     RELOC_ITEM_DESC_PTR_LUI_VALUE,
     RELOC_ITEM_DESC_PTR_PATCH_FORMAT,
@@ -293,6 +303,7 @@ from .starters import (
 )
 
 if TYPE_CHECKING:
+    from .options import ShopModes
     from .world import DigimonWorldWorld
 
 
@@ -488,24 +499,25 @@ class DigimonWorldPatchExtension(APPatchExtension):
     def relocate_item_desc_ptr(caller: APProcedurePatch, rom: bytes) -> bytes:
         """Build the relocated ITEM_DESC_PTR table in Cave6.
 
-        Runs when either
-        :class:`worlds.digimon_world.options.RecycleShopLocations` or
-        :class:`worlds.digimon_world.options.MeritShopLocations` is on —
-        see :func:`_assemble_procedure`.
+        Runs when any of the four shopsanity shop options (recycle /
+        merit / item / secret) is not ``off`` — see
+        :func:`_assemble_procedure`.
 
         Reads the 128 vanilla u32 pointer entries from the **original
-        source ROM** (via :meth:`get_source_data_with_cache` — a
-        convention kept from the era when ``apply_tokens`` overwrote
-        that .bin region with ext ITEM_PARA entries; ext entries now
-        live in the EXT_ITEM_PARA seed block, but reading the pristine
-        source stays correct and simpler). Writes them as slots 0..127
-        of the relocated 256-entry table at
-        :data:`RELOC_ITEM_DESC_PTR_BIN_OFFSET`. Slots 128..134 are
-        overwritten with kuseg pointers into the 7 recycle-shop AP
-        description strings (region :data:`AP_DESC_STRINGS_RAM`); slots
-        135..148 with kuseg pointers into the 14 merit-shop AP
-        description strings (region :data:`MERIT_AP_DESC_STRINGS_RAM`).
-        Slots 149..255 stay zero.
+        source ROM** (via :meth:`get_source_data_with_cache` — the
+        shopsanity wrappers overwrite the vanilla desc-ptr .bin region,
+        so reading the pristine source is mandatory now, not just
+        simpler). Writes them as slots 0..127 of the relocated
+        256-entry table at :data:`RELOC_ITEM_DESC_PTR_BIN_OFFSET`.
+        Slots 128..134 are overwritten with kuseg pointers into the 7
+        recycle-shop AP description strings (region
+        :data:`AP_DESC_STRINGS_RAM`); slots 135..148 with kuseg
+        pointers into the 14 merit-shop AP description strings (region
+        :data:`MERIT_AP_DESC_STRINGS_RAM`); slots 149..185 (item +
+        secret shop, shopsanity) with the always-on generic
+        "Item from the multiworld" string pointer (no Cave6 space is
+        left for 37 more per-slot strings — the lab shipped the same
+        generic-pointer decision). Slots 186..255 stay zero.
 
         If a given shop's option is off, ``apply_tokens`` will not have
         written description bytes into that region — but the slots'
@@ -556,6 +568,14 @@ class DigimonWorldPatchExtension(APPatchExtension):
             ptr = merit_desc_kuseg_base + i * AP_DESC_STRING_MAX_LEN
             slot = MERIT_SHOP_AP_ITEM_ID_BASE + i
             struct.pack_into("<I", table, slot * 4, ptr)
+
+        # Shopsanity slots 149..185 (item + secret shop) → the always-on
+        # generic "Item from the multiworld" string. The hover panel of
+        # every item/secret AP row reads this one shared string.
+        from .data.addresses import AP_ITEM_DESC_RAM
+        generic_ptr = 0x80000000 | AP_ITEM_DESC_RAM
+        for slot in (*ITEM_SHOP_AP_ITEM_IDS, *SECRET_SHOP_AP_ITEM_IDS):
+            struct.pack_into("<I", table, slot * 4, generic_ptr)
 
         target = bytearray(rom)
         write_user_data_bytes(
@@ -1846,91 +1866,138 @@ def _write_item_para_relocation_tokens(patch: DigimonWorldProcedurePatch) -> Non
         )
 
 
-def _write_recycle_shop_tokens(
-    patch: DigimonWorldProcedurePatch,
-    world: DigimonWorldWorld,
-) -> None:
-    """Write all Recycle Shop tokens for the seed.
+def _resolve_placed_item(
+    world: DigimonWorldWorld, location_name: str,
+) -> tuple[str, str] | None:
+    """``(ap_item_name, owner_player_name)`` for a filled AP location.
 
-    Five sets of writes:
-
-    1. **Extended ITEM_PARA entries (slots 128..134)** in the
-       EXT_ITEM_PARA seed block (via
-       :func:`ext_item_para_slot_bin_offset`; the always-on boot hook
-       copies the block into the relocated table at natural slot
-       positions). One 32-byte entry per AP shop slot, carrying the
-       multiworld-resolved AP item name (truncated to 14 chars) and
-       the slot's vanilla money price.
-    2. **AP description strings** at :data:`AP_DESC_STRINGS_BIN_OFFSET`
-       in Cave1. One 64-byte slot per shop entry, NUL-padded, holding
-       ``"From <player>'s World"``. The relocated ITEM_DESC_PTR
-       (built later by :meth:`relocate_item_desc_ptr`) references
-       these.
-    3. **3 ITEM_DESC_PTR callsite patches** that move every
-       ``lui $r2, 0x8012; addiu $r2, $r2, 0x79DC`` pair in the SLUS
-       to the relocated table. After this, vanilla item-description
-       lookups read from Cave1 instead of the now-repurposed
-       0x801279DC region.
-    4. **giveItem wrapper** at :data:`ROM_RECYCLE_SHOP_WRAPPER_OFFSET`
-       — 60-byte MIPS sequence that, when ``$a0`` is in the AP slot
-       range [128, 134], fires ``setTrigger(904 + offset)`` and
-       returns ``$v0=1`` without delivering any item to inventory.
-       Otherwise tail-calls vanilla ``giveItem``.
-    5. **Jal hijack** at :data:`ROM_RECYCLE_SHOP_PATCH_OFFSET` —
-       single 4-byte rewrite of the recycle shop's
-       ``jal 0x800C5240`` to point at the wrapper.
-
-    The 256-entry relocated ITEM_DESC_PTR table itself is built by
-    the :meth:`DigimonWorldPatchExtension.relocate_item_desc_ptr`
-    procedure step (it needs to read the 128 vanilla pointers from
-    the source ROM, which apply_tokens cannot do). Caller must add
-    that step to the procedure when this token writer is invoked
-    — see :func:`_assemble_procedure`.
+    Returns ``None`` when the location doesn't exist (option off —
+    callers gate already, defensive only). An unfilled location falls
+    back to the generic "AP Item" name owned by this world's player.
     """
 
     multiworld = world.multiworld
-    player = world.player
+    try:
+        location = multiworld.get_location(location_name, world.player)
+    except KeyError:
+        return None
+    placed = location.item
+    if placed is None:
+        return "AP Item", multiworld.player_name[world.player]
+    return placed.name, multiworld.player_name[placed.player]
 
-    # 1. Extended ITEM_PARA entries (one per AP shop slot).
-    # 2. AP description strings (one per AP shop slot).
-    for i, location_name in enumerate(RECYCLE_SHOP_LOCATION_NAMES):
-        try:
-            location = multiworld.get_location(location_name, player)
-        except KeyError:
-            # Option off — should never reach here because callers
-            # gate on the option, but defend in case.
-            return
 
-        placed = location.item
-        if placed is None:
-            # Defensive: location wasn't filled. Skip the AP-specific
-            # writes; the slot will display whatever stale bytes the
-            # vanilla ITEM_DESC_PTR region happened to contain — but
-            # the wrapper will still fire the trigger on purchase.
-            ap_item_name = "AP Item"
-            owner_name = multiworld.player_name[player]
-        else:
-            ap_item_name = placed.name
-            owner_name = multiworld.player_name[placed.player]
+def _resolve_shop_prices(world: DigimonWorldWorld) -> dict[int, int]:
+    """Per-ext-slot money price for the recycle / item / secret AP rows.
 
-        slot_id = 128 + i
-        entry_bytes = build_ap_item_para_entry(
-            ap_item_name, RECYCLE_SHOP_VANILLA_PRICES[i],
-        )
-        patch.write_token(
-            APTokenTypes.WRITE,
-            ext_item_para_slot_bin_offset(slot_id),
-            entry_bytes,
-        )
+    * ``shop_price_mode: tiered`` — recycle keeps its vanilla prices;
+      item shop rows follow :func:`item_shop_tiered_price` (500 / 1000 /
+      2000 by tier); secret shop rows follow
+      :func:`secret_shop_tiered_price` (1000..3200 by clerk).
+    * ``shop_price_mode: randomized`` — each slot rolls uniformly in
+      ``[shop_price_min, shop_price_max]`` from the world RNG
+      (deterministic per seed).
 
-        desc_bytes = build_ap_desc_string(owner_name)
-        patch.write_token(
-            APTokenTypes.WRITE,
-            AP_DESC_STRINGS_BIN_OFFSET + i * AP_DESC_STRING_MAX_LEN,
-            desc_bytes,
-        )
+    Merit slots (135..148) are intentionally absent — merit prices are
+    merit-currency and always stay vanilla.
+    """
 
-    # 3. ITEM_DESC_PTR callsite patches (3 sites, both halves of each).
+    options = world.options
+    randomized = int(options.shop_price_mode.value) == 1
+    price_min = int(options.shop_price_min.value)
+    price_max = int(options.shop_price_max.value)
+
+    prices: dict[int, int] = {}
+    for i in range(RECYCLE_SHOP_AP_ITEM_ID_COUNT):
+        prices[RECYCLE_SHOP_AP_ITEM_ID_BASE + i] = RECYCLE_SHOP_VANILLA_PRICES[i]
+    for i, slot in enumerate(ITEM_SHOP_AP_ITEM_IDS):
+        prices[slot] = item_shop_tiered_price(i)
+    for i, slot in enumerate(SECRET_SHOP_AP_ITEM_IDS):
+        prices[slot] = secret_shop_tiered_price(i)
+    if randomized:
+        for slot in prices:
+            prices[slot] = world.random.randint(price_min, price_max)
+    return prices
+
+
+def _write_shopsanity_common_tokens(
+    patch: DigimonWorldProcedurePatch,
+    modes: ShopModes,
+) -> None:
+    """Shopsanity infrastructure, emitted whenever ANY shop mode != off.
+
+    Lab-validated 2026-08-21 (``work/dw1_re/decomp/_scan_shopsanity``,
+    three nets). Seven sets of writes:
+
+    1. **EXTENDED boot seed hook** (55 words) over the always-on
+       37-word hook at :data:`ITEM_PARA_BOOT_HOOK_OFFSET` — adds loop 4
+       (second seed block 0x80115A4C -> relocated slots 158..185) and
+       loop 5 (re-zero the staging region, restoring its boot
+       invariant). Token order: must be emitted AFTER
+       :func:`_write_item_para_relocation_tokens` so these bytes
+       overwrite the base hook token.
+    2. **AP builder wrapper** (96 words) at the freed vanilla
+       ITEM_DESC_PTR region 0x801279DC + the **dispatcher jal
+       redirect** at 0x800FC6AC. Screen-gated per-shop-mode row
+       emission (see the Shopsanity section of ``data.addresses``).
+    3. **Extended giveItem wrapper** (26 words) at 0x80127B5C + the
+       **giveItem jal redirect** at 0x800FB410. Supersedes the retired
+       v1 recycle giveItem wrapper (same callsite) and handles all AP
+       id ranges (128..134 / 149..164 / 165..185).
+    4. **Per-shop mode config** (4 bytes ``[recycle, item, secret, 0]``)
+       at :data:`SHOP_AP_CONFIG_BIN_OFFSET`.
+    5. **3 ITEM_DESC_PTR callsite patches** — the freed region now
+       holds code, so ALL desc-ptr readers must be re-based to the
+       relocated Cave6 table (previously only emitted for the recycle
+       shop; merit-only seeds relied on never dereferencing).
+    6. **Icon clamp wrapper + patch** — any icon lookup with
+       item_id >= 128 renders slot 83's (blanked) icon.
+
+    The merit shop's own machinery (ext wrapper, scan bound, jal at
+    0x8010BF3C) stays in :func:`_write_merit_shop_locations_tokens` —
+    merit is data-only with respect to this infrastructure and is NOT
+    in the config word.
+    """
+
+    # 1. Extended boot hook (overwrites the base 37-word hook token).
+    patch.write_token(
+        APTokenTypes.WRITE,
+        ITEM_PARA_BOOT_HOOK_OFFSET,
+        ITEM_PARA_BOOT_HOOK_EXT_BYTES,
+    )
+
+    # 2. Builder wrapper + dispatcher jal redirect.
+    patch.write_token(
+        APTokenTypes.WRITE,
+        SHOP_AP_BUILDER_WRAPPER_OFFSET,
+        SHOP_AP_BUILDER_WRAPPER_BYTES,
+    )
+    patch.write_token(
+        APTokenTypes.WRITE,
+        SHOP_AP_DISPATCHER_JAL_OFFSET,
+        struct.pack("<I", SHOP_AP_DISPATCHER_JAL_VALUE),
+    )
+
+    # 3. Extended giveItem wrapper + jal redirect.
+    patch.write_token(
+        APTokenTypes.WRITE,
+        SHOP_AP_GIVEITEM_EXT_OFFSET,
+        SHOP_AP_GIVEITEM_EXT_BYTES,
+    )
+    patch.write_token(
+        APTokenTypes.WRITE,
+        SHOP_AP_GIVEITEM_JAL_OFFSET,
+        struct.pack("<I", SHOP_AP_GIVEITEM_JAL_VALUE),
+    )
+
+    # 4. Per-shop mode config (merit not included — data-only modes).
+    patch.write_token(
+        APTokenTypes.WRITE,
+        SHOP_AP_CONFIG_BIN_OFFSET,
+        build_shop_ap_config_bytes(modes.recycle, modes.item, modes.secret),
+    )
+
+    # 5. ITEM_DESC_PTR callsite patches (3 sites, both halves of each).
     lui_bytes = struct.pack(
         RELOC_ITEM_DESC_PTR_PATCH_FORMAT, RELOC_ITEM_DESC_PTR_LUI_VALUE,
     )
@@ -1941,70 +2008,139 @@ def _write_recycle_shop_tokens(
         patch.write_token(APTokenTypes.WRITE, lui_offset, lui_bytes)
         patch.write_token(APTokenTypes.WRITE, addiu_offset, addiu_bytes)
 
-    # 4. giveItem wrapper.
-    patch.write_token(
-        APTokenTypes.WRITE,
-        ROM_RECYCLE_SHOP_WRAPPER_OFFSET,
-        ROM_RECYCLE_SHOP_WRAPPER_BYTES,
-    )
-
-    # 5. Jal hijack.
-    patch.write_token(
-        APTokenTypes.WRITE,
-        ROM_RECYCLE_SHOP_PATCH_OFFSET,
-        struct.pack(ROM_RECYCLE_SHOP_PATCH_FORMAT, ROM_RECYCLE_SHOP_PATCH_VALUE),
-    )
-
-    # 6. setItemTexture clamp wrapper — fixes garbage icons for slots
-    #    128..134 by redirecting any icon lookup with item_id >= 128 to
-    #    slot 83 (which is already blanked in ITEM.TIM by the merit shop
-    #    patcher). Without this, slots 128..134 read tile coords
-    #    (col=0..6, row=8) which is off the 16x8-tile texture.
+    # 6. setItemTexture clamp wrapper + entry patch — icon lookups with
+    #    item_id >= 128 redirect to slot 83 (blanked in ITEM.TIM by the
+    #    always-on merit-shop patcher).
     patch.write_token(
         APTokenTypes.WRITE,
         ROM_ICON_CLAMP_WRAPPER_OFFSET,
         ROM_ICON_CLAMP_WRAPPER_BYTES,
     )
-    # 7. Patch site for icon clamp: rewrite first 2 instructions of
-    #    setItemTexture as ``j wrapper`` + ``nop``. The trampoline
-    #    reproduces the displaced bytes inline before returning.
     patch.write_token(
         APTokenTypes.WRITE,
         ROM_ICON_CLAMP_PATCH_OFFSET,
         struct.pack(ROM_ICON_CLAMP_PATCH_FORMAT, *ROM_ICON_CLAMP_PATCH_VALUE),
     )
 
-    # 8. Recycle-shop init epilogue wrapper — fixes the name flicker
-    #    where rows show vanilla item names on first open and only
-    #    refresh to AP names after scrolling. The shop UI captures
-    #    each row's name at row-init time; our client-side runtime
-    #    reconciler runs ~6 frames too late. This wrapper hijacks the
-    #    shop_obj initializer's epilogue (RAM 0x800A3408) and writes
-    #    our AP IDs into the array synchronously inside the engine's
-    #    call chain — before the UI initializes any rows.
-    patch.write_token(
-        APTokenTypes.WRITE,
-        ROM_RECYCLE_SHOP_INIT_WRAPPER_OFFSET,
-        ROM_RECYCLE_SHOP_INIT_WRAPPER_BYTES,
-    )
-    # 9. Patch site for the init wrapper: rewrite the function's last
-    #    8 bytes as ``j wrapper; nop``. The wrapper reproduces the
-    #    displaced ``jr $ra; addiu $sp, +0x48`` epilogue inline.
-    patch.write_token(
-        APTokenTypes.WRITE,
-        ROM_RECYCLE_SHOP_INIT_PATCH_OFFSET,
-        struct.pack(
-            ROM_RECYCLE_SHOP_INIT_PATCH_FORMAT,
-            *ROM_RECYCLE_SHOP_INIT_PATCH_VALUE,
-        ),
-    )
+
+def _write_recycle_shop_tokens(
+    patch: DigimonWorldProcedurePatch,
+    world: DigimonWorldWorld,
+    prices: dict[int, int],
+) -> None:
+    """Recycle Shop per-seed data tokens (mode != off).
+
+    Two sets of writes:
+
+    1. **Extended ITEM_PARA entries (slots 128..134)** in the
+       EXT_ITEM_PARA seed block (via
+       :func:`ext_item_para_slot_bin_offset`; the boot hook copies the
+       block into the relocated table at natural slot positions). One
+       32-byte entry per AP shop slot, carrying the
+       multiworld-resolved AP item name (truncated to 14 chars) and
+       the slot's price per the ``shop_price_mode`` option.
+    2. **AP description strings** at :data:`AP_DESC_STRINGS_BIN_OFFSET`
+       (Cave6). One 64-byte NUL-padded ``"From <player>'s World"``
+       slot per row; the relocated ITEM_DESC_PTR (built by
+       :meth:`relocate_item_desc_ptr`) references these.
+
+    The v1 runtime machinery this writer used to install — the 60-B
+    giveItem wrapper @ 0x80095940, its jal hijack, and the
+    entry_count==7 init-epilogue wrapper — was retired 2026-08-21: the
+    shopsanity builder wrapper + extended giveItem wrapper
+    (:func:`_write_shopsanity_common_tokens`) subsume all three, and
+    the client's runtime array reconciler is gone with them.
+    """
+
+    for i, location_name in enumerate(RECYCLE_SHOP_LOCATION_NAMES):
+        resolved = _resolve_placed_item(world, location_name)
+        if resolved is None:
+            return  # option off — defensive, callers gate already
+        ap_item_name, owner_name = resolved
+
+        slot_id = RECYCLE_SHOP_AP_ITEM_ID_BASE + i
+        patch.write_token(
+            APTokenTypes.WRITE,
+            ext_item_para_slot_bin_offset(slot_id),
+            build_ap_item_para_entry(ap_item_name, prices[slot_id]),
+        )
+        patch.write_token(
+            APTokenTypes.WRITE,
+            AP_DESC_STRINGS_BIN_OFFSET + i * AP_DESC_STRING_MAX_LEN,
+            build_ap_desc_string(owner_name),
+        )
+
+
+def _write_item_shop_tokens(
+    patch: DigimonWorldProcedurePatch,
+    world: DigimonWorldWorld,
+    prices: dict[int, int],
+) -> None:
+    """Item-shop per-seed data tokens (mode != off).
+
+    One 32-byte ext ITEM_PARA entry per AP row (slots 149..173) with
+    the multiworld-resolved AP item name and the slot's price per the
+    ``shop_price_mode`` option. ``meritValue`` stays 0 (the default of
+    :func:`build_ap_item_para_entry`) — a non-zero value would leak
+    the slot into the merit shop's scan. Slots 149..157 land in the
+    Cave6 seed block, 158..173 in the second staging block (routing
+    via :func:`ext_item_para_slot_bin_offset`). Hover descriptions use
+    the shared generic pointer (see :meth:`relocate_item_desc_ptr`).
+    """
+
+    for i, location_name in enumerate(ITEM_SHOP_LOCATION_NAMES):
+        resolved = _resolve_placed_item(world, location_name)
+        if resolved is None:
+            return  # option off — defensive, callers gate already
+        ap_item_name, _owner_name = resolved
+        slot_id = ITEM_SHOP_AP_ITEM_ID_BASE + i
+        patch.write_token(
+            APTokenTypes.WRITE,
+            ext_item_para_slot_bin_offset(slot_id),
+            build_ap_item_para_entry(ap_item_name, prices[slot_id]),
+        )
+
+
+def _write_secret_shop_tokens(
+    patch: DigimonWorldProcedurePatch,
+    world: DigimonWorldWorld,
+    prices: dict[int, int],
+) -> None:
+    """Secret-shop per-seed data tokens (mode != off).
+
+    One 32-byte ext ITEM_PARA entry per AP row (slots 174..185, all in
+    the second staging block), same shape as
+    :func:`_write_item_shop_tokens`.
+    """
+
+    for i, location_name in enumerate(SECRET_SHOP_LOCATION_NAMES):
+        resolved = _resolve_placed_item(world, location_name)
+        if resolved is None:
+            return  # option off — defensive, callers gate already
+        ap_item_name, _owner_name = resolved
+        slot_id = SECRET_SHOP_AP_ITEM_ID_BASE + i
+        patch.write_token(
+            APTokenTypes.WRITE,
+            ext_item_para_slot_bin_offset(slot_id),
+            build_ap_item_para_entry(ap_item_name, prices[slot_id]),
+        )
 
 
 def _write_merit_shop_locations_tokens(
     patch: DigimonWorldProcedurePatch,
     world: DigimonWorldWorld,
+    *,
+    replace: bool,
 ) -> None:
     """Write all Merit Shop AP-randomization tokens for the seed.
+
+    Merit modes are data-only (lab-validated): ``replace`` emits the 14
+    vanilla-item meritValue zero-outs (set 3 below) so the vanilla rows
+    disappear; ``coexist`` omits exactly those tokens and everything
+    else is identical — vanilla rows stay purchasable through the ext
+    wrapper's fall-through, next to the AP rows (28-row list validated
+    in the lab). Slot 117 (Amazing rod) stays zeroed always-on either
+    way, via :func:`_write_merit_shop_wrapper_tokens`.
 
     Six sets of writes (only when
     :class:`worlds.digimon_world.options.MeritShopLocations` is on):
@@ -2059,23 +2195,12 @@ def _write_merit_shop_locations_tokens(
     idempotent for both).
     """
 
-    multiworld = world.multiworld
-    player = world.player
-
     # 1. Extended ITEM_PARA entries + 2. AP description strings.
     for i, location_name in enumerate(MERIT_SHOP_LOCATION_NAMES):
-        try:
-            location = multiworld.get_location(location_name, player)
-        except KeyError:
+        resolved = _resolve_placed_item(world, location_name)
+        if resolved is None:
             return  # option off — defensive, callers gate already
-
-        placed = location.item
-        if placed is None:
-            ap_item_name = "AP Item"
-            owner_name = multiworld.player_name[player]
-        else:
-            ap_item_name = placed.name
-            owner_name = multiworld.player_name[placed.player]
+        ap_item_name, owner_name = resolved
 
         slot_id = MERIT_SHOP_AP_ITEM_ID_BASE + i
         _vanilla_id, _vanilla_name, vanilla_merit = MERIT_SHOP_VANILLA_ENTRIES[i]
@@ -2111,18 +2236,20 @@ def _write_merit_shop_locations_tokens(
             desc_bytes,
         )
 
-    # 3. Vanilla-item meritValue zero-outs (14 sites).
-    zero_merit = b"\x00\x00"
-    for vanilla_id, _name, _merit in MERIT_SHOP_VANILLA_ENTRIES:
-        merit_byte_offset = (
-            vanilla_id * ROM_ITEM_TABLE_ENTRY_SIZE
-            + ITEM_PARA_MERIT_VALUE_OFFSET
-        )
-        patch.write_token(
-            APTokenTypes.WRITE,
-            _table_byte_to_bin_flat(merit_byte_offset),
-            zero_merit,
-        )
+    # 3. Vanilla-item meritValue zero-outs (14 sites) — replace mode
+    #    only. Coexist keeps the vanilla rows visible and purchasable.
+    if replace:
+        zero_merit = b"\x00\x00"
+        for vanilla_id, _name, _merit in MERIT_SHOP_VANILLA_ENTRIES:
+            merit_byte_offset = (
+                vanilla_id * ROM_ITEM_TABLE_ENTRY_SIZE
+                + ITEM_PARA_MERIT_VALUE_OFFSET
+            )
+            patch.write_token(
+                APTokenTypes.WRITE,
+                _table_byte_to_bin_flat(merit_byte_offset),
+                zero_merit,
+            )
 
     # 4. Extended wrapper bytes.
     patch.write_token(
@@ -2221,7 +2348,7 @@ def _assemble_procedure(
     """Mutate the per-instance procedure to include opt-in extension steps.
 
     Order: ``verify_rom_hash`` -> ``apply_tokens`` ->
-    ``relocate_item_desc_ptr`` (if recycle shop on) -> any opt-in
+    ``relocate_item_desc_ptr`` (if any shop mode != off) -> any opt-in
     shufflers in declaration order -> ``recalc_edc``.
 
     The shufflers operate independently (one rewrites map-spawn item
@@ -2349,15 +2476,31 @@ def write_patch(world: DigimonWorldWorld, output_directory: str) -> None:
     )
     if int(options.vending_locations.value):
         _write_vending_tokens(patch, world)
-    do_recycle_shop = bool(int(options.recycle_shop_locations.value))
-    if do_recycle_shop:
-        _write_recycle_shop_tokens(patch, world)
-    do_merit_shop = bool(int(options.merit_shop_locations.value))
-    if do_merit_shop:
-        # Must run AFTER _write_merit_shop_wrapper_tokens (always-on)
-        # because it overrides the same 4-byte jal-hijack site. Token
-        # order = insertion order, so this placement is sufficient.
-        _write_merit_shop_locations_tokens(patch, world)
+
+    # Shopsanity (recycle / item / secret / merit, each off | coexist |
+    # replace). The common infrastructure — extended boot hook, builder
+    # wrapper, extended giveItem wrapper, config, desc-ptr callsites,
+    # icon clamp — is emitted whenever ANY shop mode != off; each
+    # enabled shop then adds its per-seed ext ITEM_PARA entries. Must
+    # run AFTER _write_item_para_relocation_tokens (the extended hook
+    # token overwrites the base hook token; ext entries overwrite the
+    # seed zero-fill) and, for merit, AFTER
+    # _write_merit_shop_wrapper_tokens (jal-hijack override site).
+    from .options import get_shop_modes
+    shop_modes = get_shop_modes(options)
+    if shop_modes.any_enabled:
+        _write_shopsanity_common_tokens(patch, shop_modes)
+        prices = _resolve_shop_prices(world)
+        if shop_modes.recycle:
+            _write_recycle_shop_tokens(patch, world, prices)
+        if shop_modes.item:
+            _write_item_shop_tokens(patch, world, prices)
+        if shop_modes.secret:
+            _write_secret_shop_tokens(patch, world, prices)
+        if shop_modes.merit:
+            _write_merit_shop_locations_tokens(
+                patch, world, replace=shop_modes.merit == SHOP_MODE_REPLACE,
+            )
 
     do_shuffle_ground_items = bool(int(options.randomize_ground_items.value))
     do_shuffle_starters = bool(int(options.randomize_starter.value))
@@ -2369,7 +2512,7 @@ def write_patch(world: DigimonWorldWorld, output_directory: str) -> None:
         patch,
         shuffle_ground_items=do_shuffle_ground_items,
         shuffle_starters=do_shuffle_starters,
-        relocate_item_desc_ptr=(do_recycle_shop or do_merit_shop),
+        relocate_item_desc_ptr=shop_modes.any_enabled,
     )
 
     patch.write_file("token_data.bin", patch.get_token_binary())

@@ -116,15 +116,10 @@ from .data.addresses import (
     MERIT_SHOP_LOCATION_RAM_BITS,
     NANIMON_QUEST_LOCATION_RAM_BITS,
     ITEM_PARA_RELOC_BASE,
-    RAM_RECYCLE_SHOP_GP_SLOT,
-    RECYCLE_SHOP_AP_ITEM_ID_BASE,
-    RECYCLE_SHOP_AP_ITEM_ID_COUNT,
-    RECYCLE_SHOP_ENTRY_COUNT,
-    RECYCLE_SHOP_LOCATION_NAMES,
+    ITEM_SHOP_LOCATION_RAM_BITS,
     RECYCLE_SHOP_LOCATION_RAM_BITS,
-    RECYCLE_SHOP_OBJ_ENTRY_COUNT_OFFSET,
-    RECYCLE_SHOP_OBJ_LIST_PTR_OFFSET,
     ROM_ITEM_TABLE_ENTRY_SIZE,
+    SECRET_SHOP_LOCATION_RAM_BITS,
     RAM_CURRENT_BITS,
     RAM_CURRENT_BRAINS,
     RAM_CURRENT_DEFENSE,
@@ -461,6 +456,8 @@ LOCATION_RAM_BITS: dict[str, tuple[int, int]] = {
     **VENDING_LOCATION_RAM_BITS,
     **RECYCLE_SHOP_LOCATION_RAM_BITS,
     **MERIT_SHOP_LOCATION_RAM_BITS,
+    **ITEM_SHOP_LOCATION_RAM_BITS,
+    **SECRET_SHOP_LOCATION_RAM_BITS,
     **NANIMON_QUEST_LOCATION_RAM_BITS,
     **ARENA_CUP_LOCATION_RAM_BITS,
     **BOSS_LOCATION_RAM_BITS,
@@ -982,12 +979,6 @@ class DigimonWorldClient:
         # when ``goal == prosperity``. ``None`` = not yet received from
         # slot_data — until then the goal check is a no-op.
         self._prosperity_goal: int | None = None
-        # Recycle shop runtime patcher gate. Driven by slot_data; off
-        # by default. When False, the runtime array reconciler is a
-        # no-op, the trigger byte still flips iff the wrapper fires
-        # (which only happens when the option is on at gen time, so
-        # this is doubly safe).
-        self._recycle_shop_locations: bool | None = None
         # Fishing locations: opt-in. When True, the watcher tracks
         # per-fish inventory counts each tick and fires a fish AP
         # location whenever the count increases while the player is on
@@ -1117,12 +1108,6 @@ class DigimonWorldClient:
             )
         if self._god_mode is None and ctx.slot_data is not None:
             self._god_mode = bool(ctx.slot_data.get("god_mode", 0))
-        if self._recycle_shop_locations is None and ctx.slot_data is not None:
-            # Default off matches the ROM-patcher default — pre-Phase-10
-            # seeds (where the option didn't exist) get no runtime patch.
-            self._recycle_shop_locations = bool(
-                ctx.slot_data.get("recycle_shop_locations", 0),
-            )
         if self._fishing_locations is None and ctx.slot_data is not None:
             # Default off — pre-fishing seeds get no per-tick inventory
             # scan.
@@ -1150,8 +1135,12 @@ class DigimonWorldClient:
             await self._reconcile_region_gate_bits(ctx)
             await self._reconcile_technique_bits(ctx)
             await self._reconcile_merit_shop_sentinel(ctx)
-            if self._recycle_shop_locations:
-                await self._reconcile_recycle_shop_array(ctx)
+            # The recycle-shop runtime array reconciler was removed
+            # 2026-08-21: the shopsanity builder wrapper renders the AP
+            # rows synchronously at shop-open (lab-validated), so the
+            # client-side poll is superseded. The merit sentinel
+            # reconciler above is still load-bearing (post-purchase
+            # meritValue bump survives save/reload).
             await self._wipe_chest_sentinels(ctx)
             if self._fast_drimogemon:
                 await self._enforce_fast_drimogemon(ctx)
@@ -1399,109 +1388,6 @@ class DigimonWorldClient:
                 )
             except bizhawk.RequestFailedError:
                 return
-
-    async def _reconcile_recycle_shop_array(self, ctx: DigimonWorldClientContext) -> None:
-        """Rewrite the runtime recycle-shop item-list array when open.
-
-        The recycle shop's vanilla [id, flag] * 7 array is reconstructed
-        by the engine each time the shop opens (see
-        docs/recycle_shop_implementation_plan.md §1c — we never traced
-        the construction path, so static patching is not possible).
-        Instead we poll every tick: when the shop_obj at gp-0x6BC4 is
-        live AND its entry_count is 7 (the recycle shop's fingerprint),
-        overwrite the runtime array with our extended IDs
-        [128,1, 129,1, ..., 134,1] so the renderer reads slots 128..134
-        of (extended) ITEM_PARA — i.e. the AP item names + prices the
-        patcher wrote at gen time.
-
-        Idempotent: only writes when the first byte of the array isn't
-        already the AP base id.
-
-        Frame-rate budget: 3 small reads (4 + 1 + 4 bytes), conditional
-        14-byte write. The merit-shop reconciler runs the same shape.
-        """
-
-        if not RECYCLE_SHOP_LOCATION_NAMES:
-            return
-
-        # 1. Read shop_obj pointer (kuseg) from gp-0x6BC4.
-        try:
-            gp_data = (await bizhawk.read(
-                ctx.bizhawk_ctx,
-                [(RAM_RECYCLE_SHOP_GP_SLOT, 4, DOMAIN_MAIN_RAM)],
-            ))[0]
-        except bizhawk.RequestFailedError:
-            return
-        if not gp_data or len(gp_data) != 4:
-            return
-        shop_obj_kuseg = int.from_bytes(gp_data, "little")
-        # NULL or out-of-range → no shop open.
-        if shop_obj_kuseg < 0x80000000 or shop_obj_kuseg >= 0x80200000:
-            return
-        shop_obj_bare = shop_obj_kuseg - 0x80000000
-
-        # 2. Read entry_count (u8) from shop_obj+8. If != 7 it's some
-        #    other shop (merit, file-city money shops) — skip.
-        try:
-            ec_data = (await bizhawk.read(
-                ctx.bizhawk_ctx,
-                [(
-                    shop_obj_bare + RECYCLE_SHOP_OBJ_ENTRY_COUNT_OFFSET,
-                    1,
-                    DOMAIN_MAIN_RAM,
-                )],
-            ))[0]
-        except bizhawk.RequestFailedError:
-            return
-        if not ec_data or ec_data[0] != RECYCLE_SHOP_ENTRY_COUNT:
-            return
-
-        # 3. Read item_list_ptr (u32 kuseg) from shop_obj+0.
-        try:
-            ilp_data = (await bizhawk.read(
-                ctx.bizhawk_ctx,
-                [(
-                    shop_obj_bare + RECYCLE_SHOP_OBJ_LIST_PTR_OFFSET,
-                    4,
-                    DOMAIN_MAIN_RAM,
-                )],
-            ))[0]
-        except bizhawk.RequestFailedError:
-            return
-        if not ilp_data or len(ilp_data) != 4:
-            return
-        item_list_kuseg = int.from_bytes(ilp_data, "little")
-        if item_list_kuseg < 0x80000000 or item_list_kuseg >= 0x80200000:
-            return
-        item_list_bare = item_list_kuseg - 0x80000000
-
-        # 4. Read 14 bytes of the current array. If the first byte is
-        #    already our AP base id, the array is already patched —
-        #    skip the write.
-        try:
-            current = (await bizhawk.read(
-                ctx.bizhawk_ctx,
-                [(item_list_bare, 14, DOMAIN_MAIN_RAM)],
-            ))[0]
-        except bizhawk.RequestFailedError:
-            return
-        if not current or len(current) != 14:
-            return
-        if current[0] == RECYCLE_SHOP_AP_ITEM_ID_BASE:
-            return
-
-        # 5. Build [base+0, 1, base+1, 1, ..., base+6, 1] and write.
-        new_array = bytearray(14)
-        for i in range(RECYCLE_SHOP_AP_ITEM_ID_COUNT):
-            new_array[i * 2] = RECYCLE_SHOP_AP_ITEM_ID_BASE + i
-            new_array[i * 2 + 1] = 0x01
-        try:
-            await bizhawk.write(
-                ctx.bizhawk_ctx,
-                [(item_list_bare, list(new_array), DOMAIN_MAIN_RAM)],
-            )
-        except bizhawk.RequestFailedError:
-            return
 
     async def _reconcile_keyitem_flags(self, ctx: DigimonWorldClientContext) -> None:
         """Pin key-item trigger bits to AP-delivered state each tick.

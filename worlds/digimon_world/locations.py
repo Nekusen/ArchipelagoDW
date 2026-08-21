@@ -15,6 +15,8 @@ the same way:
 * ``69_059_xxx`` — Nanimon Quest sites (5, always on)
 * ``69_060_xxx`` — Arena Cup grade-tier wins (20 = 5 tiers x 4 checks, always on)
 * ``69_061_xxx`` — Boss-defeat events (always on)
+* ``69_062_xxx`` — item shop AP rows (25, opt-in via :class:`worlds.digimon_world.options.ItemShopLocations`)
+* ``69_063_xxx`` — secret shop AP rows (12, opt-in via :class:`worlds.digimon_world.options.SecretShopLocations`)
 
 Locked v1 MVP scope: chests + recruits + starter. NPC-gift "K Prosperity"
 locations are gone — prosperity is now a real AP item shipped in the
@@ -44,9 +46,11 @@ from .data.addresses import (
     BOSS_LOCATION_RAM_BITS,
     CARD_LOCATION_NIBBLES,
     FISHING_LOCATION_NAMES,
+    ITEM_SHOP_LOCATION_NAMES,
     MERIT_SHOP_LOCATION_NAMES,
     NANIMON_QUEST_LOCATION_RAM_BITS,
     RECYCLE_SHOP_LOCATION_NAMES,
+    SECRET_SHOP_LOCATION_NAMES,
     VENDING_LOCATION_NAMES,
     VENDING_LOCATION_REGIONS,
 )
@@ -538,6 +542,46 @@ assert len(_MERIT_SHOP_LOCATIONS) == 14, len(_MERIT_SHOP_LOCATIONS)
 
 
 # =============================================================================
+# Item-shop locations (25, opt-in)
+# =============================================================================
+# The File City item shop (market stall screens 181..188 + shop building
+# screen 216 — both front the same in-game shop backend). 25 AP rows,
+# revealed by the ``Progressive Item Shop`` ladder (5 / 15 / 25 rows at
+# tiers 1 / 2 / 3); :mod:`.rules` gates each tier's row group on the
+# matching Progressive count. Region = ``File City``. Included when
+# :class:`worlds.digimon_world.options.ItemShopLocations` != off.
+#
+# Patch wiring lives in the "Shopsanity" section of
+# :mod:`worlds.digimon_world.data.addresses` and
+# :func:`rom._write_shopsanity_tokens`.
+
+_ITEM_SHOP_LOCATIONS: Final[dict[str, LocationEntry]] = {
+    name: LocationEntry(69_062_000 + i, "File City")
+    for i, name in enumerate(ITEM_SHOP_LOCATION_NAMES)
+}
+assert len(_ITEM_SHOP_LOCATIONS) == 25, len(_ITEM_SHOP_LOCATIONS)
+
+
+# =============================================================================
+# Secret-shop locations (12, opt-in)
+# =============================================================================
+# The Secret Item Shop in the sewer under File City's second item shop
+# (screen 217). 3 AP rows per clerk (Numemon / Mojyamon / Mamemon /
+# Devimon) — the clerk on duty rotates as the player re-enters. Region =
+# ``File City``; :mod:`.rules` gates the clerk pools on ``Progressive
+# Secret Shop`` (x1 for Numemon/Mojyamon, x2 for Mamemon/Devimon) AND
+# ``Progressive Item Shop`` x2 (the sewer is only reachable through the
+# second item shop — same dependency as the Ninjamon rule). Included
+# when :class:`worlds.digimon_world.options.SecretShopLocations` != off.
+
+_SECRET_SHOP_LOCATIONS: Final[dict[str, LocationEntry]] = {
+    name: LocationEntry(69_063_000 + i, "File City")
+    for i, name in enumerate(SECRET_SHOP_LOCATION_NAMES)
+}
+assert len(_SECRET_SHOP_LOCATIONS) == 12, len(_SECRET_SHOP_LOCATIONS)
+
+
+# =============================================================================
 # Fishing locations (6, opt-in)
 # =============================================================================
 # Each of DW1's 6 catchable fish (Digianchovy / Digisnapper / DigiTrout /
@@ -679,6 +723,8 @@ _LOCATION_TABLE: Final[dict[str, LocationEntry]] = {
     **_VENDING_LOCATIONS,
     **_RECYCLE_SHOP_LOCATIONS,
     **_MERIT_SHOP_LOCATIONS,
+    **_ITEM_SHOP_LOCATIONS,
+    **_SECRET_SHOP_LOCATIONS,
     **_FISHING_LOCATIONS,
     **_NANIMON_QUEST_LOCATIONS,
     **_ARENA_CUP_LOCATIONS,
@@ -697,6 +743,8 @@ LOCATION_NAME_GROUPS: Final[dict[str, set[str]]] = {
     "Vending": set(_VENDING_LOCATIONS),
     "Recycle Shop": set(_RECYCLE_SHOP_LOCATIONS),
     "Merit Shop": set(_MERIT_SHOP_LOCATIONS),
+    "Item Shop": set(_ITEM_SHOP_LOCATIONS),
+    "Secret Shop": set(_SECRET_SHOP_LOCATIONS),
     "Fishing": set(_FISHING_LOCATIONS),
     "Nanimon Quest": set(_NANIMON_QUEST_LOCATIONS),
     "Arena Cup": set(_ARENA_CUP_LOCATIONS),
@@ -729,9 +777,19 @@ def create_all_locations(world: DigimonWorldWorld) -> None:
     if not int(world.options.recycle_shop_locations.value):
         skip_locations.update(_RECYCLE_SHOP_LOCATIONS)
     # MeritShopLocations: opt-in, default off. When off, the 14
-    # merit shop AP locations are excluded from the pool.
+    # merit shop AP locations are excluded from the pool. (For the
+    # four shop options, coexist (1) and replace (2) both include the
+    # same AP locations — only the ROM-side vanilla stock differs.)
     if not int(world.options.merit_shop_locations.value):
         skip_locations.update(_MERIT_SHOP_LOCATIONS)
+    # ItemShopLocations: opt-in, default off. When off, the 25 item
+    # shop AP locations are excluded from the pool.
+    if not int(world.options.item_shop_locations.value):
+        skip_locations.update(_ITEM_SHOP_LOCATIONS)
+    # SecretShopLocations: opt-in, default off. When off, the 12
+    # secret shop AP locations are excluded from the pool.
+    if not int(world.options.secret_shop_locations.value):
+        skip_locations.update(_SECRET_SHOP_LOCATIONS)
     # FishingLocations: opt-in, default off. When off, the 6 fishing
     # AP locations are excluded from the pool.
     if not int(world.options.fishing_locations.value):

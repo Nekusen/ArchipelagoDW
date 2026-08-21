@@ -289,17 +289,48 @@ class TestRecycleShopPatcherOn(DigimonWorldTestBase):
             self.assertIn(addiu_off, self.observed)
             self.assertEqual(self.observed[addiu_off], addiu_bytes)
 
-    def test_wrapper_body_present(self) -> None:
-        self.assertIn(ROM_RECYCLE_SHOP_WRAPPER_OFFSET, self.observed)
-        self.assertEqual(self.observed[ROM_RECYCLE_SHOP_WRAPPER_OFFSET],
-                         ROM_RECYCLE_SHOP_WRAPPER_BYTES)
+    def test_shopsanity_wrappers_present(self) -> None:
+        # Shopsanity era (2026-08-21): the recycle shop rides the shared
+        # builder wrapper + extended giveItem wrapper instead of the
+        # retired v1 60-B wrapper / init-epilogue wrapper.
+        from ..data.addresses import (
+            SHOP_AP_BUILDER_WRAPPER_BYTES,
+            SHOP_AP_BUILDER_WRAPPER_OFFSET,
+            SHOP_AP_GIVEITEM_EXT_BYTES,
+            SHOP_AP_GIVEITEM_EXT_OFFSET,
+        )
+        self.assertEqual(
+            self.observed[SHOP_AP_BUILDER_WRAPPER_OFFSET], SHOP_AP_BUILDER_WRAPPER_BYTES,
+        )
+        self.assertEqual(
+            self.observed[SHOP_AP_GIVEITEM_EXT_OFFSET], SHOP_AP_GIVEITEM_EXT_BYTES,
+        )
 
-    def test_jal_hijack_present(self) -> None:
+    def test_jal_hijack_targets_extended_wrapper(self) -> None:
+        # Same callsite the v1 wrapper hijacked (0x800FB410), now
+        # redirected to the extended giveItem wrapper.
+        from ..data.addresses import SHOP_AP_GIVEITEM_JAL_VALUE
         self.assertIn(ROM_RECYCLE_SHOP_PATCH_OFFSET, self.observed)
         self.assertEqual(
             struct.unpack("<I", self.observed[ROM_RECYCLE_SHOP_PATCH_OFFSET])[0],
-            ROM_RECYCLE_SHOP_PATCH_VALUE,
+            SHOP_AP_GIVEITEM_JAL_VALUE,
         )
+
+    def test_retired_v1_wrapper_tokens_absent(self) -> None:
+        # The v1 60-B giveItem wrapper and the entry_count==7 init
+        # epilogue wrapper are retired — their bytes must never be
+        # emitted again (their Cave6 space is freed for future use).
+        from ..data.addresses import (
+            ROM_RECYCLE_SHOP_INIT_PATCH_OFFSET,
+            ROM_RECYCLE_SHOP_INIT_WRAPPER_OFFSET,
+        )
+        self.assertNotIn(ROM_RECYCLE_SHOP_WRAPPER_OFFSET, self.observed)
+        self.assertNotIn(ROM_RECYCLE_SHOP_INIT_WRAPPER_OFFSET, self.observed)
+        self.assertNotIn(ROM_RECYCLE_SHOP_INIT_PATCH_OFFSET, self.observed)
+        # ... and no token anywhere carries the old jal value.
+        old_jal = struct.pack("<I", ROM_RECYCLE_SHOP_PATCH_VALUE)
+        for _t, _off, data in self.tokens:
+            self.assertNotEqual(data, old_jal)
 
     def test_relocate_extension_in_procedure(self) -> None:
         names = [step[0] for step in self.procedure]
@@ -349,11 +380,16 @@ class TestRecycleShopPatcherOff(DigimonWorldTestBase):
 
 
 # =============================================================================
-# Wrapper bytecode shape
+# Wrapper bytecode shape (RETIRED v1 wrapper — constants only)
 # =============================================================================
 
 
 class TestRecycleShopWrapper(DigimonWorldTestBase):
+    """The v1 60-B wrapper is RETIRED (2026-08-21, superseded by the
+    shopsanity extended giveItem wrapper) and never emitted anymore —
+    these tests only pin the historical constants so the freed Cave6
+    region's documentation stays accurate."""
+
     options: ClassVar[dict[str, Any]] = {}
 
     def test_wrapper_size(self) -> None:

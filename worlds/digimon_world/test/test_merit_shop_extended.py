@@ -307,7 +307,10 @@ class _CapturedPatch:
 
 
 class TestMeritShopPatcherOn(DigimonWorldTestBase):
-    options: ClassVar[dict[str, Any]] = {"merit_shop_locations": 1}
+    # ``replace`` = the legacy "on" behavior (vanilla meritValue
+    # zero-outs emitted). Coexist-mode emission is covered by
+    # test_shopsanity.py's option matrix.
+    options: ClassVar[dict[str, Any]] = {"merit_shop_locations": "replace"}
 
     def setUp(self) -> None:
         super().setUp()
@@ -634,14 +637,17 @@ class TestExtSeedSegment(unittest.TestCase):
             EXT_ITEM_PARA_SEED_RAM + EXT_ITEM_PARA_SEED_SIZE, 0x80097000,
         )
 
-    def test_ext_slot_helper_is_single_segment(self) -> None:
+    def test_ext_slot_helper_routes_both_seed_segments(self) -> None:
         from ..data.addresses import (
             EXT_ITEM_PARA_SEED_BIN_OFFSET,
             EXT_ITEM_PARA_SEED_SLOT_LAST,
+            SHOP_AP_STAGING2_BIN_OFFSET,
+            SHOP_AP_STAGING2_SLOT_BASE,
+            SHOP_AP_STAGING2_SLOT_LAST,
             ext_item_para_slot_bin_offset,
         )
-        # Slot 128 = seed base; every subsequent slot is contiguous
-        # (+32) — no freed-desc / Cave6 split anymore.
+        # Slot 128 = seed base; every subsequent seed-block slot is
+        # contiguous (+32) — no freed-desc / Cave6 split anymore.
         self.assertEqual(
             ext_item_para_slot_bin_offset(128), EXT_ITEM_PARA_SEED_BIN_OFFSET,
         )
@@ -651,11 +657,23 @@ class TestExtSeedSegment(unittest.TestCase):
                 ext_item_para_slot_bin_offset(slot - 1) + 32,
                 f"slot {slot} not contiguous with slot {slot - 1}",
             )
+        # Slots 158..185 (shopsanity, 2026-08-21) route to the second
+        # .bin-backed staging block — contiguous within it.
+        self.assertEqual(
+            ext_item_para_slot_bin_offset(SHOP_AP_STAGING2_SLOT_BASE),
+            SHOP_AP_STAGING2_BIN_OFFSET,
+        )
+        for slot in range(SHOP_AP_STAGING2_SLOT_BASE + 1, SHOP_AP_STAGING2_SLOT_LAST + 1):
+            self.assertEqual(
+                ext_item_para_slot_bin_offset(slot),
+                ext_item_para_slot_bin_offset(slot - 1) + 32,
+                f"slot {slot} not contiguous with slot {slot - 1}",
+            )
         # Out-of-range slots reject on both sides.
         with self.assertRaises(ValueError):
             ext_item_para_slot_bin_offset(127)
         with self.assertRaises(ValueError):
-            ext_item_para_slot_bin_offset(EXT_ITEM_PARA_SEED_SLOT_LAST + 1)
+            ext_item_para_slot_bin_offset(SHOP_AP_STAGING2_SLOT_LAST + 1)
 
     def test_merit_slots_fit_inside_seed_segment(self) -> None:
         from ..data.addresses import EXT_ITEM_PARA_SEED_SLOT_LAST

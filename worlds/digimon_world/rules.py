@@ -42,7 +42,14 @@ from BaseClasses import ItemClassification, LocationProgressType
 from rule_builder.rules import CanReachRegion, False_, Has
 from worlds.generic.Rules import add_rule
 
-from .data.addresses import ARENA_CUP_TIERS, FISHING_LOCATION_NAMES
+from .data.addresses import (
+    ARENA_CUP_TIERS,
+    FISHING_LOCATION_NAMES,
+    ITEM_SHOP_LOCATION_NAMES,
+    ITEM_SHOP_TIER_COUNTS,
+    SECRET_SHOP_ITEMS_PER_CLERK,
+    SECRET_SHOP_LOCATION_NAMES,
+)
 from .items import PROSPERITY_PER_ITEM
 from .locations import (
     ARENA_CUP_NAMES,
@@ -96,6 +103,7 @@ def set_all_rules(world: DigimonWorldWorld) -> None:
     _set_fishing_rules(world)
     _set_nanimon_quest_rules(world)
     _set_arena_cup_rules(world)
+    _set_shop_rules(world)
     _set_ogremon_quest_chest_rules(world)
     _set_chest_rules(world)
     _apply_pp_cutoffs(world)
@@ -970,6 +978,56 @@ def _set_arena_cup_rules(world: DigimonWorldWorld) -> None:
             world.set_rule(loc, Has(_PROGRESSIVE_ARENA_NAME, count=count))
     # Keep the addresses-side and locations-side tables exercised.
     assert len(ARENA_CUP_NAMES) == len(ARENA_CUP_TIERS) * 4
+
+
+# ---------------------------------------------------------------------------
+# Shopsanity rules (item shop + secret shop)
+# ---------------------------------------------------------------------------
+
+
+def _set_shop_rules(world: DigimonWorldWorld) -> None:
+    """Gate the item-shop and secret-shop AP rows on the Progressive
+    shop ladders.
+
+    * **Item shop** — the in-game shop only shows 5 / 15 / 25 AP rows
+      at Progressive Item Shop tiers 1 / 2 / 3 (the ROM wrapper keys
+      the row count on the tier-marker BEATEN bits the Progressive item
+      delivers). Rules mirror that: rows 1-5 need x1, 6-15 need x2,
+      16-25 need x3.
+    * **Secret shop** — every row needs ``Progressive Item Shop`` x2
+      (the sewer's only physical entrance is through the second item
+      shop — same dependency as the Ninjamon fix in
+      :func:`_ninjamon_extra`) plus ``Progressive Secret Shop``: x1
+      for the Numemon / Mojyamon clerk pools, x2 for Mamemon / Devimon
+      (matches ``items.PROGRESSIVE_BUNDLES`` tier membership — the
+      clerk only shows up for duty once their tier is delivered).
+
+    When the corresponding shop option is off the locations don't
+    exist; the ``KeyError`` guard skips them (same pattern as the
+    arena cup rules).
+    """
+
+    tier1, tier2, _tier3 = ITEM_SHOP_TIER_COUNTS
+    for i, name in enumerate(ITEM_SHOP_LOCATION_NAMES):
+        tier = 1 if i < tier1 else 2 if i < tier1 + tier2 else 3
+        try:
+            location = world.get_location(name)
+        except KeyError:
+            break  # option off — none of the item-shop rows exist
+        world.set_rule(location, Has("Progressive Item Shop", count=tier))
+
+    for i, name in enumerate(SECRET_SHOP_LOCATION_NAMES):
+        clerk = i // SECRET_SHOP_ITEMS_PER_CLERK
+        secret_count = 1 if clerk < 2 else 2
+        try:
+            location = world.get_location(name)
+        except KeyError:
+            break  # option off — none of the secret-shop rows exist
+        world.set_rule(
+            location,
+            Has("Progressive Secret Shop", count=secret_count)
+            & Has("Progressive Item Shop", count=2),
+        )
 
 
 # ---------------------------------------------------------------------------
