@@ -319,13 +319,20 @@ class TestRecycleShopPatcherOn(DigimonWorldTestBase):
     def test_retired_v1_wrapper_tokens_absent(self) -> None:
         # The v1 60-B giveItem wrapper and the entry_count==7 init
         # epilogue wrapper are retired — their bytes must never be
-        # emitted again (their Cave6 space is freed for future use).
+        # emitted again. Their Cave6 space was freed; the init wrapper's
+        # region has since been legitimately reclaimed by the icon-id
+        # table (2026-08-21), so the check is "not the retired BYTES",
+        # not "offset untouched".
         from ..data.addresses import (
             ROM_RECYCLE_SHOP_INIT_PATCH_OFFSET,
+            ROM_RECYCLE_SHOP_INIT_WRAPPER_BYTES,
             ROM_RECYCLE_SHOP_INIT_WRAPPER_OFFSET,
         )
         self.assertNotIn(ROM_RECYCLE_SHOP_WRAPPER_OFFSET, self.observed)
-        self.assertNotIn(ROM_RECYCLE_SHOP_INIT_WRAPPER_OFFSET, self.observed)
+        self.assertNotEqual(
+            self.observed.get(ROM_RECYCLE_SHOP_INIT_WRAPPER_OFFSET),
+            ROM_RECYCLE_SHOP_INIT_WRAPPER_BYTES,
+        )
         self.assertNotIn(ROM_RECYCLE_SHOP_INIT_PATCH_OFFSET, self.observed)
         # ... and no token anywhere carries the old jal value.
         old_jal = struct.pack("<I", ROM_RECYCLE_SHOP_PATCH_VALUE)

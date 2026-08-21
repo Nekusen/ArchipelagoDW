@@ -823,6 +823,16 @@ def create_all_locations(world: DigimonWorldWorld) -> None:
     # patcher emits no §82 neuter token either).
     if not int(world.options.piximon_manual_location.value):
         skip_locations.update(_PIXIMON_MANUAL_LOCATIONS)
+    # Frigimon / Mojyamon recruit locations: opt-OUT toggles, default
+    # on (preserves previous seeds). Both in-game recruit chains are
+    # tedious — Mojyamon's is additionally RNG-gated — so players can
+    # drop the checks. Only the AP locations go away: the recruits'
+    # City-NPC delivery is item-side (Progressive Restaurant T2 /
+    # Progressive Secret Shop T1 bundles) and is not touched here.
+    if not int(world.options.frigimon_recruit_location.value):
+        skip_locations.add("Frigimon")
+    if not int(world.options.mojyamon_recruit_location.value):
+        skip_locations.add("Mojyamon")
     # ChestRandomization: default ON. When OFF, the 65 chest AP
     # locations are excluded from the pool — chests retain vanilla
     # items and don't fire AP checks.

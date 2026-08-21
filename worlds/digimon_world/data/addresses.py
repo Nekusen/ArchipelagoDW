@@ -4569,57 +4569,237 @@ AP_ITEM_DESC_PTR_BIN_OFFSET: Final = _table_byte_to_bin_flat(
 AP_ITEM_DESC_PTR_VALUE: Final = 0x80000000 | AP_ITEM_DESC_RAM
 ROM_AP_ITEM_DESC_PTR_PATCH_FORMAT: Final = "<I"
 
-# --- ITEM.TIM icon blanking ------------------------------------------------
+# --- ITEM.TIM: AP logo icon for slot 83 -------------------------------------
 #
-# ITEM.TIM is a separate file in the disc filesystem
-# (``DIGIMON/ETCDAT/ITEM.TIM``). Its data starts at LBA 7470 in the
-# .bin (= ``LBA * 2352 + 24`` = bin offset 0x010C16B8). The TIM
-# header is 8 bytes; the CLUT block is 780 bytes (24 CLUTs × 16
-# colors × 2 bytes + 12-byte block header); the pixel block header is
-# 12 bytes. So pixel data starts at TIM file offset 800 (= 0x320).
+# The item-icon TIM exists TWICE on the disc, byte-identical in vanilla
+# (verified 2026-08-21; every patch below must hit both copies):
 #
-# Pixel data is 4bpp (2 pixels per byte), arranged as a 256x128
-# texture (16 cols × 8 rows of 16x16 icons). Each scanline is
-# 256 / 2 = 128 bytes. Item N's icon occupies the 16x16 block at
-# pixel coords (col*16, row*16) where col = N%16, row = N/16.
+# * the standalone file ``DIGIMON/ETCDAT/ITEM.TIM`` at LBA 7470
+#   (data start = ``LBA * 2352 + 24`` = bin offset 0x010C16B8);
+# * a copy embedded inside ``DIGIMON/ETCDAT/ETCTIM.BIN`` (the boot-time
+#   UI texture bundle, LBA 7376) at file offset 74592 (bin offset
+#   0x010A0538, mid-sector). **This embedded copy is the one the game
+#   actually uploads to VRAM** — live evidence 2026-08-21: with only
+#   the standalone file patched, a patched-ISO boot still rendered the
+#   vanilla Electo Ring icon for slot 83 while the SLUS-side
+#   ITEM_CLUT_DATA redirect was verifiably active in RAM, and the
+#   vanilla tile bytes existed on disc only in ETCTIM.BIN. (This also
+#   means the pre-logo "icon blanking" of the standalone file alone
+#   never actually showed in-game.)
 #
-# For each of the 16 rows of the icon, the 8 bytes (= 16 px wide × 4bpp)
-# live at file offset:
-#   PIXEL_DATA_OFFSET + (row*16 + r) * 128 + col * 8
-# for r in 0..15. We sector-translate each row offset to a .bin offset
-# (file offsets cross sector boundaries every 2048 bytes of user data).
+# TIM layout (both copies; verified against the canonical dump):
+#
+# * TIM header, 8 bytes: magic ``0x10``, flags ``0x08`` (4bpp + CLUT).
+# * CLUT block, 780 bytes: 12-byte block header (u32 length=780,
+#   DX=224, DY=488, W=16, H=24) + 24 CLUTs x 16 colors x 2 bytes.
+#   Colors are PSX 15-bit (bits 0-4 R, 5-9 G, 10-14 B, bit 15 STP);
+#   raw 0x0000 renders fully transparent. The block is uploaded to
+#   VRAM at (224, 488), one CLUT per VRAM row.
+# * Pixel block: 12-byte header, then 4bpp pixel data at TIM file
+#   offset 800 — a 256x128 texture (16 cols x 8 rows of 16x16 icons),
+#   128 bytes per scanline, LOW nibble = LEFT pixel. Item N's icon is
+#   the 16x16 block at (col*16, row*16), col = N%16, row = N/16.
+#
+# Icon rendering (``InventoryUI.cpp:setItemTexture`` in
+# references/DW1-SydPatches): UV from (col, row) as above; the CLUT is
+# ``getClut(0xE0, ITEM_CLUT_DATA[item_id] + 0x1E8)`` — i.e. the
+# per-item byte table ``ITEM_CLUT_DATA`` (see further below, after
+# ``_slus_ram_to_bin_offset`` is available) selects one of the 24 CLUT
+# rows. Because the icon clamp wrapper rewrites ``item_id`` to 83
+# *before* the function body runs, extended AP slots (128+) use both
+# slot 83's tile AND slot 83's CLUT.
+#
+# Slot 83 (vanilla Electo Ring, unobtainable, repurposed as the "AP
+# Item" sentinel) used to get its tile blanked here. It now gets a
+# 16x16 Archipelago logo instead: six colored circles in the AP hex
+# ring. Vanilla CLUT 16 (Electo Ring's palette, shared with 5 other
+# items) is a monochrome gold ramp, so the logo also needs a palette:
+# CLUT 22's sole consumer is item 84 (Rainbowhorn), so the patcher
+# moves Rainbowhorn to CLUT 8 (requantizing its pixels at apply time —
+# see :meth:`worlds.digimon_world.rom.DigimonWorldPatchExtension.requantize_rainbowhorn`),
+# rewrites CLUT 22 with the AP palette below, and repoints
+# ``ITEM_CLUT_DATA[83]`` from 16 to 22.
 
 ITEM_TIM_LBA: Final = 7470
+ETCTIM_BIN_LBA: Final = 7376
+ITEM_TIM_IN_ETCTIM_FILE_OFFSET: Final = 74592
+ITEM_TIM_SIZE_BYTES: Final = 17184
 ITEM_TIM_PIXEL_DATA_FILE_OFFSET: Final = 800
+ITEM_TIM_CLUT_DATA_FILE_OFFSET: Final = 8 + 12  # TIM header + CLUT block header
+ITEM_TIM_CLUT_COUNT: Final = 24
+ITEM_TIM_CLUT_SIZE_BYTES: Final = 32  # 16 colors x u16
+
+# Flat .bin offset of TIM file byte 0, for each on-disc copy. Order:
+# standalone ITEM.TIM first, embedded ETCTIM.BIN copy second.
+ITEM_TIM_COPY_BASE_BIN_OFFSETS: Final = (
+    ITEM_TIM_LBA * SECTOR_SIZE_BYTES + SECTOR_HEADER_BYTES,
+    _flat_to_user_data(
+        ETCTIM_BIN_LBA * SECTOR_SIZE_BYTES + SECTOR_HEADER_BYTES,
+        ITEM_TIM_IN_ETCTIM_FILE_OFFSET,
+    ),
+)
+assert ITEM_TIM_COPY_BASE_BIN_OFFSETS == (0x010C16B8, 0x010A0538)
 
 AP_ITEM_ICON_INDEX: Final = 83
-AP_ITEM_ICON_ROW_BYTES: Final = bytes(8)  # 16 transparent pixels per icon row
 
 
-def _ap_item_icon_blank_offsets() -> tuple[int, ...]:
-    """Per-row .bin offsets for item 117's 16 icon rows (16x16 4bpp).
+def item_tim_tile_row_bin_offsets(slot: int) -> tuple[tuple[int, ...], ...]:
+    """Per-copy tuples of the 16 per-row .bin offsets for item ``slot``.
 
-    Sector-aware: each row's 8-byte chunk lives at a different sector
-    when the surrounding scanline crosses a 2048-byte user-data
-    boundary.
+    Each icon row is 8 bytes (16 px x 4bpp) at TIM file offset
+    ``PIXEL_DATA_OFFSET + (row*16 + r) * 128 + col * 8``. Offsets are
+    sector-aware (:func:`_flat_to_user_data` hops the Mode2/2352 EC
+    blocks); an assert below guarantees no 8-byte row write straddles a
+    sector's user-data window in either copy.
     """
 
-    col = AP_ITEM_ICON_INDEX % 16
-    row = AP_ITEM_ICON_INDEX // 16
-    out: list[int] = []
-    for r in range(16):
-        scanline_pixel_offset = (row * 16 + r) * 128 + col * 8
-        file_offset = ITEM_TIM_PIXEL_DATA_FILE_OFFSET + scanline_pixel_offset
-        sector_advance, byte_in_sector = divmod(file_offset, USER_DATA_BYTES)
-        out.append(
-            (ITEM_TIM_LBA + sector_advance) * SECTOR_SIZE_BYTES
-            + SECTOR_HEADER_BYTES + byte_in_sector,
+    col, row = slot % 16, slot // 16
+    return tuple(
+        tuple(
+            _flat_to_user_data(
+                base,
+                ITEM_TIM_PIXEL_DATA_FILE_OFFSET + (row * 16 + r) * 128 + col * 8,
+            )
+            for r in range(16)
         )
+        for base in ITEM_TIM_COPY_BASE_BIN_OFFSETS
+    )
+
+
+def item_tim_clut_bin_offsets(clut_index: int) -> tuple[int, ...]:
+    """Per-copy flat .bin offsets of CLUT ``clut_index``'s 32 color bytes."""
+
+    assert 0 <= clut_index < ITEM_TIM_CLUT_COUNT, clut_index
+    return tuple(
+        _flat_to_user_data(
+            base,
+            ITEM_TIM_CLUT_DATA_FILE_OFFSET + clut_index * ITEM_TIM_CLUT_SIZE_BYTES,
+        )
+        for base in ITEM_TIM_COPY_BASE_BIN_OFFSETS
+    )
+
+
+AP_ITEM_ICON_TILE_BIN_OFFSETS: Final = item_tim_tile_row_bin_offsets(
+    AP_ITEM_ICON_INDEX,
+)
+assert len(AP_ITEM_ICON_TILE_BIN_OFFSETS) == 2
+assert all(len(rows) == 16 for rows in AP_ITEM_ICON_TILE_BIN_OFFSETS)
+
+# CLUT geometry facts the patcher relies on:
+AP_ICON_CLUT_INDEX: Final = 22          # rewritten with the AP palette
+RAINBOWHORN_ITEM_ID: Final = 84         # CLUT 22's only vanilla consumer
+RAINBOWHORN_NEW_CLUT_INDEX: Final = 8   # requantization target palette
+
+AP_ICON_CLUT_BIN_OFFSETS: Final = item_tim_clut_bin_offsets(AP_ICON_CLUT_INDEX)
+
+RAINBOWHORN_TILE_BIN_OFFSETS: Final = item_tim_tile_row_bin_offsets(
+    RAINBOWHORN_ITEM_ID,
+)
+
+# No CLUT write (32 B) or tile-row write (8 B) may straddle a sector's
+# 2048-byte user-data window, in either copy.
+for _clut_index in range(ITEM_TIM_CLUT_COUNT):
+    for _off in item_tim_clut_bin_offsets(_clut_index):
+        assert (
+            SECTOR_HEADER_BYTES
+            <= _off % SECTOR_SIZE_BYTES
+            <= SECTOR_HEADER_BYTES + USER_DATA_BYTES - ITEM_TIM_CLUT_SIZE_BYTES
+        ), hex(_off)
+for _rows in (*AP_ITEM_ICON_TILE_BIN_OFFSETS, *RAINBOWHORN_TILE_BIN_OFFSETS):
+    for _off in _rows:
+        assert (
+            SECTOR_HEADER_BYTES
+            <= _off % SECTOR_SIZE_BYTES
+            <= SECTOR_HEADER_BYTES + USER_DATA_BYTES - 8
+        ), hex(_off)
+del _clut_index, _rows, _off
+
+# --- The AP logo art --------------------------------------------------------
+# Original pixel art (not derived from game assets): six circles on the
+# Archipelago hex ring, clockwise from the top: red, orange, yellow,
+# green, blue, purple. Each circle is ~5 px with a lower-right shade arc
+# and a 1-px white highlight; circles keep >= 1 px of transparent
+# spacing so they read at 16x16. Palette channels are multiples of 8
+# (exact 15-bit fit; PSX drops the low 3 bits of each channel).
+
+AP_LOGO_PALETTE: Final[tuple[tuple[int, int, int], ...]] = (
+    (0, 0, 0),        # 0: transparent (raw 0x0000)
+    (16, 16, 24),     # 1: near-black (spare — outlines if ever needed)
+    (216, 40, 40),    # 2: red
+    (136, 16, 24),    # 3: red shade
+    (240, 128, 32),   # 4: orange
+    (168, 80, 16),    # 5: orange shade
+    (248, 216, 48),   # 6: yellow
+    (184, 152, 24),   # 7: yellow shade
+    (64, 168, 64),    # 8: green
+    (24, 112, 40),    # 9: green shade
+    (56, 120, 224),   # 10: blue
+    (24, 72, 160),    # 11: blue shade
+    (152, 88, 200),   # 12: purple
+    (104, 48, 144),   # 13: purple shade
+    (240, 240, 240),  # 14: white highlight
+    (64, 64, 72),     # 15: grey (spare)
+)
+assert len(AP_LOGO_PALETTE) == 16
+assert AP_LOGO_PALETTE[0] == (0, 0, 0)  # index 0 must stay transparent
+assert all(
+    0 <= chan <= 255 and chan % 8 == 0
+    for color in AP_LOGO_PALETTE for chan in color
+)
+
+
+def _pack_clut15(palette: tuple[tuple[int, int, int], ...]) -> bytes:
+    """Pack RGB888 triples into the 32-byte PSX 15-bit CLUT format."""
+
+    out = bytearray()
+    for r, g, b in palette:
+        out += struct.pack("<H", (r >> 3) | ((g >> 3) << 5) | ((b >> 3) << 10))
+    return bytes(out)
+
+
+AP_LOGO_CLUT_BYTES: Final = _pack_clut15(AP_LOGO_PALETTE)
+assert len(AP_LOGO_CLUT_BYTES) == ITEM_TIM_CLUT_SIZE_BYTES
+
+# 16x16 indexed art: one hex digit per pixel (palette index), '.' = 0
+# (transparent). Layout: circle centers on a radius-5.3 hex ring around
+# (7.5, 7.5), circle radius 2.3.
+AP_LOGO_PIXEL_ROWS: Final[tuple[str, ...]] = (
+    ".......22.......",
+    "......2e22......",
+    "......2223......",
+    "..ccc.2233.444..",
+    ".ceccc.33.4e444.",
+    ".ccccd....44445.",
+    ".cccd......4455.",
+    "...d........5...",
+    "...a........6...",
+    ".aeaa......e666.",
+    ".aaaab....66667.",
+    ".aaabb.88.66677.",
+    "..abb.8e88.677..",
+    "......8889......",
+    "......8899......",
+    ".......99.......",
+)
+assert len(AP_LOGO_PIXEL_ROWS) == 16
+assert all(len(row) == 16 for row in AP_LOGO_PIXEL_ROWS)
+
+
+def _pack_tile_rows(rows: tuple[str, ...]) -> tuple[bytes, ...]:
+    """Pack indexed pixel-art rows into 4bpp bytes (low nibble = left)."""
+
+    out: list[bytes] = []
+    for row in rows:
+        indices = [0 if ch == "." else int(ch, 16) for ch in row]
+        out.append(bytes(
+            indices[i] | (indices[i + 1] << 4) for i in range(0, 16, 2)
+        ))
     return tuple(out)
 
 
-AP_ITEM_ICON_BLANK_BIN_OFFSETS: Final = _ap_item_icon_blank_offsets()
-assert len(AP_ITEM_ICON_BLANK_BIN_OFFSETS) == 16
+AP_LOGO_TILE_ROW_BYTES: Final = _pack_tile_rows(AP_LOGO_PIXEL_ROWS)
+assert len(AP_LOGO_TILE_ROW_BYTES) == 16
+assert all(len(row) == 8 for row in AP_LOGO_TILE_ROW_BYTES)
 
 
 # =============================================================================
@@ -6918,13 +7098,16 @@ def _slus_ram_to_bin_offset(ram_addr: int) -> int:
 #   0x800958CD..0x80095900  ~51-byte gap
 #   0x80095900..0x8009593C  combat trampolines tr1+tr2+tr3 (60 B,
 #                            installed only when combat_stat_multiplier > 1)
-#   0x80095940..0x8009597C  recycle shop giveItem wrapper (60 B, opt-in)
+#   0x80095940..0x8009597C  retired v1 recycle giveItem wrapper slot
+#                            (60 B, no longer written — free)
 #   0x80095980..0x80095D80  RELOC_ITEM_DESC_PTR (1024 B, opt-in) <- this section
 #   0x80095D80..0x80095F40  AP_DESC_STRINGS (448 B, opt-in)       <-
 #   0x80095F40..0x80096BCC  tail, claimed piecemeal by later features:
-#     - icon clamp wrapper 0x80095F40..0x80095F5C + recycle init
-#       wrapper 0x80095F5C..0x80095FB8 (both opt-in), then a 72 B
-#       sector-alignment gap up to 0x80096000
+#     - setItemTexture icon-id wrapper 0x80095F40..0x80095F80 (64 B,
+#       ALWAYS-ON, grown 2026-08-21 from the 28-B v1 clamp) + per-slot
+#       icon-id table 0x80095F80..0x80095FBA (58 B, ALWAYS-ON), then a
+#       70 B gap up to 0x80096000. (The retired recycle init-epilogue
+#       wrapper used to sit at 0x80095F5C..0x80095FB8 — reclaimed.)
 #     - merit AP desc strings 0x80096000..0x80096380 and merit-shop
 #       ext wrapper 0x80096380..0x800965BC (both opt-in)
 #     - ITEM_PARA boot seed hook 0x800965BC..0x80096650 (148 B,
@@ -7268,20 +7451,28 @@ ROM_RECYCLE_SHOP_PATCH_VALUE: Final = (
 )
 
 
-# --- setItemTexture clamp wrapper (icon fix for extended ITEM_PARA slots) --
+# --- setItemTexture icon-id wrapper (per-slot icons for ext ITEM_PARA slots) --
 # Vanilla ``setItemTexture`` at RAM 0x800E5DFC computes
 # ``col = item_id % 16; row = item_id / 16`` and reads a 16x16 tile from
 # ITEM.TIM at those grid coordinates. ITEM.TIM is laid out as 16 cols x
 # 8 rows of 16x16 tiles (= 128 tiles total, exactly slots 0..127). Our
-# extended slots 128..134 map to col=0..6, row=8 — OFF the texture, so
-# the renderer reads garbage pixels for AP shop slot icons.
+# extended slots 128..185 map off the texture, so the renderer would
+# read garbage pixels for AP shop slot icons.
 #
-# Fix: install a small trampoline before ``setItemTexture``'s prologue
-# that clamps any ``item_id >= 128`` to slot 83 (the universal "AP Item"
-# slot whose icon is already blanked in ITEM.TIM via
-# :data:`AP_ITEM_ICON_BLANK_BIN_OFFSETS`). After the clamp, the
-# trampoline reproduces the displaced first 2 instructions of
-# ``setItemTexture`` and ``j``s back into the function body.
+# Fix (v2, 2026-08-21 — supersedes the flat "everything -> slot 83"
+# clamp): install a trampoline before ``setItemTexture``'s prologue that
+# rewrites any ``item_id`` in 128..185 through the per-slot
+# :data:`AP_ICON_ID_TABLE_RAM` byte table (``a1 = table[a1 - 128]``).
+# The patcher fills the table at generation time: an ext slot whose
+# AP-placed item is THIS world's own bank-deliverable inventory item
+# (dw_code 2000..2127) gets that item's real ITEM.TIM tile id, so local
+# items keep their native icon in the shop UI; every other slot
+# (progressives, money, PP, recruit/technique items, other players'
+# items) gets :data:`AP_CHEST_SENTINEL_ITEM_ID` (83) — the AP logo
+# tile. Ids >= 186 (impossible) also fall back to 83. Because the
+# rewrite happens before the function body, both the tile UV AND the
+# ``ITEM_CLUT_DATA`` palette lookup follow the substituted id, so a
+# native icon renders with its own palette.
 #
 # Function layout (vanilla):
 #   0x800E5DFC  addiu $sp, $sp, -0x28   <- prologue instr 1 (we hijack)
@@ -7289,22 +7480,39 @@ ROM_RECYCLE_SHOP_PATCH_VALUE: Final = (
 #   0x800E5E04  sw    $s1, 0x1C($sp)    <- where the trampoline returns
 #   ...
 #
-# Wrapper layout (7 instructions / 28 bytes):
-#   sltiu $t0, $a1, RECYCLE_SHOP_AP_ITEM_ID_BASE  ; t0 = (item < 128) ? 1 : 0
-#   bne   $t0, $0, .keep
-#   nop                                            ; bne delay slot
-#   addiu $a1, $0, AP_CHEST_SENTINEL_ITEM_ID       ; clamp: item = 83
-#  .keep:
-#   addiu $sp, $sp, -0x28                          ; reproduced instr 1
-#   j     0x800E5E04                               ; jump back to instr 3
-#   sw    $ra, 0x20($sp)                           ; reproduced instr 2
-#                                                  ; (delay slot of j)
+# Wrapper layout (16 instructions / 64 bytes):
+#    0  sltiu $t0, $a1, 128        ; vanilla id?
+#    1  bne   $t0, $0, .keep
+#    2  nop                        ; bne delay slot
+#    3  sltiu $t0, $a1, 186        ; inside the ext band?
+#    4  beq   $t0, $0, .fallback   ; id >= 186 -> logo
+#    5  nop                        ; beq delay slot
+#    6  lui   $t1, hi(TABLE)
+#    7  addiu $t1, $t1, lo(TABLE)
+#    8  addu  $t1, $t1, $a1
+#    9  lbu   $a1, -128($t1)       ; a1 = table[a1 - 128]
+#   10  beq   $0, $0, .keep
+#   11  nop                        ; branch delay; also covers the R3000
+#                                  ; load-delay slot of the lbu (a1 is
+#                                  ; first read well inside the body)
+#   12 .fallback:
+#      addiu $a1, $0, 83           ; AP logo tile
+#   13 .keep:
+#      addiu $sp, $sp, -0x28       ; reproduced instr 1
+#   14  j     0x800E5E04           ; return to setItemTexture instr 3
+#   15  sw    $ra, 0x20($sp)       ; reproduced instr 2 (j delay slot)
 #
-# Wrapper sits in Cave6 immediately after AP_DESC_STRINGS (which ends at
-# RAM 0x80095F40). 4-byte aligned. ~3.1 KB of Cave6 still free after.
+# Space claim (Cave6): wrapper 0x80095F40..0x80095F80 (64 B, grown in
+# place from the 28-B v1 clamp; starts right after AP_DESC_STRINGS),
+# then the 58-B icon-id table 0x80095F80..0x80095FBA. Both fit in the
+# window freed by the retired recycle init-epilogue wrapper (the next
+# claim, the merit AP desc strings, starts at 0x80096000).
 
 ROM_SET_ITEM_TEXTURE_RAM: Final = 0x800E5DFC
 ROM_SET_ITEM_TEXTURE_RETURN_RAM: Final = 0x800E5E04  # instr 3 of setItemTexture
+# Vanilla words the entry patch displaces (byte-verified by the ROM-gated
+# tests); the wrapper reproduces them before jumping back.
+ROM_SET_ITEM_TEXTURE_VANILLA_WORDS: Final = (0x27BDFFD8, 0xAFBF0020)
 
 ROM_ICON_CLAMP_WRAPPER_RAM: Final = (
     AP_DESC_STRINGS_RAM + AP_DESC_STRINGS_TOTAL_SIZE                         # 0x80095F40
@@ -7312,48 +7520,89 @@ ROM_ICON_CLAMP_WRAPPER_RAM: Final = (
 ROM_ICON_CLAMP_WRAPPER_OFFSET: Final = _slus_ram_to_bin_offset(
     ROM_ICON_CLAMP_WRAPPER_RAM,
 )
+ROM_ICON_CLAMP_WRAPPER_LEN: Final = 64  # 16 instructions
+
+# Per-slot icon-id table: ext ids 128..185 -> u8 ITEM.TIM tile id.
+AP_ICON_ID_TABLE_BASE_ITEM_ID: Final = 128
+AP_ICON_ID_TABLE_SIZE: Final = 58                       # ids 128..185
+AP_ICON_ID_TABLE_RAM: Final = (
+    ROM_ICON_CLAMP_WRAPPER_RAM + ROM_ICON_CLAMP_WRAPPER_LEN  # 0x80095F80
+)
+AP_ICON_ID_TABLE_OFFSET: Final = _slus_ram_to_bin_offset(AP_ICON_ID_TABLE_RAM)
+AP_ICON_ID_FALLBACK: Final = AP_CHEST_SENTINEL_ITEM_ID  # 83 = AP logo tile
 
 
 def _build_icon_clamp_wrapper_bytes() -> bytes:
-    """Build the setItemTexture clamp trampoline.
+    """Build the setItemTexture icon-id trampoline.
 
-    7 MIPS instructions / 28 bytes. See :data:`ROM_ICON_CLAMP_WRAPPER_RAM`
-    block comment for the dispatch shape.
+    16 MIPS instructions / 64 bytes. See :data:`ROM_ICON_CLAMP_WRAPPER_RAM`
+    block comment for the dispatch shape and delay-slot notes.
     """
 
     import struct as _struct
 
+    table_hi, table_lo = _decompose_kuseg(AP_ICON_ID_TABLE_RAM)
     j_back = (
         0x08000000 | ((ROM_SET_ITEM_TEXTURE_RETURN_RAM >> 2) & 0x03FFFFFF)
     )
-    return b"".join(
-        _struct.pack("<I", v) for v in (
-            # sltiu $t0, $a1, 128
-            0x2CA80000 | (RECYCLE_SHOP_AP_ITEM_ID_BASE & 0xFFFF),
-            # bne $t0, $0, +2  (skip the clamp instructions if in-range)
-            0x15000002,
-            # nop (bne delay slot)
-            0x00000000,
-            # addiu $a1, $0, 83  (clamp: a1 = AP chest sentinel slot)
-            0x24050000 | (AP_CHEST_SENTINEL_ITEM_ID & 0xFFFF),
-            # addiu $sp, $sp, -0x28  (reproduced setItemTexture instr 1)
-            0x27BDFFD8,
-            # j 0x800E5E04  (return to setItemTexture instr 3)
-            j_back,
-            # sw $ra, 0x20($sp)  (reproduced instr 2 — j delay slot)
-            0xAFBF0020,
-        )
+    words = (
+        # 0: sltiu $t0, $a1, 128
+        0x2CA80000 | (AP_ICON_ID_TABLE_BASE_ITEM_ID & 0xFFFF),
+        # 1: bne $t0, $0, .keep (idx 13; offset = 13 - 2 = 11)
+        0x1500000B,
+        # 2: nop (bne delay slot)
+        0x00000000,
+        # 3: sltiu $t0, $a1, 186
+        0x2CA80000 | (
+            (AP_ICON_ID_TABLE_BASE_ITEM_ID + AP_ICON_ID_TABLE_SIZE) & 0xFFFF
+        ),
+        # 4: beq $t0, $0, .fallback (idx 12; offset = 12 - 5 = 7)
+        0x11000007,
+        # 5: nop (beq delay slot)
+        0x00000000,
+        # 6: lui $t1, hi(TABLE)
+        0x3C090000 | table_hi,
+        # 7: addiu $t1, $t1, lo(TABLE)
+        0x25290000 | table_lo,
+        # 8: addu $t1, $t1, $a1
+        0x01254821,
+        # 9: lbu $a1, -128($t1)
+        0x91250000 | ((-AP_ICON_ID_TABLE_BASE_ITEM_ID) & 0xFFFF),
+        # 10: beq $0, $0, .keep (idx 13; offset = 13 - 11 = 2)
+        0x10000002,
+        # 11: nop (branch delay; also the lbu load-delay filler)
+        0x00000000,
+        # 12: .fallback: addiu $a1, $0, 83
+        0x24050000 | (AP_ICON_ID_FALLBACK & 0xFFFF),
+        # 13: .keep: reproduced setItemTexture instr 1
+        ROM_SET_ITEM_TEXTURE_VANILLA_WORDS[0],
+        # 14: j 0x800E5E04 (return to setItemTexture instr 3)
+        j_back,
+        # 15: reproduced instr 2 (j delay slot)
+        ROM_SET_ITEM_TEXTURE_VANILLA_WORDS[1],
     )
+    return b"".join(_struct.pack("<I", v) for v in words)
 
 
 ROM_ICON_CLAMP_WRAPPER_BYTES: Final = _build_icon_clamp_wrapper_bytes()
-assert len(ROM_ICON_CLAMP_WRAPPER_BYTES) == 28, len(ROM_ICON_CLAMP_WRAPPER_BYTES)
+assert len(ROM_ICON_CLAMP_WRAPPER_BYTES) == ROM_ICON_CLAMP_WRAPPER_LEN, (
+    len(ROM_ICON_CLAMP_WRAPPER_BYTES)
+)
 
-# Cave6 bounds re-check — wrapper extends past AP_DESC_STRINGS.
-assert (ROM_ICON_CLAMP_WRAPPER_RAM + len(ROM_ICON_CLAMP_WRAPPER_BYTES)
-        <= _CAVE6_END_RAM), (
-    f"Icon clamp wrapper end "
-    f"0x{ROM_ICON_CLAMP_WRAPPER_RAM + len(ROM_ICON_CLAMP_WRAPPER_BYTES):08X} "
+# Default table image: every ext slot renders the AP logo until the
+# patcher's gen-time pass substitutes local items' native tile ids.
+AP_ICON_ID_TABLE_DEFAULT_BYTES: Final = (
+    bytes((AP_ICON_ID_FALLBACK,)) * AP_ICON_ID_TABLE_SIZE
+)
+
+# Cave6 bounds re-check — wrapper + table extend past AP_DESC_STRINGS,
+# and must stay clear of the merit AP desc strings at 0x80096000.
+assert AP_ICON_ID_TABLE_RAM + AP_ICON_ID_TABLE_SIZE <= 0x80096000, (
+    f"Icon-id table end 0x{AP_ICON_ID_TABLE_RAM + AP_ICON_ID_TABLE_SIZE:08X} "
+    f"collides with the merit AP desc strings at 0x80096000"
+)
+assert (AP_ICON_ID_TABLE_RAM + AP_ICON_ID_TABLE_SIZE <= _CAVE6_END_RAM), (
+    f"Icon-id table end 0x{AP_ICON_ID_TABLE_RAM + AP_ICON_ID_TABLE_SIZE:08X} "
     f"overflows Cave6 end 0x{_CAVE6_END_RAM:08X}"
 )
 
@@ -7369,6 +7618,47 @@ ROM_ICON_CLAMP_PATCH_VALUE: Final = (
     0x08000000 | ((ROM_ICON_CLAMP_WRAPPER_RAM >> 2) & 0x03FFFFFF),  # j wrapper
     0x00000000,                                                      # nop
 )
+
+
+# --- ITEM_CLUT_DATA redirects (AP logo palette wiring) ----------------------
+# ``setItemTexture`` picks each icon's palette via a 128-byte per-item
+# table: ``clut = getClut(0xE0, ITEM_CLUT_DATA[item_id] + 0x1E8)``. The
+# table lives in the SLUS data segment at RAM 0x80127BDC — immediately
+# after ITEM_DESC_PTR (0x801279DC + 128*4), which itself follows
+# ITEM_PARA. Single copy in the whole .bin (byte-pattern verified
+# 2026-08-21 against the array in
+# references/DW1-SydPatches/src/InventoryUI.cpp).
+#
+# Two one-byte redirects support the AP logo icon (see the "ITEM.TIM:
+# AP logo icon" section above for the palette story):
+#
+# * entry 83 (vanilla 16, the shared gold ramp) -> 22, the CLUT the
+#   patcher rewrites with :data:`AP_LOGO_CLUT_BYTES`.
+# * entry 84 (Rainbowhorn, vanilla 22 and its sole consumer) -> 8, a
+#   gold/khaki vanilla CLUT close to Rainbowhorn's original colors.
+#   Its tile is requantized to CLUT 8 at patch-apply time so the horn
+#   still renders faithfully.
+
+ITEM_CLUT_DATA_RAM: Final = 0x80127BDC
+ITEM_CLUT_DATA_ENTRIES: Final = 128
+# Structural cross-check: the table starts right after
+# ITEM_PARA (128 x 32 B) + ITEM_DESC_PTR (128 x 4 B).
+assert ITEM_CLUT_DATA_RAM == (
+    RAM_ITEM_PARA_KUSEG + 128 * ROM_ITEM_TABLE_ENTRY_SIZE + 128 * 4
+)
+# Vanilla anchor values for the two rewritten entries (ROM-gated tests
+# byte-verify these against the source dump before trusting the patch).
+ITEM_CLUT_DATA_VANILLA: Final[dict[int, int]] = {
+    AP_ITEM_ICON_INDEX: 16,
+    RAINBOWHORN_ITEM_ID: 22,
+}
+
+
+def item_clut_data_bin_offset(item_id: int) -> int:
+    """Flat .bin offset of ``ITEM_CLUT_DATA[item_id]`` (one byte)."""
+
+    assert 0 <= item_id < ITEM_CLUT_DATA_ENTRIES, item_id
+    return _slus_ram_to_bin_offset(ITEM_CLUT_DATA_RAM + item_id)
 
 
 # --- Recycle-shop array prebuild wrapper (fix UI name flicker) ------------
@@ -7431,8 +7721,13 @@ _RECYCLE_SHOP_OBJ_ENTRY_COUNT_HI: Final = 0x8009
 _RECYCLE_SHOP_OBJ_ENTRY_COUNT_LO: Final = 0x880C
 _RECYCLE_SHOP_OBJ_ARRAY_OFFSET_FROM_ENTRY_COUNT: Final = 0x1C  # 0x80088828 - 0x8008880C
 
+# RETIRED (2026-05+): no rom.py writer emits this wrapper any more — the
+# shopsanity builder wrapper renders the AP rows synchronously instead.
+# Its Cave6 region was reclaimed 2026-08-21 by the icon-id table
+# (:data:`AP_ICON_ID_TABLE_RAM`); this derived address now points INTO
+# that table and must never be written again.
 ROM_RECYCLE_SHOP_INIT_WRAPPER_RAM: Final = (
-    ROM_ICON_CLAMP_WRAPPER_RAM + len(ROM_ICON_CLAMP_WRAPPER_BYTES)           # 0x80095F5C
+    ROM_ICON_CLAMP_WRAPPER_RAM + len(ROM_ICON_CLAMP_WRAPPER_BYTES)
 )
 # Round up to 4-byte alignment (the icon clamp wrapper ends at a
 # multiple of 4 already, but document the constraint).
@@ -9289,6 +9584,13 @@ assert len(SECRET_SHOP_CLERKS) * SECRET_SHOP_ITEMS_PER_CLERK == SECRET_SHOP_AP_I
 
 assert ITEM_SHOP_AP_ITEM_ID_BASE == MERIT_SHOP_AP_ITEM_ID_LAST + 1
 assert SECRET_SHOP_AP_ITEM_ID_BASE == ITEM_SHOP_AP_ITEM_IDS[-1] + 1
+# The setItemTexture icon-id table must span exactly the ext id band
+# (recycle 128..134 + merit 135..148 + item 149..173 + secret 174..185).
+assert AP_ICON_ID_TABLE_BASE_ITEM_ID == RECYCLE_SHOP_AP_ITEM_ID_BASE
+assert (
+    AP_ICON_ID_TABLE_BASE_ITEM_ID + AP_ICON_ID_TABLE_SIZE - 1
+    == SECRET_SHOP_AP_ITEM_IDS[-1]
+)
 
 # --- Purchase-location triggers ----------------------------------------------
 

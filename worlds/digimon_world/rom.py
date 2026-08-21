@@ -165,8 +165,21 @@ from .data.addresses import (
     AP_ITEM_DESC_STRING,
     AP_DESC_STRING_MAX_LEN,
     AP_DESC_STRINGS_BIN_OFFSET,
-    AP_ITEM_ICON_BLANK_BIN_OFFSETS,
-    AP_ITEM_ICON_ROW_BYTES,
+    AP_ICON_CLUT_BIN_OFFSETS,
+    AP_ICON_CLUT_INDEX,
+    AP_ICON_ID_TABLE_BASE_ITEM_ID,
+    AP_ICON_ID_TABLE_DEFAULT_BYTES,
+    AP_ICON_ID_TABLE_OFFSET,
+    AP_ITEM_ICON_INDEX,
+    AP_ITEM_ICON_TILE_BIN_OFFSETS,
+    AP_LOGO_CLUT_BYTES,
+    AP_LOGO_TILE_ROW_BYTES,
+    ITEM_TIM_CLUT_SIZE_BYTES,
+    RAINBOWHORN_ITEM_ID,
+    RAINBOWHORN_NEW_CLUT_INDEX,
+    RAINBOWHORN_TILE_BIN_OFFSETS,
+    item_clut_data_bin_offset,
+    item_tim_clut_bin_offsets,
     ROM_AMAZING_ROD_HIDE_BYTES,
     ROM_AMAZING_ROD_HIDE_OFFSET,
     ROM_AP_ITEM_DESC_PTR_PATCH_FORMAT,
@@ -375,6 +388,54 @@ def _build_volume_id(seed_name: str) -> bytes:
 # named extension methods, each ``(caller, rom, *args) -> bytes``. We
 # define one that hash-checks the source bytes and another that recalcs
 # EDC after token application.
+
+
+def _decode_clut15(raw: bytes) -> tuple[tuple[int, int, int], ...]:
+    """Decode one 32-byte PSX 15-bit CLUT into 16 RGB888 triples."""
+
+    colors = struct.unpack(f"<{ITEM_TIM_CLUT_SIZE_BYTES // 2}H", raw)
+    return tuple(
+        ((c & 0x1F) << 3, ((c >> 5) & 0x1F) << 3, ((c >> 10) & 0x1F) << 3)
+        for c in colors
+    )
+
+
+def _nearest_clut_index(
+    color: tuple[int, int, int],
+    palette: tuple[tuple[int, int, int], ...],
+) -> int:
+    """Nearest palette index by squared RGB distance.
+
+    Index 0 is excluded — it renders fully transparent on PSX
+    hardware, so an opaque source pixel must never map to it.
+    """
+
+    return min(
+        range(1, len(palette)),
+        key=lambda i: (
+            (color[0] - palette[i][0]) ** 2
+            + (color[1] - palette[i][1]) ** 2
+            + (color[2] - palette[i][2]) ** 2
+        ),
+    )
+
+
+def _requantize_tile_row(
+    row: bytes,
+    src_palette: tuple[tuple[int, int, int], ...],
+    dst_palette: tuple[tuple[int, int, int], ...],
+) -> bytes:
+    """Re-index one 8-byte 4bpp tile row from ``src_palette`` to the
+    nearest colors of ``dst_palette``. Index 0 (transparent) is
+    preserved as-is; low nibble = left pixel."""
+
+    out = bytearray()
+    for byte in row:
+        lo, hi = byte & 0xF, byte >> 4
+        lo = 0 if lo == 0 else _nearest_clut_index(src_palette[lo], dst_palette)
+        hi = 0 if hi == 0 else _nearest_clut_index(src_palette[hi], dst_palette)
+        out.append(lo | (hi << 4))
+    return bytes(out)
 
 class DigimonWorldPatchExtension(APPatchExtension):
     game = GAME_NAME
@@ -589,6 +650,52 @@ class DigimonWorldPatchExtension(APPatchExtension):
         return bytes(target)
 
     @staticmethod
+    def requantize_rainbowhorn(caller: APProcedurePatch, rom: bytes) -> bytes:
+        """Re-index Rainbowhorn's ITEM.TIM tile from CLUT 22 to CLUT 8.
+
+        Always-on companion of the AP logo icon (see
+        :func:`_write_merit_shop_wrapper_tokens` step 7): the token pass
+        rewrites CLUT 22 with the AP palette and repoints
+        ``ITEM_CLUT_DATA[84]`` at CLUT 8, so Rainbowhorn's pixels must
+        be re-indexed against CLUT 8's colors or the horn would render
+        in the AP palette's hues. The tile is game data, so it cannot
+        ship inside the token blob — instead this step reads the
+        pristine tile and both vanilla CLUTs from the **source** ROM
+        (:meth:`~worlds.Files.APProcedurePatch.get_source_data_with_cache`)
+        and maps every opaque pixel to CLUT 8's nearest color
+        (transparent index 0 is preserved). CLUT 8 is the
+        least-error vanilla substitute for the horn's gold/khaki tones
+        (quantization survey 2026-08-21).
+
+        Runs after ``apply_tokens``; the touched offsets (tile 84's 16
+        rows) are disjoint from every token write, so relative order
+        does not actually matter.
+        """
+
+        source = caller.get_source_data_with_cache()
+        target = bytearray(rom)
+        # Both on-disc TIM copies are patched; the vanilla CLUTs are
+        # byte-identical between them but each copy's tile is read and
+        # rewritten with its own copy's palettes for robustness.
+        for copy_index, tile_rows in enumerate(RAINBOWHORN_TILE_BIN_OFFSETS):
+            src_off = item_tim_clut_bin_offsets(AP_ICON_CLUT_INDEX)[copy_index]
+            dst_off = item_tim_clut_bin_offsets(
+                RAINBOWHORN_NEW_CLUT_INDEX,
+            )[copy_index]
+            src_palette = _decode_clut15(         # vanilla CLUT 22
+                source[src_off:src_off + ITEM_TIM_CLUT_SIZE_BYTES],
+            )
+            dst_palette = _decode_clut15(         # vanilla CLUT 8
+                source[dst_off:dst_off + ITEM_TIM_CLUT_SIZE_BYTES],
+            )
+
+            for offset in tile_rows:
+                target[offset:offset + 8] = _requantize_tile_row(
+                    source[offset:offset + 8], src_palette, dst_palette,
+                )
+        return bytes(target)
+
+    @staticmethod
     def recalc_edc(caller: APProcedurePatch, rom: bytes) -> bytes:
         """Run a sector-diff EDC/ECC recalc against the original source.
 
@@ -624,19 +731,23 @@ class DigimonWorldProcedurePatch(APProcedurePatch, APTokenMixin):
        canonical SLUS-01032 dump.
     2. ``apply_tokens`` — built-in extension that walks the token blob
        and applies WRITE/COPY/RLE/AND/OR/XOR tokens.
-    3. ``shuffle_ground_items`` — *optional, per-instance.* Inserted by
+    3. ``requantize_rainbowhorn`` — always-on companion of the AP logo
+       icon: re-indexes Rainbowhorn's ITEM.TIM tile (game data, read
+       from the source ROM at apply time) against CLUT 8 after the
+       token pass rewrote its vanilla CLUT 22 with the AP palette.
+    4. ``shuffle_ground_items`` — *optional, per-instance.* Inserted by
        :func:`_assemble_procedure` when the
        :class:`worlds.digimon_world.options.GroundItemRandomization`
        option is on. Reads ``ground_items.json`` for seed and pool
        scope flags, parses ITEM_PARA, rewrites every map-spawn item-id
        byte. Defaults to absent — vanilla ground items unchanged.
-    4. ``shuffle_starters`` — *optional, per-instance.* Inserted by
+    5. ``shuffle_starters`` — *optional, per-instance.* Inserted by
        :func:`_assemble_procedure` when the
        :class:`worlds.digimon_world.options.StarterRandomization`
        option is on. Reads ``starters.json``, parses
        DIGIMON_PARA + TECH_PARA, rewrites the two starter slots'
        Digimon ids and learn-tech / equip-anim bytes.
-    5. ``recalc_edc`` — diff-recalc EDC/ECC for any sector whose data
+    6. ``recalc_edc`` — diff-recalc EDC/ECC for any sector whose data
        was touched.
     """
 
@@ -648,6 +759,7 @@ class DigimonWorldProcedurePatch(APProcedurePatch, APTokenMixin):
     procedure: ClassVar[list[tuple[str, list[str]]]] = [
         ("verify_rom_hash", []),
         ("apply_tokens", ["token_data.bin"]),
+        ("requantize_rainbowhorn", []),
         ("recalc_edc", []),
     ]
 
@@ -1183,14 +1295,45 @@ def _write_merit_shop_wrapper_tokens(patch: DigimonWorldProcedurePatch) -> None:
         AP_ITEM_DESC_PTR_BIN_OFFSET,
         struct.pack(ROM_AP_ITEM_DESC_PTR_PATCH_FORMAT, AP_ITEM_DESC_PTR_VALUE),
     )
-    # 7. Blank slot 83's icon in ITEM.TIM (Electo Ring sprite, never
-    #    seen elsewhere in the game). 16 row writes, sector-aware.
-    for bin_offset in AP_ITEM_ICON_BLANK_BIN_OFFSETS:
+    # 7. Archipelago logo over slot 83's icon in ITEM.TIM (Electo Ring
+    #    sprite, never seen elsewhere in the game — formerly blanked).
+    #    Because the setItemTexture clamp redirects every extended AP
+    #    slot (128+) to slot 83, this is the icon every AP shop row
+    #    (and the chest sentinel) renders. Four write families:
+    #
+    #    a. 16 tile-row writes (sector-aware offsets) — the logo pixels.
+    #    b. The AP palette over CLUT 22 (single 32-byte write; CLUT 22's
+    #       only vanilla consumer is Rainbowhorn, relocated in d.).
+    #    c. ITEM_CLUT_DATA[83]: 16 -> 22 so slot 83 renders with the AP
+    #       palette.
+    #    d. ITEM_CLUT_DATA[84]: 22 -> 8 so Rainbowhorn stops using the
+    #       rewritten CLUT. Its tile pixels are requantized to CLUT 8 at
+    #       patch-apply time by the ``requantize_rainbowhorn`` procedure
+    #       step (they are game data, so they can't ship in the token
+    #       blob).
+    #
+    #    The a. and b. families are written to BOTH on-disc TIM copies
+    #    (standalone ITEM.TIM + the embedded ETCTIM.BIN copy the game
+    #    actually uploads to VRAM — see the addresses.py section).
+    for copy_rows in AP_ITEM_ICON_TILE_BIN_OFFSETS:
+        for bin_offset, row_bytes in zip(
+            copy_rows, AP_LOGO_TILE_ROW_BYTES, strict=True,
+        ):
+            patch.write_token(APTokenTypes.WRITE, bin_offset, row_bytes)
+    for clut_offset in AP_ICON_CLUT_BIN_OFFSETS:
         patch.write_token(
-            APTokenTypes.WRITE,
-            bin_offset,
-            AP_ITEM_ICON_ROW_BYTES,
+            APTokenTypes.WRITE, clut_offset, AP_LOGO_CLUT_BYTES,
         )
+    patch.write_token(
+        APTokenTypes.WRITE,
+        item_clut_data_bin_offset(AP_ITEM_ICON_INDEX),
+        bytes((AP_ICON_CLUT_INDEX,)),
+    )
+    patch.write_token(
+        APTokenTypes.WRITE,
+        item_clut_data_bin_offset(RAINBOWHORN_ITEM_ID),
+        bytes((RAINBOWHORN_NEW_CLUT_INDEX,)),
+    )
 
 
 def _write_leomonstone_neuter_tokens(patch: DigimonWorldProcedurePatch) -> None:
@@ -1948,6 +2091,69 @@ def _resolve_placed_item(
     return placed.name, multiworld.player_name[placed.player]
 
 
+def _build_ap_icon_id_table(world: DigimonWorldWorld) -> bytes:
+    """Per-ext-slot ITEM.TIM tile ids for the setItemTexture icon wrapper.
+
+    One byte per extended ITEM_PARA slot 128..185, consumed in-game by
+    the icon-id wrapper (``a1 = table[a1 - 128]``, see
+    :data:`worlds.digimon_world.data.addresses.AP_ICON_ID_TABLE_RAM`):
+
+    * If the slot's AP location holds THIS world's own bank-deliverable
+      inventory item (dw_code 2000..2127), the byte is that item's real
+      DW1 item id — the shop row shows the item's native icon.
+    * Anything else — another player's item, an AP-only abstraction
+      (Progressive ladders, Bits, Prosperity Points, recruit /
+      technique / virtual-access items), an unfilled location, or a
+      shop whose option is off — keeps the default
+      :data:`AP_ICON_ID_FALLBACK` (83), the Archipelago logo tile.
+    """
+
+    from .items import dw1_internal_item_id
+
+    table = bytearray(AP_ICON_ID_TABLE_DEFAULT_BYTES)
+    slot_families: tuple[tuple[int, tuple[str, ...]], ...] = (
+        (RECYCLE_SHOP_AP_ITEM_ID_BASE, RECYCLE_SHOP_LOCATION_NAMES),
+        (MERIT_SHOP_AP_ITEM_ID_BASE, MERIT_SHOP_LOCATION_NAMES),
+        (ITEM_SHOP_AP_ITEM_ID_BASE, ITEM_SHOP_LOCATION_NAMES),
+        (SECRET_SHOP_AP_ITEM_ID_BASE, SECRET_SHOP_LOCATION_NAMES),
+    )
+    for base_id, location_names in slot_families:
+        for i, location_name in enumerate(location_names):
+            try:
+                location = world.multiworld.get_location(
+                    location_name, world.player,
+                )
+            except KeyError:
+                continue  # shop option off — the slot is never rendered
+            item = location.item
+            if item is None or item.player != world.player:
+                continue
+            internal_id = dw1_internal_item_id(item.name)
+            if internal_id is None:
+                continue
+            table[base_id + i - AP_ICON_ID_TABLE_BASE_ITEM_ID] = internal_id
+    return bytes(table)
+
+
+def _write_ap_icon_id_table_tokens(
+    patch: DigimonWorldProcedurePatch, world: DigimonWorldWorld,
+) -> None:
+    """Emit the 58-byte per-slot icon-id table.
+
+    Companion of the icon-id wrapper written by
+    :func:`_write_shopsanity_common_tokens` step 6, gated the same way
+    (any shop mode != off). Placement-dependent, so it needs the filled
+    multiworld (``write_patch`` runs from ``generate_output``, after
+    fill).
+    """
+
+    patch.write_token(
+        APTokenTypes.WRITE,
+        AP_ICON_ID_TABLE_OFFSET,
+        _build_ap_icon_id_table(world),
+    )
+
+
 def _resolve_shop_prices(world: DigimonWorldWorld) -> dict[int, int]:
     """Per-ext-slot money price for the recycle / item / secret AP rows.
 
@@ -2011,8 +2217,12 @@ def _write_shopsanity_common_tokens(
        holds code, so ALL desc-ptr readers must be re-based to the
        relocated Cave6 table (previously only emitted for the recycle
        shop; merit-only seeds relied on never dereferencing).
-    6. **Icon clamp wrapper + patch** — any icon lookup with
-       item_id >= 128 renders slot 83's (blanked) icon.
+    6. **Icon-id wrapper + entry patch** — icon lookups with item_id in
+       128..185 are rewritten through the per-slot icon-id table (local
+       placed items keep their native tile; everything else renders the
+       AP logo at slot 83). The table bytes are emitted separately by
+       :func:`_write_ap_icon_id_table_tokens` (same gating, needs the
+       filled multiworld).
 
     The merit shop's own machinery (ext wrapper, scan bound, jal at
     0x8010BF3C) stays in :func:`_write_merit_shop_locations_tokens` —
@@ -2069,9 +2279,13 @@ def _write_shopsanity_common_tokens(
         patch.write_token(APTokenTypes.WRITE, lui_offset, lui_bytes)
         patch.write_token(APTokenTypes.WRITE, addiu_offset, addiu_bytes)
 
-    # 6. setItemTexture clamp wrapper + entry patch — icon lookups with
-    #    item_id >= 128 redirect to slot 83 (blanked in ITEM.TIM by the
-    #    always-on merit-shop patcher).
+    # 6. setItemTexture icon-id wrapper + entry patch — icon lookups
+    #    with item_id in 128..185 are rewritten through the per-slot
+    #    icon-id table at :data:`AP_ICON_ID_TABLE_RAM` (local placed
+    #    items keep their native tile; everything else renders the AP
+    #    logo tile at slot 83). The table contents are emitted by
+    #    :func:`_write_ap_icon_id_table_tokens` (needs fill results);
+    #    here only the code + entry hijack are written.
     patch.write_token(
         APTokenTypes.WRITE,
         ROM_ICON_CLAMP_WRAPPER_OFFSET,
@@ -2409,6 +2623,7 @@ def _assemble_procedure(
     """Mutate the per-instance procedure to include opt-in extension steps.
 
     Order: ``verify_rom_hash`` -> ``apply_tokens`` ->
+    ``requantize_rainbowhorn`` (always-on) ->
     ``relocate_item_desc_ptr`` (if any shop mode != off) -> any opt-in
     shufflers in declaration order -> ``recalc_edc``.
 
@@ -2436,6 +2651,9 @@ def _assemble_procedure(
     patch.procedure = [
         ("verify_rom_hash", []),
         ("apply_tokens", ["token_data.bin"]),
+        # Always-on AP-logo companion (also in the class-level default
+        # procedure): re-indexes Rainbowhorn's tile to CLUT 8.
+        ("requantize_rainbowhorn", []),
         *extensions,
         ("recalc_edc", []),
     ]
@@ -2560,6 +2778,12 @@ def write_patch(world: DigimonWorldWorld, output_directory: str) -> None:
     shop_modes = get_shop_modes(options)
     if shop_modes.any_enabled:
         _write_shopsanity_common_tokens(patch, shop_modes)
+        # Per-slot icon-id table for the setItemTexture wrapper —
+        # placement-dependent (local items keep their native shop icon;
+        # AP abstractions and other players' items show the AP logo).
+        # Gated with the wrapper: ext ids never render without
+        # shopsanity, so a table without its consumer would be inert.
+        _write_ap_icon_id_table_tokens(patch, world)
         prices = _resolve_shop_prices(world)
         if shop_modes.recycle:
             _write_recycle_shop_tokens(patch, world, prices)

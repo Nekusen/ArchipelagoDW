@@ -708,7 +708,12 @@ def _set_recruit_rules(world: DigimonWorldWorld) -> None:
         extra_factory = _RECRUIT_EXTRA_RULES.get(recruit_name)
         if pp <= 0 and extra_factory is None:
             continue
-        location = world.get_location(recruit_name)
+        try:
+            location = world.get_location(recruit_name)
+        except KeyError:
+            # Recruit location dropped by an option (e.g. the Frigimon /
+            # Mojyamon opt-out toggles) — nothing to attach a rule to.
+            continue
         # Only attach the PP gate if the player can actually reach that
         # PP threshold in-game.
         rule = _pp(pp) if 0 < pp <= mt_threshold else None

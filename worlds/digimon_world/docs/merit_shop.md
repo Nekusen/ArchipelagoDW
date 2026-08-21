@@ -300,12 +300,19 @@ as a 16-col × 8-row grid of 16x16 icons. Item N's icon is at pixel
 coords `(N%16 * 16, N/16 * 16)`. For slot 83: col 3, row 5 → top-left
 pixel at (48, 80). 16 rows × 8 bytes = 128 bytes per icon.
 
-We blank slot 83's 16x16 region by writing 8 zero bytes per row × 16
-rows. Each row is in a different file offset; sector-aware translation
-required (the icon spans across 2-3 sectors due to the 2048-byte user
-data limit per sector).
+Slot 83's 16x16 region originally got blanked (8 zero bytes per row ×
+16 rows). Since 2026-08-21 it carries a 16x16 Archipelago logo instead
+(six colored circles on the AP hex ring): the patcher writes the logo
+tile rows, rewrites CLUT 22 with a dedicated AP palette, and repoints
+`ITEM_CLUT_DATA[83]` (the per-item palette table at RAM `0x80127BDC`)
+from the shared gold CLUT 16 to CLUT 22. CLUT 22's only vanilla
+consumer, Rainbowhorn (item 84), moves to CLUT 8 with its pixels
+requantized at patch-apply time. Each tile row is at a different file
+offset; sector-aware translation required (the icon spans across 2-3
+sectors due to the 2048-byte user data limit per sector).
 
-Constants: `ITEM_TIM_*`, `AP_ITEM_ICON_*` in `addresses.py`.
+Constants: `ITEM_TIM_*`, `AP_ITEM_ICON_*`, `AP_LOGO_*`,
+`ITEM_CLUT_DATA_*`, `RAINBOWHORN_*` in `addresses.py`.
 
 ### 5c. The chest sentinel name unification
 
@@ -527,7 +534,7 @@ reconciler instead.
 | `ROM_MERIT_SHOP_PATCH_VALUE` | The new jal instruction (LE u32) |
 | `_build_merit_shop_wrapper_bytes()` | Generates the wrapper MIPS code from MERIT_SHOP_DISPATCH |
 | `AP_ITEM_DESC_*` | Description string + ITEM_DESC_PTR redirect |
-| `AP_ITEM_ICON_*` | Slot 83 icon-blanking constants |
+| `AP_ITEM_ICON_*` / `AP_LOGO_*` | Slot 83 AP-logo icon constants (tile offsets, palette, art) |
 | `ITEM_TIM_LBA` (= 7470) | LBA of ITEM.TIM in the disc filesystem |
 | `ITEM_TIM_PIXEL_DATA_FILE_OFFSET` (= 800) | Offset of pixel data within the TIM file |
 | `_flat_to_user_data(base, offset)` | The sector-aware bin offset translator |

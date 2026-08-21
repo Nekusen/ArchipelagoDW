@@ -446,6 +446,43 @@ class PiximonManualLocation(Toggle):
     display_name = "Piximon Training Manual Location"
 
 
+class FrigimonRecruitLocation(DefaultOnToggle):
+    """Include Frigimon's recruit as an AP location.
+
+    On by default (matches previous seeds). Turn OFF to drop the
+    ``Frigimon`` check from the pool — the in-game recruit chain is
+    widely considered tedious, so players can opt out of having a
+    multiworld item locked behind it.
+
+    Only the AP **location** (the check) is affected. Frigimon's
+    City-NPC delivery is untouched either way: she is bundled into
+    ``Progressive Restaurant`` tier 2 (see
+    :data:`worlds.digimon_world.items.PROGRESSIVE_BUNDLES`) and still
+    joins File City when that item is delivered.
+    """
+
+    display_name = "Frigimon Recruit Location"
+
+
+class MojyamonRecruitLocation(DefaultOnToggle):
+    """Include Mojyamon's recruit as an AP location.
+
+    On by default (matches previous seeds). Turn OFF to drop the
+    ``Mojyamon`` check from the pool — the in-game recruit is tedious
+    and, worse, RNG-dependent (Mojyamon's appearance is a random roll,
+    so the check can demand long re-entry grinding through no fault of
+    the player).
+
+    Only the AP **location** (the check) is affected. Mojyamon's
+    City-NPC delivery is untouched either way: he is bundled into
+    ``Progressive Secret Shop`` tier 1 (see
+    :data:`worlds.digimon_world.items.PROGRESSIVE_BUNDLES`) and still
+    joins File City when that item is delivered.
+    """
+
+    display_name = "Mojyamon Recruit Location"
+
+
 class ChestRandomization(DefaultOnToggle):
     """Whether DW1's 65 chests participate in AP randomization.
 
@@ -1054,6 +1091,8 @@ class DigimonWorldOptions(PerGameCommonOptions):
     card_locations: CardLocations
     card_trade_multiplier: CardTradeMultiplier
     piximon_manual_location: PiximonManualLocation
+    frigimon_recruit_location: FrigimonRecruitLocation
+    mojyamon_recruit_location: MojyamonRecruitLocation
     vending_locations: VendingLocations
     recycle_shop_locations: RecycleShopLocations
     merit_shop_locations: MeritShopLocations
@@ -1086,7 +1125,8 @@ option_groups: list[OptionGroup] = [
         "Locations",
         [CardLocations, VendingLocations, RecycleShopLocations, MeritShopLocations,
          ItemShopLocations, SecretShopLocations, ShopPriceMode, ShopPriceMin,
-         ShopPriceMax, FishingLocations, PiximonManualLocation],
+         ShopPriceMax, FishingLocations, PiximonManualLocation,
+         FrigimonRecruitLocation, MojyamonRecruitLocation],
     ),
     OptionGroup(
         "Quality of Life",
