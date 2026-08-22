@@ -152,18 +152,41 @@ These come from [docs/style.md](docs/style.md) and the ruff config and override 
   rewrite from scratch.
 - **Working branch**: `digimon-world-ps1`
 - **World package location** (target): `worlds/digimon_world/`
-- **Current status**: Phase 0 (pre-flight) closed 2026-04-27. The world
-  package skeleton exists at [worlds/digimon_world/](worlds/digimon_world/)
-  (empty `__init__.py` + verified `data/addresses.py` manifest, no
-  `World` subclass yet). Phase 1 (stub skeleton + tests) is next — see
-  [PLAN.md](PLAN.md) §c for the full phased plan and exit criteria.
+- **Current status** (2026-08-22): fully functional world, `world_version 0.6.0`.
+  Core generation/patcher/client are complete and the v1 feature set is
+  in; the project is now in a feature-expansion + polish phase. The 2026-08
+  implementation batch shipped, all lab-validated through the three
+  PATCH_PROCESS nets and disc-boot byte-verified, and committed on
+  `digimon-world-ps1`:
+    - Physical **region-gate** enforcement for `region_locking` (walk-on
+      loop-back wrapper + 12 script-class gates + Birdramon-flight gating;
+      flight fares zeroed as QoL).
+    - **ITEM_PARA relocation** to a contiguous 256-slot table on
+      heap-claimed RAM (ext ceiling 173 → 255; merit teleports retired).
+    - **Shopsanity** — per-shop off/coexist/replace for all four shops
+      (item/secret/recycle/merit) + tiered-or-randomized pricing.
+    - **Card-trade multiplier** and the **Piximon Training Manual** check.
+    - QoL: recruit-location opt-out toggles, the **Archipelago logo** item
+      icon, chest delivery hardening, inventory-first item delivery,
+      **infinite Auto Pilot**, and the **Coelamon** recruit-loop fix
+      (location restored to the pool).
+  Remaining (see the `dw1-backlog` / `dw1-impl-batch-design` memories):
+  the user's BizHawk validation session, Phase 5 setup docs, the
+  region-locking option-integration pass, and deferred big features
+  (enemy randomization, in-game notifications).
 - **Architecture** (locked): BizHawk + Nymashock + APProcedurePatch +
-  generic Lua connector — the FFT Ivalice Island pattern. Custom Lua
-  (SOTN-style) is the controlled escalation path. PCSX-Redux is fallback
-  only. The unified RAM/ROM address manifest lives at
+  generic Lua connector — the FFT Ivalice Island pattern. A DuckStation
+  client also ships. PCSX-Redux is the RE-lab emulator (not player-facing).
+  The unified RAM/ROM address manifest lives at
   [worlds/digimon_world/data/addresses.py](worlds/digimon_world/data/addresses.py)
-  and is the **single source of truth** — Phase 3 (patcher) and Phase 4
-  (client) import from there, never from `references/` directly.
+  and is the **single source of truth** — the patcher (`rom.py`) and
+  client (`client.py`) import from there, never from `references/` directly.
+- **Patch-test loop**: the standardized fast iteration flow — prototype in
+  decompiled C, iterate as live-RAM pokes over a savestate, then one
+  confirming ISO build — is documented in
+  [worlds/digimon_world/tools/PATCH_PROCESS.md](worlds/digimon_world/tools/PATCH_PROCESS.md),
+  driven by `tools/dw1_apply_patch.py` (one spec drives live-RAM
+  apply/verify and sector-aware ISO builds) and run by the `dw1-patch` agent.
 - **RE lab**: PCSX-Redux + Ghidra workbench for automated reverse engineering
   (watchpoints, REST-driven RAM access, analyzed SLUS project). Tools live in
   `C:\opt\tools\`, harness scripts and the full guide in

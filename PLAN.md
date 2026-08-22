@@ -3,7 +3,15 @@
 Working branch: `digimon-world-ps1`. Target package: `worlds/digimon_world/`. Target build:
 Digimon World 1 USA, **SLUS-01032** (exact SHA-256 to be confirmed — see Open Question Q3).
 
-This document is the output of the exploration phase. No production code has been written yet.
+This document is the output of the exploration phase.
+
+> **Status note (2026-08-22): this is a historical planning document.** The world is now
+> fully built and functional (`world_version 0.6.0`) with the v1 feature set plus the
+> 2026-08 expansion batch (region gates, ITEM_PARA relocation, shopsanity, card/Piximon
+> checks, QoL, Coelamon fix) shipped on `digimon-world-ps1`. For the current project state
+> see the "Project: Digimon World 1" section of [CLAUDE.md](CLAUDE.md) and the project
+> memories (`dw1-impl-batch-design`, `dw1-backlog`). The phased plan below is preserved as
+> the original exploration record.
 
 ---
 
