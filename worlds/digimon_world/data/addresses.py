@@ -9606,6 +9606,23 @@ del _trig
 # triggers 800..855 are OFF LIMITS forever. Bytes 0x1BE038+ (pstat 7+)
 # audited free: vanilla scripts max out at trigger 713, engine constants
 # at 640, zero direct-address or save-block-relative accesses.
+#
+# CAVEAT on that audit's METHOD (2026-08-22, `scriptvm` decomp unit).
+# ``readPStat`` @ 0x801062E0 / ``writePStat`` @ 0x80106474 are
+# ``*(u8 *)(*(u32 *)0x80134FB8 + target + 0x159)`` -- the offset 0x159 off
+# the save-block pointer is what makes 0x1BE031 the pstat base, so that
+# part is now derived from code rather than inferred. But live vector
+# capture over the intro plus the shop/ferry/arena savestates observed
+# targets **0, 2, 6, 28, 29, 30, 31, 103, 245, 247, 248 and 254** -- i.e.
+# the constant-caller census above materially UNDER-counted the range,
+# because plenty of callers pass a computed target (``dailyPStatTrigger``
+# walks pstat 29-32; pstat(103) is the partner species; the 245-254 band
+# is engine bookkeeping). The census's *conclusion* for the bytes AP
+# actually claims still holds -- pstat 7, 8 and 9 (triggers 856..879) were
+# never touched in any captured vector -- but the *method* is not
+# sufficient on its own. Before claiming any further pstat byte, capture
+# vectors rather than grepping for constants. Coverage caveat: 11 distinct
+# targets over one capture session is not an exhaustive enumeration.
 
 ITEM_SHOP_AP_ITEM_ID_BASE: Final = 149
 ITEM_SHOP_AP_ITEM_ID_COUNT: Final = 25

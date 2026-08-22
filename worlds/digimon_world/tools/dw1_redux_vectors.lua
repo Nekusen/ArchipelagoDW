@@ -7,13 +7,27 @@
 --         max_total = 2000,              -- stop capturing after this many vectors
 --         autoplay = true,               -- X/START masher to get from title into gameplay
 --         funcs = {
---             { addr = 0x80106CA8, name = "getTriggerOffsets",
+--             -- `max` (optional) caps THIS function's vectors, so one very hot function cannot
+--             -- consume the whole `max_total` budget and starve the rest of the unit.
+--             { addr = 0x80106CA8, name = "getTriggerOffsets", max = 4000,
 --               pre  = { { addr = 0x80134FB8, len = 4 } },      -- memory hexdumped at entry
 --               post = {},                                       -- memory hexdumped at return
 --               deref = { { reg = "a1", type = "u32" },          -- at return, read *entry-reg
 --                         { reg = "a2", type = "u8" } } },
 --         },
 --     }
+--
+-- A pre/post region addresses memory in one of three ways -- pick exactly one key:
+--     { addr = 0x80134FB8, len = 4 }   -- STATIC address
+--     { reg  = "a0",       len = 8 }   -- address = that register's value AT ENTRY
+--     { ptr  = 0x80134FDC, len = 8 }   -- address = the u32 stored at 0x80134FDC, read when the
+--                                      --   region is dumped (so a `post` ptr region follows the
+--                                      --   pointer's NEW value, a `pre` one its old value)
+-- `reg`/`ptr` regions are what make pointer-walking functions (script VM, list builders)
+-- verifiable: the replay harness reloads each dumped region at its RESOLVED address, which is
+-- the JSON key, so the model sees the same bytes the real function saw. A region whose address
+-- resolves outside main RAM is skipped (emitted as null) rather than dumping garbage.
+--
 -- Every completed call emits one JSON line:
 --     {"name":..., "cycles":..., "a0":..a3.., "v0":..., "v1":..., "deref":{...}, "pre":{...}, "post":{...}}
 -- Poll progress over REST: GET /api/v1/lua/vecstat
@@ -44,10 +58,40 @@ local function readval(addr, ty)
     return mem[p] + mem[p + 1] * 0x100 + mem[p + 2] * 0x10000 + mem[p + 3] * 0x1000000  -- u32
 end
 
-local function regions_json(list, into)
+-- Resolve a region descriptor to an absolute address: static (`addr`), register-at-entry
+-- (`reg`, taken from the captured entry registers) or pointer-indirect (`ptr`).
+local function resolve_addr(r, entry_regs)
+    if r.addr then return r.addr end
+    if r.reg then return entry_regs and entry_regs[r.reg] or nil end
+    if r.ptr then return readval(r.ptr, "u32") end
+    return nil
+end
+
+-- Main RAM is 2 MB, mirrored at 0x00000000 / 0x80000000 / 0xA0000000. Anything else (scratchpad,
+-- I/O, BIOS, or a null/garbage pointer) must not be hexdumped -- phys() would alias it into RAM.
+--
+-- Deliberately plain arithmetic, no bit ops: LuaJIT's bit library returns SIGNED 32-bit results,
+-- so `bit.band(0x80134FB8, 0xFF000000) ~= 0x80000000` is TRUE (-2147483648 vs 2147483648) and a
+-- segment test written that way rejects every KSEG0 address -- which is exactly what it did on
+-- the first capture run, nulling all regions.
+local function in_main_ram(addr, len)
+    if not addr or addr == 0 then return false end
+    local u = addr % 0x100000000          -- normalise to unsigned 32-bit
+    local seg = u - (u % 0x1000000)       -- top byte, still unsigned
+    if seg ~= 0x00000000 and seg ~= 0x80000000 and seg ~= 0xA0000000 then return false end
+    return (u % 0x200000) + len <= 0x200000
+end
+
+local function regions_json(list, entry_regs)
     local parts = {}
     for _, r in ipairs(list or {}) do
-        parts[#parts + 1] = string.format('"%08X":"%s"', r.addr, hexdump(r.addr, r.len))
+        local addr = resolve_addr(r, entry_regs)
+        if in_main_ram(addr, r.len) then
+            parts[#parts + 1] = string.format('"%08X":"%s"', addr, hexdump(addr, r.len))
+        else
+            parts[#parts + 1] = string.format('"%s":null', r.reg or r.ptr and
+                string.format("ptr:%08X", r.ptr) or string.format("%08X", r.addr or 0))
+        end
     end
     return "{" .. table.concat(parts, ",") .. "}"
 end
@@ -58,10 +102,11 @@ for _, fn in ipairs(cfg.funcs) do
     local entry_bp = PCSX.addBreakpoint(fn.addr, "Exec", 4, "vec:" .. fn.name, function()
         local ok, err = pcall(function()
             if total >= (cfg.max_total or 2000) then return end
+            if fn.max and counts[fn.name] >= fn.max then return end
             local regs = PCSX.getRegisters().GPR.n
             pending = {
                 a0 = regs.a0, a1 = regs.a1, a2 = regs.a2, a3 = regs.a3,
-                ra = regs.ra, pre = regions_json(fn.pre),
+                ra = regs.ra, pre = regions_json(fn.pre, regs), regs = regs,
             }
             local ret_bp
             ret_bp = PCSX.addBreakpoint(regs.ra, "Exec", 4, "ret:" .. fn.name, function()
@@ -77,7 +122,7 @@ for _, fn in ipairs(cfg.funcs) do
                         '"deref":{%s},"pre":%s,"post":%s}\n',
                         fn.name, tonumber(PCSX.getCPUCycles()) or 0,
                         pending.a0, pending.a1, pending.a2, pending.a3, r2.v0, r2.v1,
-                        table.concat(dparts, ","), pending.pre, regions_json(fn.post))
+                        table.concat(dparts, ","), pending.pre, regions_json(fn.post, pending.regs))
                     out:write(line)
                     pending = nil
                     total = total + 1
@@ -90,7 +135,8 @@ for _, fn in ipairs(cfg.funcs) do
         if not ok then print("DW1_VEC entry error: " .. tostring(err)) end
     end)
     _G.dw1_vec_bps[#_G.dw1_vec_bps + 1] = entry_bp
-    print(string.format("DW1_VEC: armed %s @ %08X", fn.name, fn.addr))
+    print(string.format("DW1_VEC: armed %s @ %08X%s", fn.name, fn.addr,
+        fn.max and string.format(" (max %d)", fn.max) or ""))
 end
 
 PCSX.WebServer = PCSX.WebServer or {}

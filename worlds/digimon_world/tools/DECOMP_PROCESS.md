@@ -9,6 +9,12 @@ a decomp is a ROM patch, the follow-on procedure is [PATCH_PROCESS.md](PATCH_PRO
 vectors captured from the real game (emulator differential testing). Reading-level Ghidra
 pseudo-C is a *draft*, never a deliverable.
 
+**When the game state needed for capture is unavailable**, the unit is still worth doing: write
+and cross-check the model, record it as `PROVISIONAL` in the ledger, and add a row to
+[SAVESTATE_REQUESTS.md](SAVESTATE_REQUESTS.md) naming the state that would unblock it. A
+PROVISIONAL model is a draft with the reasoning banked, not a result — never build a shipped
+patch on one without saying so out loud.
+
 **Repo hygiene (hard rule)**: decompiled C, vectors, and every game-derived artifact live under
 `work\dw1_re\decomp\` (gitignored — the fork is public). Only process tooling and docs are
 committed.
@@ -31,8 +37,17 @@ powershell -File worlds\digimon_world\tools\dw1_ghidra.ps1 -ReadOnly -Script DW1
 ```
 
 Produces `decomp.c` (Ghidra pseudo-C + Syd's signature comment), `listing.asm`, `refs.txt`
-(callers / callees / data refs). Repeat per function of the unit. **Serialize Ghidra runs** —
-the project database is single-writer; never run two headless invocations concurrently.
+(callers / callees / data refs).
+
+`DW1ExportFunc.java` accepts **several `<hexAddr> <outDir>` pairs in one invocation** — always
+use that for a multi-function unit. A headless startup costs far more than an export (10
+functions in one run take about as long as one), and it sidesteps the serialization rule below
+entirely. **Serialize Ghidra runs** — the project database is single-writer; never run two
+headless invocations concurrently.
+
+`DW1FunctionStats.java <out.tsv>` writes a census of every function (address, name, size,
+instruction count, caller/callee counts). Use it to size an effort or pick targets by call
+frequency — the most-called functions are usually the highest-leverage units.
 
 ### Step 3 — Understand and cross-check
 
@@ -49,6 +64,18 @@ the project database is single-writer; never run two headless invocations concur
   always captured; declare `pre`/`post` memory regions (inputs the function reads / outputs it
   writes) and `deref` specs for pointer out-params (see header of
   [dw1_redux_vectors.lua](dw1_redux_vectors.lua)).
+- A region addresses memory in one of three ways: `addr` (static), `reg` (the value of that
+  register at entry) or `ptr` (the u32 stored at that static address, read when the region is
+  dumped). **`reg` and `ptr` regions are what make pointer-walking functions verifiable** — a
+  script PC, a save-block base or a runtime table moves at runtime, so a static `addr` cannot
+  reach it. The JSON key is the *resolved* address, and the replay harness reloads each region
+  there, so the model sees exactly the bytes the real function saw.
+- Give a hot function a `max` so it cannot eat the whole `max_total` budget. Without it a
+  function with 100 callers will starve the rest of the unit within seconds.
+- **Size the windows generously and check the skip count afterwards.** A window that is too
+  short does not fail — it silently produces `skip`s, which is how the `scriptvm` run 1 missed
+  every pstat index above 0xA6 (they reach 254). If a function reports skips, widen and recapture
+  before declaring the unit done.
 - Launch: `powershell -File worlds\digimon_world\tools\dw1_redux_launch.ps1 -Script worlds\digimon_world\tools\dw1_redux_vectors.lua`
 - Progress: `python dw1_redux_api.py lua "return PCSX.WebServer.Handlers.vecstat()"`; the
   `autoplay = true` masher (START/X) gets from title into the opening. When enough vectors
@@ -70,6 +97,11 @@ the project database is single-writer; never run two headless invocations concur
   `dw1_redux_api.py poke` — but only after saving any savestate you care about; mutated flags
   can derail scripts.
 - Caveats: capture assumes non-recursive functions; CPU breakpoints don't see DMA writes.
+- **Savestate loads do not disturb armed Lua breakpoints**, so touring the state library in one
+  session is the cheapest way to diversify vectors. `dw1_masher('x')` advances dialogs hands-off.
+- Where the traffic is: ordinary free-roam runs almost **no** script bytecode. The intro cutscene
+  is by far the densest source, followed by dialog-open shop states and screen transitions. If a
+  script-side counter is not moving, the problem is usually the game state, not the harness.
 
 Game-behavior facts for scripted play (user-confirmed 2026-08-20):
 
@@ -170,7 +202,9 @@ python verify.py            # exit 0 + "VERDICT: OK" required
 
 - `work\dw1_re\decomp\<unit>\NOTES.md`: what the function does, structural insights, vector
   coverage (how many, which paths, what was skipped and why), date.
-- Update the ledger `work\dw1_re\decomp\LEDGER.md` (status table of all units).
+- Update the ledger `work\dw1_re\decomp\LEDGER.md` (status table of all units). If the unit is
+  `PROVISIONAL`, add the matching row to [SAVESTATE_REQUESTS.md](SAVESTATE_REQUESTS.md) in the
+  same pass — a PROVISIONAL row with no request row is a dead end nobody can pick up later.
 - Session hygiene: archive `work\dw1_re\vectors.jsonl` into the unit dir (the next capture
   session truncates it). Screenshots default to overwriting `work\dw1_re\screen_now.png`; if
   you wrote extra captures under other names, delete them when the session ends.
