@@ -155,7 +155,7 @@ from .data.addresses import (
     RAM_TROPICAL_JUNGLE_BRIDGE_FIXED,
     RECRUIT_RAM_BITS,
     REGION_ACCESS_RAM_BITS,
-    tech_mastery_bit,
+    tech_mastery_bits,
     STAT_CAP_FLAG_TARGET,
     STAT_CAP_TARGET,
     VENDING_LOCATION_RAM_BITS,
@@ -641,18 +641,29 @@ def _make_technique_bit_deliverer(slot: int) -> ItemDeliverer:
     Setting the bit is sufficient to make the technique usable in
     combat — DW1's combat-menu population reads this bitmap directly
     (user-verified in-battle 2026-05-11).
+
+    Uses :func:`tech_mastery_bits`, not the single-bit
+    :func:`tech_mastery_bit`: vanilla's ``learnMove`` sets a companion bit
+    for Dynamite Kick and Horizontal Kick, and the mastered-move count that
+    gates digivolution counts it.
     """
 
-    byte_addr, bit_index = tech_mastery_bit(slot)
-    bit_mask = 1 << bit_index
+    masks_by_byte: dict[int, int] = {}
+    for byte_addr, bit_index in tech_mastery_bits(slot):
+        masks_by_byte[byte_addr] = masks_by_byte.get(byte_addr, 0) | (1 << bit_index)
 
     async def deliver(ctx: DigimonWorldClientContext) -> list[RamWrite]:
-        current = (await bizhawk.read(
-            ctx.bizhawk_ctx, [(byte_addr, 1, DOMAIN_MAIN_RAM)],
-        ))[0]
-        if not current or (current[0] & bit_mask):
+        blocks = await bizhawk.read(
+            ctx.bizhawk_ctx,
+            [(addr, 1, DOMAIN_MAIN_RAM) for addr in masks_by_byte],
+        )
+        if any(len(block) != 1 for block in blocks):
             return []
-        return [(byte_addr, [current[0] | bit_mask], DOMAIN_MAIN_RAM)]
+        writes: list[RamWrite] = []
+        for (byte_addr, mask), block in zip(masks_by_byte.items(), blocks, strict=True):
+            if not block[0] & mask == mask:
+                writes.append((byte_addr, [block[0] | mask], DOMAIN_MAIN_RAM))
+        return writes
 
     return deliver
 
@@ -1737,7 +1748,8 @@ class DigimonWorldClient:
         """Re-assert technique-mastery bits from AP-delivered items.
 
         The mastery bitmap (:data:`RAM_TECH_MASTERY_BASE`, 8 bytes
-        spanning slots 0..56) lives in the partner save block and
+        spanning slots 0..63, of which 0..56 are player-masterable)
+        lives in the partner save block and
         resets on partner death/rebirth (and potentially digivolution).
         AP delivery in :func:`_make_technique_bit_deliverer` is a
         one-shot OR-write; this watcher pass forces the same bits
@@ -1769,11 +1781,14 @@ class DigimonWorldClient:
         if not target_slots:
             return
 
-        # Build per-byte OR masks across the 8-byte bitmap.
+        # Build per-byte OR masks across the bitmap. `tech_mastery_bits`
+        # (not the single-bit accessor) so the companion slot vanilla sets
+        # for Dynamite Kick / Horizontal Kick is re-asserted too — it counts
+        # toward the mastered-move total that gates digivolution.
         masks_by_byte: dict[int, int] = {}
         for slot in target_slots:
-            byte_addr, bit_index = tech_mastery_bit(slot)
-            masks_by_byte[byte_addr] = masks_by_byte.get(byte_addr, 0) | (1 << bit_index)
+            for byte_addr, bit_index in tech_mastery_bits(slot):
+                masks_by_byte[byte_addr] = masks_by_byte.get(byte_addr, 0) | (1 << bit_index)
 
         try:
             blocks = await bizhawk.read(

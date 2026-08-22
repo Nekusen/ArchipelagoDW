@@ -33,6 +33,7 @@ from ..data.addresses import (
     TECH_MASTERY_SLOTS,
     TECH_NAMES_BY_SLOT,
     tech_mastery_bit,
+    tech_mastery_bits,
 )
 from ..items import (
     _ITEM_TABLE,
@@ -292,6 +293,97 @@ class TestTechniqueDelivery(DigimonWorldTestBase):
 
         async def fake_read(_bizhawk_ctx: Any, _requests: list[Any]) -> list[bytes]:
             return [b""]
+
+        with mock.patch.object(client_module.bizhawk, "read", fake_read):
+            writes = _run(deliverer(ctx))
+
+        self.assertEqual(writes, [])
+
+
+class TestTechMasteryCompanionBits(DigimonWorldTestBase):
+    """Dynamite Kick and Horizontal Kick set a second bit, exactly as
+    vanilla's own ``learnMove`` @ 0x800E5F14 does.
+
+    Console-verified 2026-08-23 (``learnMove`` decomp unit): the routine ORs
+    a two-bit u32 mask into the word at 0x00155804 -- 0x00011000 for Dynamite
+    Kick (slots 44 + 48) and 0x02800000 for Horizontal Kick (slots 55 + 57).
+    ``getNumMasteredMoves`` is a plain 64-bit popcount over that word pair, and
+    ``calculateRequirementScore`` gates digivolution on the result, so an AP
+    grant that wrote only the primary bit was worth one less mastered move
+    than a naturally-learned one.
+    """
+
+    options: ClassVar[dict[str, Any]] = {}
+
+    def test_plain_technique_has_a_single_bit(self) -> None:
+        self.assertEqual(tech_mastery_bits(12), (tech_mastery_bit(12),))
+
+    def test_dynamite_kick_also_sets_slot_48(self) -> None:
+        self.assertEqual(
+            tech_mastery_bits(44),
+            ((RAM_TECH_MASTERY_BASE + 5, 4), (RAM_TECH_MASTERY_BASE + 6, 0)),
+        )
+
+    def test_horizontal_kick_also_sets_slot_57(self) -> None:
+        self.assertEqual(
+            tech_mastery_bits(55),
+            ((RAM_TECH_MASTERY_BASE + 6, 7), (RAM_TECH_MASTERY_BASE + 7, 1)),
+        )
+
+    def test_companion_masks_match_the_vanilla_u32_words(self) -> None:
+        """The two bits must reconstruct learnMove's literal masks."""
+
+        for slot, expected in ((44, 0x00011000), (55, 0x02800000)):
+            with self.subTest(slot=slot):
+                word = 0
+                for byte_addr, bit_index in tech_mastery_bits(slot):
+                    byte_offset = byte_addr - (RAM_TECH_MASTERY_BASE + 4)
+                    self.assertIn(byte_offset, range(4), "outside the 0x155804 word")
+                    word |= (1 << bit_index) << (8 * byte_offset)
+                self.assertEqual(word, expected)
+
+    def test_deliverer_writes_both_bytes_for_dynamite_kick(self) -> None:
+        deliverer = ITEM_DELIVERY_ROUTES[TECHNIQUE_ITEM_PREFIX + "Dynamite Kick"]
+        ctx = _FakeClientCtxMinimal()
+
+        async def fake_read(_bizhawk_ctx: Any, requests: list[Any]) -> list[bytes]:
+            return [bytes([0x00]) for _ in requests]
+
+        with mock.patch.object(client_module.bizhawk, "read", fake_read):
+            writes = _run(deliverer(ctx))
+
+        self.assertEqual(
+            sorted((addr, tuple(byte_list)) for addr, byte_list, _ in writes),
+            [(RAM_TECH_MASTERY_BASE + 5, (0x10,)), (RAM_TECH_MASTERY_BASE + 6, (0x01,))],
+        )
+
+    def test_deliverer_still_completes_a_half_applied_grant(self) -> None:
+        """Primary bit already on, companion missing -> write the companion."""
+
+        deliverer = ITEM_DELIVERY_ROUTES[TECHNIQUE_ITEM_PREFIX + "Dynamite Kick"]
+        ctx = _FakeClientCtxMinimal()
+
+        async def fake_read(_bizhawk_ctx: Any, requests: list[Any]) -> list[bytes]:
+            # requests are (addr, length, domain); byte 5 has slot 44 set already
+            return [
+                bytes([0x10]) if addr == RAM_TECH_MASTERY_BASE + 5 else bytes([0x00])
+                for addr, _length, _domain in requests
+            ]
+
+        with mock.patch.object(client_module.bizhawk, "read", fake_read):
+            writes = _run(deliverer(ctx))
+
+        self.assertEqual(len(writes), 1)
+        addr, byte_list, _ = writes[0]
+        self.assertEqual((addr, byte_list), (RAM_TECH_MASTERY_BASE + 6, [0x01]))
+
+    def test_deliverer_idempotent_when_both_bits_set(self) -> None:
+        deliverer = ITEM_DELIVERY_ROUTES[TECHNIQUE_ITEM_PREFIX + "Horizontal Kick"]
+        ctx = _FakeClientCtxMinimal()
+
+        async def fake_read(_bizhawk_ctx: Any, requests: list[Any]) -> list[bytes]:
+            preset = {RAM_TECH_MASTERY_BASE + 6: 0x80, RAM_TECH_MASTERY_BASE + 7: 0x02}
+            return [bytes([preset.get(addr, 0x00)]) for addr, _length, _domain in requests]
 
         with mock.patch.object(client_module.bizhawk, "read", fake_read):
             writes = _run(deliverer(ctx))

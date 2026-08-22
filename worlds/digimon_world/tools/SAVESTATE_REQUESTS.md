@@ -26,10 +26,21 @@ harness can then drive the event itself.
 
 ## Open requests
 
-Nothing is currently blocking a decomp — the `scriptvm` unit (2026-08-22) went from Ghidra
-export to VERIFIED without needing a new state. The rows below are **anticipated** gaps: systems
-with no state in the lab today, listed so that a future capture session can cover them in one
-pass rather than one interruption at a time.
+These rows are **live**: each one is a decomp that captured vectors but could not reach a branch
+or an input class, so the unit ships PARTIAL until the state exists. Raised by the 2026-08-22
+batch (callScriptSection / renderString / hasDigimonRaised / scriptIdToEntityId / isKeyDown /
+dailyPStatTrigger).
+
+| Priority | Filename | Position it at | Unblocks |
+| --- | --- | --- | --- |
+| High | `species_raised.state` | Any save where at least one Digimon species has already been **raised** — a partner that reached Champion and later died or was reborn, so the "ever raised" flag is set. The collection/graveyard list must show at least one entry. | `hasDigimonRaised` @ 0x800FF824. All 2866 captured vectors return 0, even on the all-50-recruits `shop_secret` save, because **trigger 512+X is an "ever raised" flag, not a recruit bit**. The `v0 == 1` branch has never been observed; without it the unit can only be PARTIAL. |
+| Medium | `numeric_ui.state` | Any screen drawing **digits** as text — a shop with prices visible, or the Bits counter mid-change; ideally with punctuation on screen too. | `convertAsciiToGameChar` @ 0x800F18C8. 41 distinct inputs captured, not one a digit. The entire digit class (base 0x824F / bias 0x30) and the out-of-range `return 0` branch are asm-derived only. |
+| Low | `long_text.state` | A dialog or menu line long enough to push a string past x = 0xF4 — a wide item/technique description, or the credits. | `renderCharacter` @ 0x8010CC28. 2034 vectors, none with `xPos >= 0xF4` or `yPos >= 0xF4`, so both clamp branches are unreplayed. |
+
+## Anticipated gaps
+
+Systems with no state in the lab at all. Not blocking anything today; listed so a future capture
+session can cover them in one pass rather than one interruption at a time.
 
 | Priority | Filename | Position it at | Unblocks |
 | --- | --- | --- | --- |

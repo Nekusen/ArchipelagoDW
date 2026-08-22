@@ -1109,8 +1109,61 @@ assert set(TECH_NAMES_BY_SLOT) == set(TECH_MASTERY_SLOTS), (
 )
 
 
+# Vanilla's own ``learnMove`` @ 0x800E5F14 does NOT write one bit for
+# these two techniques — it ORs a two-bit u32 mask into the word at
+# 0x00155804, setting a *companion* slot alongside the real one:
+#
+#   learnMove(0x2C) / learnMove(0x30) -> 0x00011000 -> slots 44 AND 48
+#   learnMove(0x37) / learnMove(0x39) -> 0x02800000 -> slots 55 AND 57
+#
+# Console-verified 2026-08-23 (decomp unit ``learnMove``, 566 vectors
+# over 70 distinct ids x 8 starting bitmaps, plus 6 natural vectors).
+# This is observable, not cosmetic:
+#
+#   * ``getNumMasteredMoves`` @ 0x800E3510 is a plain 64-bit popcount
+#     over both words (verified: ``popcount(w0, w1) == v0`` on all 232
+#     vectors, single-bit inputs at 44/48/55/56/57/63 each return 1),
+#     so vanilla learning either technique raises the count by **2**.
+#   * ``calculateRequirementScore`` @ 0x800E26B8 gates digivolution on
+#     ``*(s16 *)(0x8012AC04 + i) <= (s8) getNumMasteredMoves()``, so the
+#     count feeds real progression.
+#   * ``hasMove`` is a plain bit test with no special-casing, so
+#     ``hasMove(0x30)`` reads bit **48** and ``hasMove(0x39)`` reads bit
+#     **57** — an AP grant that set only slot 44 would read back as
+#     "not known" through those ids.
+#
+# Writing only the primary bit therefore left an AP-granted technique
+# worth one less mastered move than a naturally-learned one. AP delivery
+# mirrors vanilla by setting both bits (see the client's technique
+# deliverer and reconcile loop). Note ``forgetMove`` @ 0x800E66E0 never
+# clears slot 48 on its own, matching vanilla's asymmetry.
+TECH_MASTERY_COMPANION_SLOTS: Final[dict[int, int]] = {
+    44: 48,  # Dynamite Kick   -> the "Dynamite Kick v2" duplicate slot
+    55: 57,  # Horizontal Kick -> the slot past the player-masterable range
+}
+
+
+def tech_mastery_bits(slot: int) -> tuple[tuple[int, int], ...]:
+    """Return every ``(byte_address, bit_index)`` vanilla sets for ``slot``.
+
+    Usually a single pair, but the two techniques in
+    :data:`TECH_MASTERY_COMPANION_SLOTS` get their companion bit too, so an
+    AP grant is byte-identical to what DW1's own ``learnMove`` would write.
+    """
+
+    bits = [tech_mastery_bit(slot)]
+    companion = TECH_MASTERY_COMPANION_SLOTS.get(slot)
+    if companion is not None:
+        bits.append((RAM_TECH_MASTERY_BASE + companion // 8, companion % 8))
+    return tuple(bits)
+
+
 def tech_mastery_bit(slot: int) -> tuple[int, int]:
     """Return ``(byte_address, bit_index)`` for technique mastery ``slot``.
+
+    This is the *primary* bit only. Callers writing a grant should use
+    :func:`tech_mastery_bits`, which also covers the companion slot vanilla
+    sets for Dynamite Kick and Horizontal Kick.
 
     Layout: bit ``slot % 8`` of byte ``RAM_TECH_MASTERY_BASE + slot // 8``.
     Asserts the slot is one of the 56 player-masterable techs — passing
