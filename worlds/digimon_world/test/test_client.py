@@ -157,9 +157,25 @@ class TestRecruitDispatch(DigimonWorldTestBase):
         recruit bits (200+X). Cutscene completion sets bit 200+X
         directly (no setTrigger redirect), so the AP location fires
         when the cutscene ends. AP delivery writes bit 720+X (handled
-        by the recruit deliverer)."""
+        by the recruit deliverer).
 
+        Coelamon is the one exception (restored 2026-08-22): the
+        client pins his vanilla bit 249 every tick, so his location
+        polls the remapped shore-cutscene trigger 779 instead — see
+        addresses.py ``COELAMON_RECRUIT_LOCATION_BIT``."""
+
+        from ..data.addresses import COELAMON_RECRUIT_LOCATION_BIT
         for recruit_name in RECRUIT_NAMES:
+            if recruit_name == "Coelamon":
+                self.assertEqual(
+                    LOCATION_RAM_BITS[recruit_name],
+                    COELAMON_RECRUIT_LOCATION_BIT,
+                )
+                self.assertNotEqual(
+                    LOCATION_RAM_BITS[recruit_name],
+                    RECRUIT_RAM_BITS[recruit_name],
+                )
+                continue
             self.assertEqual(
                 LOCATION_RAM_BITS[recruit_name],
                 RECRUIT_RAM_BITS[recruit_name],
@@ -216,8 +232,10 @@ class TestChestDispatch(DigimonWorldTestBase):
         # ITEM_DESC_PTR region (contiguous with vanilla ITEM_PARA);
         # slots 144..148 live in the Cave6 ext segment via the
         # merit-scan teleport wrapper.
-        # 42 recruits (50 vanilla - 8 dropped: Airdramon, Seadramon,
-        # Nanimon, Giromon, Coelamon, Devimon, Megadramon, MetalGreymon).
+        # 43 recruits (50 vanilla - 7 dropped: Airdramon, Seadramon,
+        # Nanimon, Giromon, Devimon, Megadramon, MetalGreymon; Coelamon
+        # restored 2026-08-22 — polled at the remapped trigger 779, not
+        # his vanilla recruit bit).
         # 63 chests (65 - 2 Lava Cave 5/6 dropped 2026-05-24).
         # 20 arena cup checks (5 grade tiers x 4 per tier).
         # 1 boss-defeat event (Meteormon).
@@ -225,7 +243,7 @@ class TestChestDispatch(DigimonWorldTestBase):
         # 1 Piximon's Training Manual (opt-in, trigger 877, 2026-08-21).
         self.assertEqual(
             len(LOCATION_RAM_BITS),
-            42 + 63 + 8 + 10 + 7 + 14 + 25 + 12 + 5 + 20 + 1 + 1,
+            43 + 63 + 8 + 10 + 7 + 14 + 25 + 12 + 5 + 20 + 1 + 1,
         )
 
 
@@ -868,27 +886,30 @@ class TestManifestRecruitTableShape(DigimonWorldTestBase):
     options: ClassVar[dict[str, Any]] = {}
 
     def test_all_recruit_names_have_recruit_bits(self) -> None:
-        # RECRUIT_NAMES (40) is a subset of RECRUIT_RAM_BITS (50 —
+        # RECRUIT_NAMES (41) is a subset of RECRUIT_RAM_BITS (50 —
         # vanilla recruit bit-block). Excluded from RECRUIT_NAMES:
         # Agumon (force-recruited bank NPC), Digitamamon (post-game
         # optional), Airdramon (dropped 2026-05-08), Seadramon
         # (dropped 2026-05-09 — recruit cutscene IS Blue Flute
         # pickup), Nanimon (dropped 2026-05-09 — never joins city),
         # Giromon (dropped 2026-05-09 — Jukebox crashes NTSC build),
-        # Coelamon (dropped 2026-05-24 — cutscene bugged, fix deferred),
         # Devimon / Megadramon / MetalGreymon (dropped 2026-05-27 —
         # all three Mt. Infinity recruit bits get set post-Machinedramon,
-        # after the goal would already have fired). See addresses.py
+        # after the goal would already have fired). Coelamon was dropped
+        # 2026-05-24 and RESTORED 2026-08-22 (shore cutscene remapped to
+        # its own AP trigger — see addresses.py
+        # ``ROM_COELAMON_CUTSCENE_REMAP_*``). See addresses.py
         # ``_AP_RECRUIT_EXCLUDED``.
         for recruit_name in RECRUIT_NAMES:
             self.assertIn(recruit_name, RECRUIT_RAM_BITS)
         self.assertEqual(len(RECRUIT_RAM_BITS), 50)
-        self.assertEqual(len(RECRUIT_NAMES), 40)
+        self.assertEqual(len(RECRUIT_NAMES), 41)
         for excluded in ("Agumon", "Digitamamon", "Airdramon",
-                         "Seadramon", "Nanimon", "Giromon", "Coelamon",
+                         "Seadramon", "Nanimon", "Giromon",
                          "Devimon", "Megadramon", "MetalGreymon"):
             self.assertNotIn(excluded, RECRUIT_NAMES)
         self.assertIn("Greymon", RECRUIT_NAMES)
+        self.assertIn("Coelamon", RECRUIT_NAMES)
         self.assertIn("Agumon", RECRUIT_RAM_BITS)
         self.assertIn("Digitamamon", RECRUIT_RAM_BITS)
 

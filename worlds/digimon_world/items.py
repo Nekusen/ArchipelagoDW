@@ -461,10 +461,10 @@ _BUNDLED_RECRUITS: Final[frozenset[str]] = frozenset({
     name for name in AP_RECRUIT_ITEM_DIGIMON
     if name not in _INDIVIDUAL_RECRUIT_CLASSIFICATIONS
 })
-# 25 = 26 bundled - Coelamon (dropped 2026-05-24 from the AP pool, but
-# his city-visibility bit is still toggled by Progressive Item Shop T1
-# because the client uses BEATEN_RAM_BITS, not AP_RECRUIT_ITEM_DIGIMON).
-assert len(_BUNDLED_RECRUITS) == 25, len(_BUNDLED_RECRUITS)
+# 26 bundled recruits (Coelamon restored 2026-08-22 — his AP location
+# is back, city visibility still rides Progressive Item Shop T1; he has
+# no standalone ``Coelamon Recruit`` item, like every bundled recruit).
+assert len(_BUNDLED_RECRUITS) == 26, len(_BUNDLED_RECRUITS)
 
 
 def _digimon_id_from_recruit_bit(byte_addr: int, bit: int) -> int:
@@ -570,11 +570,10 @@ _bundle_members = {
     name for tiers in PROGRESSIVE_BUNDLES.values() for tier in tiers for name in tier
 }
 # Digitamamon is in _AP_RECRUIT_EXCLUDED (post-game) but appears in
-# Progressive Restaurant T3 as a side-flag. Coelamon is similarly in
-# _AP_RECRUIT_EXCLUDED (dropped 2026-05-24 — bugged cutscene) but still
-# rides Progressive Item Shop T1 for city visibility. Subtract both
-# before the equality check.
-assert _bundle_members - {"Digitamamon", "Coelamon"} == _BUNDLED_RECRUITS, (
+# Progressive Restaurant T3 as a side-flag — subtract him before the
+# equality check. (Coelamon was in this subtraction while dropped
+# 2026-05-24..2026-08-22; he is a regular bundled recruit again.)
+assert _bundle_members - {"Digitamamon"} == _BUNDLED_RECRUITS, (
     f"Bundle membership mismatch: in-bundles={sorted(_bundle_members)}, "
     f"_BUNDLED_RECRUITS={sorted(_BUNDLED_RECRUITS)}"
 )

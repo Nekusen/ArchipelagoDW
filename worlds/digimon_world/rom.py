@@ -95,6 +95,8 @@ from .data.addresses import (
     ROM_CHEST_ITEM_FORMAT,
     ROM_CITY_BITMAP_BYTES,
     ROM_CITY_BITMAP_OFFSET,
+    ROM_COELAMON_CUTSCENE_REMAP_OFFSETS,
+    ROM_COELAMON_CUTSCENE_REMAP_VALUE,
     ROM_COELAMON_GATE_OFFSETS,
     ROM_COELAMON_GATE_VALUE,
     ROM_COMBAT_SITE1_FORMAT,
@@ -1547,10 +1549,42 @@ def _write_coelamon_gate_tokens(patch: DigimonWorldProcedurePatch) -> None:
     (Coelamon joins city) still works once trigger 185 is set by AP item
     delivery. See :data:`ROM_COELAMON_GATE_OFFSETS` /
     :data:`ROM_COELAMON_GATE_VALUE`.
+
+    Offsets repaired 2026-08-22 (the original shipment was +4 off and
+    corrupted the recruit-cutscene head instead of moving the branch
+    target — see the offset-repair note in ``data/addresses.py``).
+    Composes with :func:`_write_coelamon_cutscene_remap_tokens`, which
+    rewrites the same statement's trigger-id bytes (disjoint offsets,
+    asserted in the manifest).
     """
 
     for offset in ROM_COELAMON_GATE_OFFSETS:
         patch.write_token(APTokenTypes.WRITE, offset, ROM_COELAMON_GATE_VALUE)
+
+
+def _write_coelamon_cutscene_remap_tokens(patch: DigimonWorldProcedurePatch) -> None:
+    """Remap Script 6's five trigger-249 references to trigger 779.
+
+    The Coelamon shore state machine (recruit cutscene, ferry, and the
+    shore-spawn guards) vanilla-reads and sets recruit bit 249 — but
+    under AP the client pins bit 249 every tick (item-shop / hint-NPC
+    compatibility), which would leave the recruit cutscene permanently
+    unreachable; and historically the location looped when 249 stayed
+    unmarked. Rewriting every Script-6 reference (four guard reads +
+    the ``setTrigger`` operand, plus three dead residue twins) to the
+    fresh AP trigger 779 gives the shore its own persistent "cutscene
+    done" bit: the cutscene fires once (bridge built), sets 779 = the
+    ``Coelamon`` AP location signal, and never re-fires. The pre-bridge
+    ferry and the +2 PP grant stay vanilla. Same decoupling shape as
+    :func:`_write_old_fishrod_remap_tokens`. Always-on. See
+    :data:`ROM_COELAMON_CUTSCENE_REMAP_OFFSETS` /
+    :data:`ROM_COELAMON_CUTSCENE_REMAP_VALUE`.
+    """
+
+    for offset in ROM_COELAMON_CUTSCENE_REMAP_OFFSETS:
+        patch.write_token(
+            APTokenTypes.WRITE, offset, ROM_COELAMON_CUTSCENE_REMAP_VALUE,
+        )
 
 
 def _write_prosperity_goal_token(
@@ -2718,6 +2752,7 @@ def write_patch(world: DigimonWorldWorld, output_directory: str) -> None:
     # offsets today, but keep the ordering contract anyway).
     _write_region_gate_tokens(patch, world)
     _write_old_fishrod_remap_tokens(patch)  # always-on; decouples cutscene from rod ownership
+    _write_coelamon_cutscene_remap_tokens(patch)  # always-on; shore machine -> trigger 779
     _write_mansion_key_neuter_tokens(patch)  # always-on; vanilla key give -> AP location signal
     _write_frig_key_neuter_tokens(patch)  # always-on; same shape as Mansion Key
     _write_gear_neuter_tokens(patch)  # always-on; same shape as Mansion/Frig Key

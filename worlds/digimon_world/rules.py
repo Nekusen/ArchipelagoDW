@@ -603,9 +603,20 @@ def _unimon_extra(_world: DigimonWorldWorld):
     return Has("Centarumon Recruit")
 
 
-# Coelamon dropped from the AP pool 2026-05-24 (recruit cutscene
-# bugged; see addresses.py ``_AP_RECRUIT_EXCLUDED``). The
-# ``_coelamon_extra`` rule is gone with it.
+# Coelamon (restored 2026-08-22 — see addresses.py
+# ``ROM_COELAMON_CUTSCENE_REMAP_*``): his recruit cutscene at Coela
+# Point (inside Native Forest) only plays once the Tropical Jungle
+# Bridge is fixed — the shore gate reads trigger 185. In shuffled
+# bridge mode 185 is only ever set by AP delivery of the ``Tropical
+# Jungle Bridge`` item (the take-across gate patch closes the vanilla
+# ferry route that used to set it organically), so logic must require
+# the item. In always_open mode 185 is pinned from the start and the
+# recruit is freely reachable — same conditional shape as
+# ``_ninjamon_extra`` / ``_drimogemon_extra``.
+def _coelamon_extra(world: DigimonWorldWorld):
+    if int(world.options.bridge_unlock.value) == _OPT_SHUFFLED:
+        return Has("Tropical Jungle Bridge")
+    return None
 
 
 # Drimogemon is the in-game source of "Lava Cave Access" — vanilla
@@ -639,10 +650,12 @@ def _drimogemon_extra(world: DigimonWorldWorld):
 #     (the other minor recruits only "join"). Meramon lives in
 #     Meramon Tunnel; Tyrannomon lives in Ancient Dino Region. Either
 #     path is sufficient.
-#   * **Item Shop** — Coelamon. Coelamon was dropped from the AP pool
-#     (his recruit cutscene is bugged); the client pins his beaten-bit
-#     to 1 each tick so the game treats the shop as built without any
-#     AP logic gate. No extra rule.
+#   * **Item Shop** — Coelamon. The client pins his vanilla
+#     recruit-block bit to 1 each tick (see addresses.py
+#     ``COELAMON_RECRUIT_BIT``) so the game treats the shop as built
+#     without any AP logic gate; the restored Coelamon AP location
+#     (2026-08-22) runs on its own remapped trigger and doesn't change
+#     this. No extra rule.
 #
 # ``CanReachRegion("Meramon Tunnel")`` transitively requires Lava Cave
 # Access in shuffled LCA mode (via the entrance rule), so we don't need
@@ -682,6 +695,7 @@ _RECRUIT_EXTRA_RULES = {
     # Shuffled-mode option gates: each is a no-op rule in non-shuffled
     # modes (the corresponding AP item isn't in the pool).
     "Drimogemon":   _drimogemon_extra,
+    "Coelamon":     _coelamon_extra,   # restored 2026-08-22 (bridge gate)
     "Andromon":     _andromon_extra,
 }
 

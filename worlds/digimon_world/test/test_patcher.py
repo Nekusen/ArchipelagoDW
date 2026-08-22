@@ -1021,6 +1021,122 @@ class TestOldFishrodRemapPatcher(DigimonWorldTestBase):
         )
 
 
+class TestCoelamonRecruitRemapPatcher(DigimonWorldTestBase):
+    """Coelamon shore-cutscene remap: always-on (restored 2026-08-22).
+
+    Script 6's five trigger-249 references (four guard reads + the
+    ``setTrigger`` operand, plus three dead residue twins) are rewritten
+    to trigger 779 so the shore state machine runs on its own persistent
+    "cutscene done" bit. **Loop regression coverage**: the original
+    2026-05-24 bug was the recruit cutscene re-firing forever because
+    its guard bit stayed unmarked; the remap makes the guard read the
+    same bit the cutscene sets, and the client pin of vanilla bit 249
+    can neither block nor re-fire the cutscene (live-verified — see
+    ``work/dw1_re/decomp/_coelamon_recruit/NOTES.md``). See
+    addresses.py: ``ROM_COELAMON_CUTSCENE_REMAP_*``."""
+
+    options: ClassVar[dict[str, Any]] = {}  # bridge_unlock default = always_open
+
+    def test_remap_tokens_present(self) -> None:
+        from ..data.addresses import (
+            COELAMON_RECRUIT_LOCATION_TRIGGER_ID,
+            ROM_COELAMON_CUTSCENE_REMAP_OFFSETS,
+            ROM_COELAMON_CUTSCENE_REMAP_VALUE,
+        )
+
+        observed = _capture_tokens(self.world)
+        # 2-byte trigger-ID rewrite at each of the 5 live + 3 residue sites.
+        self.assertEqual(len(ROM_COELAMON_CUTSCENE_REMAP_OFFSETS), 8)
+        self.assertEqual(
+            ROM_COELAMON_CUTSCENE_REMAP_VALUE,
+            bytes((
+                COELAMON_RECRUIT_LOCATION_TRIGGER_ID & 0xFF,
+                (COELAMON_RECRUIT_LOCATION_TRIGGER_ID >> 8) & 0xFF,
+            )),
+        )
+        for offset in ROM_COELAMON_CUTSCENE_REMAP_OFFSETS:
+            self.assertIn(
+                (offset, ROM_COELAMON_CUTSCENE_REMAP_VALUE), observed,
+                f"missing Coelamon cutscene remap write at {offset:#x}",
+            )
+
+    def test_gate_tokens_absent_in_always_open(self) -> None:
+        # bridge_unlock = always_open: the take-across gate keeps its
+        # vanilla 1506 branch target (185 is pinned from the start).
+        from ..data.addresses import ROM_COELAMON_GATE_OFFSETS
+
+        observed_offsets = {off for off, _ in _capture_tokens(self.world)}
+        for offset in ROM_COELAMON_GATE_OFFSETS:
+            self.assertNotIn(offset, observed_offsets)
+
+    def test_location_bit_matches_trigger_formula(self) -> None:
+        """Sanity: ``COELAMON_RECRUIT_LOCATION_BIT`` is the canonical
+        RAM bit for trigger 779 per ``mem[0x001BDFCD + N/8] |= 1 << (N%8)``,
+        and it is NOT Coelamon's vanilla recruit bit (which the client
+        pins every tick — polling that would self-fire the location)."""
+        from ..data.addresses import (
+            AP_TRIGGER_ARRAY_BASE,
+            COELAMON_RECRUIT_LOCATION_BIT,
+            COELAMON_RECRUIT_LOCATION_TRIGGER_ID,
+            RECRUIT_RAM_BITS,
+        )
+
+        n = COELAMON_RECRUIT_LOCATION_TRIGGER_ID
+        self.assertEqual(
+            COELAMON_RECRUIT_LOCATION_BIT,
+            (AP_TRIGGER_ARRAY_BASE + n // 8, n % 8),
+        )
+        self.assertNotEqual(
+            COELAMON_RECRUIT_LOCATION_BIT, RECRUIT_RAM_BITS["Coelamon"],
+        )
+
+
+class TestCoelamonGateShuffledPatcher(DigimonWorldTestBase):
+    """bridge_unlock = shuffled: the take-across gate patch must land at
+    the CORRECTED branch-target offsets (vm 598 / residue twin 3690).
+
+    Regression trap for the +4 offset bug shipped before 2026-08-22:
+    the old offsets (0x13FE0572 / 0x13FE12B6) are the ``4F 14`` head of
+    the recruit cutscene's ``moveCameraTo`` — writing there corrupted
+    the cutscene and left the ferry bypass open. No token may ever
+    write those offsets again."""
+
+    options: ClassVar[dict[str, Any]] = {"bridge_unlock": 2}
+
+    # The pre-2026-08-22 (wrong) shipment offsets.
+    _LEGACY_WRONG_OFFSETS = (0x13FE0572, 0x13FE12B6)
+
+    def test_gate_tokens_at_corrected_offsets(self) -> None:
+        from ..data.addresses import (
+            ROM_COELAMON_CUTSCENE_REMAP_OFFSETS,
+            ROM_COELAMON_GATE_OFFSETS,
+            ROM_COELAMON_GATE_VALUE,
+        )
+
+        observed = _capture_tokens(self.world)
+        self.assertEqual(ROM_COELAMON_GATE_OFFSETS, (0x13FE056E, 0x13FE12B2))
+        self.assertEqual(ROM_COELAMON_GATE_VALUE, bytes((0xFC, 0x05)))  # 1532 LE
+        for offset in ROM_COELAMON_GATE_OFFSETS:
+            self.assertIn(
+                (offset, ROM_COELAMON_GATE_VALUE), observed,
+                f"missing corrected take-across gate write at {offset:#x}",
+            )
+        # The two Coelamon families write disjoint bytes of Script 6.
+        self.assertFalse(
+            set(ROM_COELAMON_GATE_OFFSETS)
+            & set(ROM_COELAMON_CUTSCENE_REMAP_OFFSETS),
+        )
+
+    def test_legacy_wrong_offsets_never_written(self) -> None:
+        observed_offsets = {off for off, _ in _capture_tokens(self.world)}
+        for offset in self._LEGACY_WRONG_OFFSETS:
+            self.assertNotIn(
+                offset, observed_offsets,
+                f"legacy +4-bug offset {offset:#x} written — this "
+                f"corrupts the recruit cutscene's moveCameraTo head",
+            )
+
+
 class TestQoLPatcherOptionsOff(DigimonWorldTestBase):
     """Skip-intro and type-unlocks OFF: their tokens should NOT appear.
     Spawn-rate-boost is a Range and always writes (the option just

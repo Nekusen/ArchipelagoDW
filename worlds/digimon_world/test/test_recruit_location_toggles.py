@@ -111,3 +111,53 @@ class TestBothRecruitLocationsOff(_ToggleAssertionsMixin, DigimonWorldTestBase):
     def test_pool_and_delivery(self) -> None:
         self._assert_pool_matches_locations()
         self._assert_delivery_untouched()
+
+
+# =============================================================================
+# Coelamon restoration (2026-08-22)
+# =============================================================================
+
+
+class TestCoelamonLocationRestored(DigimonWorldTestBase):
+    """Coelamon's recruit AP location is back (dropped 2026-05-24 over
+    the shore-cutscene loop; the ROM now remaps the shore state machine
+    to its own trigger 779 — see addresses.py
+    ``ROM_COELAMON_CUTSCENE_REMAP_*``). Item-side nothing changes: he
+    stays a bundled recruit (city visibility rides ``Progressive Item
+    Shop`` T1; no standalone ``Coelamon Recruit`` item)."""
+
+    options: ClassVar[dict[str, Any]] = {}
+
+    def test_location_exists_in_native_forest(self) -> None:
+        location = self.world.get_location("Coelamon")
+        self.assertEqual(location.parent_region.name, "Native Forest")
+
+    def test_no_standalone_recruit_item(self) -> None:
+        pool_names = [item.name for item in self.multiworld.itempool]
+        self.assertNotIn("Coelamon Recruit", pool_names)
+        self.assertEqual(
+            pool_names.count("Progressive Item Shop"),
+            len(PROGRESSIVE_BUNDLES["Progressive Item Shop"]),
+        )
+
+    def test_reachable_without_bridge_item_in_always_open(self) -> None:
+        # bridge_unlock defaults to always_open: trigger 185 is pinned
+        # from the start, so the shore cutscene needs no AP item.
+        state = self.multiworld.get_all_state(False)
+        self.assertTrue(self.world.get_location("Coelamon").can_reach(state))
+
+
+class TestCoelamonBridgeShuffledLogic(DigimonWorldTestBase):
+    """bridge_unlock = shuffled: the shore gate reads trigger 185 and
+    the take-across ferry is closed, so the recruit cutscene — and with
+    it the AP location — is only reachable after the ``Tropical Jungle
+    Bridge`` item is delivered."""
+
+    options: ClassVar[dict[str, Any]] = {"bridge_unlock": 2}
+
+    def test_coelamon_requires_bridge_item(self) -> None:
+        self.assertAccessDependency(
+            ["Coelamon"],
+            [["Tropical Jungle Bridge"]],
+            only_check_listed=True,
+        )

@@ -101,9 +101,15 @@ _RECRUIT_REGIONS: Final[dict[str, str]] = {
     # Native Forest
     "Palmon":       "Native Forest",
     "Kunemon":      "Native Forest",
-    # Coelamon dropped 2026-05-24 — his recruit cutscene is bugged in
-    # the current build and the fix would be too costly. See
-    # addresses.py ``_AP_RECRUIT_EXCLUDED``.
+    # Coelamon restored 2026-08-22 (dropped 2026-05-24 while his
+    # recruit cutscene looped under the old setTrigger wrapper). His
+    # shore sits at Coela Point inside Native Forest; the recruit
+    # cutscene additionally needs the Tropical Jungle Bridge state —
+    # rules.py ``_coelamon_extra`` gates on the bridge item in
+    # shuffled bridge mode. The location's RAM bit is the remapped
+    # cutscene trigger 779, NOT his vanilla recruit bit (which the
+    # client pins) — see addresses.py ``COELAMON_RECRUIT_LOCATION_BIT``.
+    "Coelamon":     "Native Forest",
     # Seadramon dropped 2026-05-09 (the cutscene IS the Blue Flute
     # pickup; he doesn't really do anything in town). See addresses.py
     # ``_AP_RECRUIT_EXCLUDED``. The cutscene now fires the
@@ -200,12 +206,12 @@ RECRUIT_NAMES: Final[tuple[str, ...]] = tuple(_RECRUIT_REGIONS)
 # 2026-05-08), minus Seadramon (dropped 2026-05-09 — recruit cutscene
 # is the Blue Flute pickup), minus Nanimon and Giromon (dropped
 # 2026-05-09 — Nanimon never joins the city, Giromon's Jukebox crashes
-# the NTSC build), minus Coelamon (dropped 2026-05-24 — recruit cutscene
-# is bugged in the current build, fix deferred), minus all 3 Mt. Infinity
-# recruits Devimon/Megadramon/MetalGreymon (dropped 2026-05-27 — their
-# recruit bits get set post-Machinedramon, after the goal would have
-# already fired). See addresses.py ``_AP_RECRUIT_EXCLUDED``.
-assert len(RECRUIT_NAMES) == 40, len(RECRUIT_NAMES)
+# the NTSC build), minus all 3 Mt. Infinity recruits
+# Devimon/Megadramon/MetalGreymon (dropped 2026-05-27 — their recruit
+# bits get set post-Machinedramon, after the goal would have already
+# fired). Coelamon restored 2026-08-22. See addresses.py
+# ``_AP_RECRUIT_EXCLUDED``.
+assert len(RECRUIT_NAMES) == 41, len(RECRUIT_NAMES)
 
 
 # =============================================================================
@@ -220,7 +226,9 @@ RECRUIT_PP_REQUIREMENTS: Final[dict[str, int]] = {
     # 0 PP — most recruits (Agumon, Digitamamon dropped from pool entirely)
     "Palmon": 0,
     "Kunemon": 0,
-    # Coelamon dropped 2026-05-24 — see _RECRUIT_REGIONS comment.
+    # Coelamon has no PP gate in vanilla — his gate is the bridge state
+    # (see _RECRUIT_REGIONS comment and rules.py ``_coelamon_extra``).
+    "Coelamon": 0,
     # Seadramon dropped 2026-05-09 — see _RECRUIT_REGIONS comment.
     "Betamon": 0,
     "Vegiemon": 0,

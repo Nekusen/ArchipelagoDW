@@ -3100,6 +3100,11 @@ ROM_LAVA_CAVE_GATE_VALUE: Final = bytes((
 #
 #     if trigger(185) == false OR trigger(249) == true then 1506
 #
+# (The trigger-249 read is remapped to trigger 779 by the always-on
+# Coelamon recruit-cutscene remap — see ``ROM_COELAMON_CUTSCENE_REMAP_*``
+# near the end of this module. The branch-target byte patched here is
+# the same statement, different bytes; the two patch families compose.)
+#
 # Branch target 1506 is the entry to case 1 ("I'll take you across the
 # water"), which would let the player reach Tropical Jungle without the
 # AP-controlled "Tropical Jungle Bridge" item. To close the bypass we
@@ -3109,14 +3114,27 @@ ROM_LAVA_CAVE_GATE_VALUE: Final = bytes((
 # trigger 185, the gate falls through, and case 2 ("Coelamon joins the
 # city") fires as in vanilla.
 #
-# Two BIN copies of the script; both target bytes patched. Patch is
-# emitted only when ``options.bridge_unlock == shuffled``.
-# Vanilla mode (and always_open mode, where 185 is pinned from the
-# start anyway) keep the unpatched 1506 branch target.
+# **Offset repair 2026-08-22**: this patch originally shipped with
+# offsets 0x13FE0572 / 0x13FE12B6 — a +4 arithmetic slip. Those bytes
+# are the ``4F 14`` head of ``moveCameraTo 20 2214 865`` (vm 602, the
+# recruit path's FIRST instruction), so the shipped patch left the
+# ferry bypass open AND corrupted the recruit cutscene head in
+# shuffled mode. The branch-target u16 actually lives at vm 598 = flat
+# 0x13FE056E (byte-verified: ``E2 05`` = 1506 there, ``4F 14`` at the
+# old offsets). Derivation asserts live next to the cutscene-remap
+# constants (they need :func:`script_vm_to_bin_offset`).
+#
+# "Copy 2" is the slot-tail residue: Script 6's slot tail (vm
+# 3092..4095, after the FF 00 terminator @3090) is a stale self-copy
+# shifted +3092 — dead code (the section table never points there) but
+# disc-loaded with the script's final 2048-byte block; patched for
+# hygiene. Patch is emitted only when ``options.bridge_unlock ==
+# shuffled``. Always_open mode (185 pinned from the start) keeps the
+# unpatched 1506 branch target.
 
 ROM_COELAMON_GATE_OFFSETS: Final = (
-    0x13FE0572,  # Copy 1: 0x13FE0566 + 12 (target byte position in if-stmt)
-    0x13FE12B6,  # Copy 2: 0x13FE12AA + 12
+    0x13FE056E,  # real gate: Script 6 vm 598 (statement head vm 586 + 12)
+    0x13FE12B2,  # dead residue twin: vm 3690 (= 598 + 3092)
 )
 ROM_COELAMON_GATE_VALUE: Final = bytes((0xFC, 0x05))  # 1532 LE
 
@@ -4883,16 +4901,20 @@ assert _beaten_bytes.isdisjoint(_chest_bytes), (
 
 AGUMON_RECRUIT_BIT: Final[tuple[int, int]] = RECRUIT_RAM_BITS["Agumon"]
 
-# Coelamon's "in city / shop is open" recruit-block bit. Pinned to 1
-# each tick by the client (see :meth:`DigimonWorldClient._enforce_coelamon_beaten`)
-# because Coelamon's recruit cutscene is bugged and was dropped from
-# the AP pool (see :data:`_AP_RECRUIT_EXCLUDED`). The File City Item
-# Shop is gated on this bit in vanilla DW1 — pinning it makes the
-# game treat the shop as built, removing the need for an AP-side
-# workaround (e.g. an "Item Shop Built" logic gate or a synthetic AP
-# location). Andromon's recruit chain (per :func:`rules._andromon_extra`)
-# normally depends on the shop being open; the pin makes that always
-# true so AP logic doesn't need an explicit term for it.
+# Coelamon's vanilla recruit-block bit (trigger 249). Pinned to 1 each
+# tick by the client (see :meth:`DigimonWorldClient._enforce_coelamon_beaten`)
+# so every remaining vanilla reader of bit 249 — the Script 211 hint
+# NPC ("An old-timer in the river...") and any engine-side
+# recruit-block reads (File City Item Shop "is built" state, Andromon's
+# chain per :func:`rules._andromon_extra`) — sees Coelamon as
+# recruited, exactly as before the 2026-08-22 restoration.
+#
+# The pin is SAFE to keep because the shore state machine (Script 6,
+# the recruit cutscene + ferry) no longer reads bit 249 at all: the
+# always-on cutscene remap (``ROM_COELAMON_CUTSCENE_REMAP_*``) moves
+# every Script-6 reference to trigger 779, the AP location signal.
+# Pin-immunity was live-verified 2026-08-22 (recruit cutscene fires
+# with 249 pre-set; see work/dw1_re/decomp/_coelamon_recruit/NOTES.md).
 COELAMON_RECRUIT_BIT: Final[tuple[int, int]] = RECRUIT_RAM_BITS["Coelamon"]
 
 # AP-item Digimon = every recruit *except* Agumon (force-recruited bank
@@ -4931,21 +4953,23 @@ _AP_RECRUIT_EXCLUDED: Final = frozenset({
     # Effectively non-functional in our target build, so dropping
     # both the AP location and the AP item.
     "Giromon",
-    # 2026-05-24 — Coelamon dropped from AP pool. His recruit cutscene
-    # is bugged in our current build (per user direction); rather than
-    # invest in a fix, treat his slot as unreachable for now. The name
-    # stays in :data:`RECRUIT_RAM_BITS` (vanilla recruit-block layout),
-    # but is filtered out everywhere AP cares: no ``Coelamon Recruit``
-    # item, no AP location, no bit poll. Vanilla bytecode reads of
-    # ``trigger(249)`` are left in the visibility-patch tables so the
-    # city still behaves correctly if the player triggers his cutscene
-    # via vanilla flow.
-    "Coelamon",
+    # Coelamon was dropped here 2026-05-24 ("recruit cutscene bugged")
+    # and RESTORED 2026-08-22: the bug was the era's global setTrigger
+    # wrapper swallowing the cutscene's ``setTrigger 249`` (vanilla
+    # guard bit stayed clear -> the positional cutscene looped). The
+    # wrapper is long retired; the restored design gives the shore
+    # state machine its own AP trigger 779 via the always-on
+    # ``ROM_COELAMON_CUTSCENE_REMAP_*`` patch. Coelamon is a BUNDLED
+    # recruit (city visibility rides Progressive Item Shop T1; no
+    # standalone ``Coelamon Recruit`` item) with an AP location polled
+    # at :data:`COELAMON_RECRUIT_LOCATION_BIT` — NOT at his vanilla
+    # recruit bit, which the client pins (see
+    # :data:`COELAMON_RECRUIT_BIT`).
 })
 AP_RECRUIT_ITEM_DIGIMON: Final[tuple[str, ...]] = tuple(
     name for name in RECRUIT_RAM_BITS if name not in _AP_RECRUIT_EXCLUDED
 )
-assert len(AP_RECRUIT_ITEM_DIGIMON) == 43, len(AP_RECRUIT_ITEM_DIGIMON)
+assert len(AP_RECRUIT_ITEM_DIGIMON) == 44, len(AP_RECRUIT_ITEM_DIGIMON)
 
 
 # =============================================================================
@@ -9273,6 +9297,7 @@ assert TRANSITION_GATE_HOOK_OFFSET % 2352 + 4 <= 2072
 # @ 8780..8796, script 7 @ 3872..3904, script 101 @ 672..688.
 SCRIPT_ARCHIVE_USER_BASE: Final = 0x1167E800
 _SCRIPT_ARCHIVE_SLOTS: Final[dict[int, int]] = {
+    6: 0x9800,      # Coela Point shore (screen 5): Coelamon recruit + ferry
     7: 0xA800,      # Dragon Eye Lake (screen 6): Blue Flute pier + ride offer
     101: 0x45800,   # Beetle Land pad (screen 105): return ferry
     162: 0x73000,   # File City TWNA variants: Whamon ferry dock
@@ -9280,7 +9305,7 @@ _SCRIPT_ARCHIVE_SLOTS: Final[dict[int, int]] = {
     176: 0x84800,   # File City item-shop building interior (screen 216)
 }
 _SCRIPT_ARCHIVE_SLOT_SIZES: Final[dict[int, int]] = {
-    7: 0x1000, 101: 0x800, 162: 0x2800, 163: 0x2000, 176: 0x1800,
+    6: 0x1000, 7: 0x1000, 101: 0x800, 162: 0x2800, 163: 0x2000, 176: 0x1800,
 }
 
 
@@ -10365,3 +10390,140 @@ assert PIXIMON_MANUAL_TRIGGER_ID > 713
 assert PIXIMON_MANUAL_TRIGGER_ID not in _REGION_GATE_TAKEN_TRIGGERS
 assert PIXIMON_MANUAL_TRIGGER_ID not in _REGION_GATE_NEW_TRIGGERS
 assert PIXIMON_MANUAL_TRIGGER_ID not in SHOP_AP_TRIGGER_IDS
+
+
+# =============================================================================
+# Coelamon recruit-cutscene remap (always-on) — restores the Coelamon location
+# =============================================================================
+#
+# Coelamon's shore screen (Script ID 6, MAYO05 "Coela Point", screen 5)
+# is a positional state machine over the bridge bit (185) and, in
+# vanilla, Coelamon's recruit bit (249):
+#
+#     S254 000120 if trigger(185)==false OR trigger(249)==true then 200
+#     S254 000202 if hour<15 OR hour>19 OR trigger(249)==true then 286
+#     S51  000586 if trigger(185)==false OR trigger(249)==true then 1506
+#          000602..001504  recruit cutscene -> setTrigger 249 @1496,
+#                          addToPStat 1 2 @1500 (+2 PP), endSection
+#          001506..001532  ferry guard: hour window OR 249 -> endSection
+#          001534..003088  ferry cutscene -> setTrigger 96, warpTo 12 4
+#
+# History: Coelamon was dropped 2026-05-24 because the era's global
+# setTrigger wrapper redirected the cutscene's ``setTrigger 249`` into
+# the beaten range — bit 249 stayed clear, the guards never saw the
+# recruit, and the cutscene re-fired on every zone touch (inescapable
+# loop). The wrapper is retired, but bit 249 can no longer serve the
+# shore machine at all: the client pins it every tick (see
+# :data:`COELAMON_RECRUIT_BIT`), which would make the cutscene
+# permanently unreachable instead.
+#
+# Fix (the shipped Old-Fishrod / vending pattern — remap BOTH the
+# guard reads and the setTrigger to a fresh AP bit, leaving the
+# vanilla bit to the AP side): rewrite all five trigger-249 references
+# in Script 6 to trigger 779 (:data:`COELAMON_RECRUIT_LOCATION_TRIGGER_ID`).
+# After the patch the shore runs on its own persistent "shore cutscene
+# done" bit:
+#
+# * No bridge: Coelamon ferries the player across (hour 15..19), does
+#   NOT set 779 — the ferry is not the location.
+# * Bridge built, first visit: recruit cutscene plays once, sets 779
+#   (the AP location signal) and grants +2 PP as in vanilla.
+# * 779 set: shore quiet forever (no loop; save-block persistent).
+# * The client pin of 249 and Progressive Item Shop T1's beaten-bit
+#   delivery (769) cannot fire or block the location.
+#
+# All three behaviors + pin-immunity + the bridge-SHUFFLED composition
+# with :data:`ROM_COELAMON_GATE_OFFSETS` were live-verified and
+# disc-load-verified 2026-08-22 (three nets green; see
+# ``work/dw1_re/decomp/_coelamon_recruit/NOTES.md``).
+#
+# The five id-byte sites (all ``F9 00`` -> ``0B 03``) plus the three
+# dead residue twins (Script 6's slot tail vm 3092..4095 is a stale
+# self-copy shifted +3092; disc-loaded with the final 2048-byte block,
+# never executed — patched for hygiene). The setTrigger (vm 1498) and
+# ferry-guard (vm 1520) sites sit past the stale copy's reach and are
+# single-copy (full-.bin user-space census, 2026-08-22). Always
+# emitted — the vanilla flow is incompatible with the client pin
+# regardless of other options.
+
+COELAMON_RECRUIT_LOCATION_TRIGGER_ID: Final = 779
+COELAMON_RECRUIT_LOCATION_BIT: Final[tuple[int, int]] = (
+    AP_TRIGGER_ARRAY_BASE + COELAMON_RECRUIT_LOCATION_TRIGGER_ID // 8,
+    COELAMON_RECRUIT_LOCATION_TRIGGER_ID % 8,
+)
+assert COELAMON_RECRUIT_LOCATION_BIT == (0x001BE02E, 3), COELAMON_RECRUIT_LOCATION_BIT
+
+# Client poll table (merged into ``client.LOCATION_RAM_BITS``). The key
+# must equal the AP location name — the recruit location is named plain
+# "Coelamon" like every other recruit location. The bit lives OUTSIDE
+# the arena-enforcer recruit-block window (0x001BDFE6..0x001BDFED), so
+# the enforcer's 0xFF fill can never false-fire it.
+COELAMON_RECRUIT_LOCATION_RAM_BITS: Final[dict[str, tuple[int, int]]] = {
+    "Coelamon": COELAMON_RECRUIT_LOCATION_BIT,
+}
+
+_COELAMON_REMAP_SCRIPT: Final = 6
+# vm offsets of the trigger-id bytes: S254 gate cond2, S254 hour-gate
+# cond3, S51 gate cond2, S51 setTrigger operand, S51 ferry-guard cond3,
+# then the dead residue twins of the three low-vm sites (+3092).
+_COELAMON_REMAP_VM_OFFSETS: Final = (128, 214, 594, 1498, 1520, 3220, 3306, 3686)
+ROM_COELAMON_CUTSCENE_REMAP_OFFSETS: Final = tuple(
+    script_vm_to_bin_offset(_COELAMON_REMAP_SCRIPT, _vm)
+    for _vm in _COELAMON_REMAP_VM_OFFSETS
+)
+# Pin the derived offsets to the byte-verified literals so an
+# archive-slot regression trips loudly at module load.
+assert ROM_COELAMON_CUTSCENE_REMAP_OFFSETS == (
+    0x13FE0398, 0x13FE03EE, 0x13FE056A, 0x13FE08F2, 0x13FE0908,
+    0x13FE10DC, 0x13FE1132, 0x13FE12AE,
+), tuple(hex(_o) for _o in ROM_COELAMON_CUTSCENE_REMAP_OFFSETS)
+
+# Vanilla bytes at every site (trigger id 249 LE) and the 2-byte
+# replacement (trigger id 779 LE).
+ROM_COELAMON_CUTSCENE_REMAP_VANILLA: Final = bytes((0xF9, 0x00))
+ROM_COELAMON_CUTSCENE_REMAP_VALUE: Final = bytes((
+    COELAMON_RECRUIT_LOCATION_TRIGGER_ID & 0xFF,
+    (COELAMON_RECRUIT_LOCATION_TRIGGER_ID >> 8) & 0xFF,
+))
+assert ROM_COELAMON_CUTSCENE_REMAP_VALUE == bytes((0x0B, 0x03))
+
+# The take-across gate patch (bridge-SHUFFLED mode) targets the same
+# S51 gate statement — branch-target bytes at vm 598 / residue twin
+# 3690. Derivation asserts for the repaired literals (see the offset
+# repair note at :data:`ROM_COELAMON_GATE_OFFSETS`).
+assert ROM_COELAMON_GATE_OFFSETS == (
+    script_vm_to_bin_offset(_COELAMON_REMAP_SCRIPT, 598),
+    script_vm_to_bin_offset(_COELAMON_REMAP_SCRIPT, 3690),
+), tuple(hex(_o) for _o in ROM_COELAMON_GATE_OFFSETS)
+# Disjointness: the two families write different bytes of the slot.
+assert not set(ROM_COELAMON_GATE_OFFSETS) & set(ROM_COELAMON_CUTSCENE_REMAP_OFFSETS)
+
+# Containment + boundary audit: every write stays inside Script 6's
+# archive slot and inside one Mode2/2352 user-data window.
+for _vm in (*_COELAMON_REMAP_VM_OFFSETS, 598, 3690):
+    assert _vm + 2 <= _SCRIPT_ARCHIVE_SLOT_SIZES[_COELAMON_REMAP_SCRIPT], _vm
+    _off = script_vm_to_bin_offset(_COELAMON_REMAP_SCRIPT, _vm)
+    assert 24 <= _off % 2352 <= 2072 - 2, (_vm, hex(_off))
+del _vm, _off
+
+# Trigger-allocation audit (same shape as the shopsanity / Piximon
+# audits): 779 sits in the audited-clean gap right above the beaten
+# remap band (203..258 + 520 -> 723..778) and below the shopsanity
+# band A (784..799); byte 0x1BE02E is inside the statically-verified
+# vanilla-unused span 0x1BE027..0x1BE02E.
+assert COELAMON_RECRUIT_LOCATION_TRIGGER_ID > 713          # script ceiling
+assert COELAMON_RECRUIT_LOCATION_TRIGGER_ID > 716          # chest-bit ceiling
+assert not 203 <= COELAMON_RECRUIT_LOCATION_TRIGGER_ID <= 258
+assert not 723 <= COELAMON_RECRUIT_LOCATION_TRIGGER_ID <= 778
+assert not 784 <= COELAMON_RECRUIT_LOCATION_TRIGGER_ID <= 799
+assert not 800 <= COELAMON_RECRUIT_LOCATION_TRIGGER_ID <= 855
+assert not 856 <= COELAMON_RECRUIT_LOCATION_TRIGGER_ID <= 935
+assert COELAMON_RECRUIT_LOCATION_TRIGGER_ID < 936
+assert (
+    AP_TRIGGER_ARRAY_BASE + COELAMON_RECRUIT_LOCATION_TRIGGER_ID // 8
+    < RAM_MERAMON_TUNNEL_DRIMOGEMON_STATE
+)
+assert COELAMON_RECRUIT_LOCATION_TRIGGER_ID != PIXIMON_MANUAL_TRIGGER_ID
+assert COELAMON_RECRUIT_LOCATION_TRIGGER_ID not in _REGION_GATE_TAKEN_TRIGGERS
+assert COELAMON_RECRUIT_LOCATION_TRIGGER_ID not in _REGION_GATE_NEW_TRIGGERS
+assert COELAMON_RECRUIT_LOCATION_TRIGGER_ID not in SHOP_AP_TRIGGER_IDS

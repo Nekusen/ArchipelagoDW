@@ -132,11 +132,18 @@ class BridgeUnlock(Choice):
     Vanilla DW1 keeps the bridge from Native Forest to Tropical Jungle
     broken until the player triggers a cutscene by walking near it on
     the Tropical Jungle side (which they can only reach after Coelamon
-    brings them across the first time). Since Coelamon's recruit
-    cutscene is bugged in our current build (and was dropped from the
-    AP pool — see :data:`worlds.digimon_world.data.addresses._AP_RECRUIT_EXCLUDED`),
-    the original ``vanilla`` mode would never be obtainable and is no
-    longer shipped.
+    ferries them across the first time). The original ``vanilla`` mode
+    (bridge fixed by that organic cutscene) is not shipped: in
+    ``shuffled`` mode the take-across ferry is intentionally closed so
+    the bridge state is exclusively AP-driven, and in ``always_open``
+    mode it is moot.
+
+    Either way the Coelamon AP location (restored 2026-08-22) stays
+    reachable: his recruit cutscene at Coela Point plays once the
+    bridge is fixed — immediately in ``always_open``, after the
+    ``Tropical Jungle Bridge`` item lands in ``shuffled``. The
+    pre-bridge ferry (only ever seen in ``shuffled`` seeds before the
+    item arrives) is closed gracefully — Coelamon's shore stays quiet.
 
     * ``always_open`` — the bridge is open from the start (default).
       The client pins bit 1 of :data:`RAM_TROPICAL_JUNGLE_BRIDGE_FIXED`

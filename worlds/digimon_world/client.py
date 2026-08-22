@@ -84,6 +84,7 @@ from .data.addresses import (
     CARD_BLOCK_SIZE,
     CARD_LOCATION_NIBBLES,
     COELAMON_RECRUIT_BIT,
+    COELAMON_RECRUIT_LOCATION_RAM_BITS,
     DWAP_CHEST_RAM_BITS,
     EASY_MONOCHROMON_MAP_ID,
     EASY_MONOCHROMON_PROFIT_TARGET,
@@ -430,8 +431,14 @@ _DROPPED_RECRUITS_BLACKLIST: frozenset[str] = frozenset({
     # Giromon dropped 2026-05-09: his Restaurant Jukebox crashes
     # the NTSC build, so we don't make him an AP location either.
     "Giromon",
-    # Coelamon dropped 2026-05-24: recruit cutscene bugged in the
-    # current build, fix deferred. No AP location.
+    # Coelamon: his AP location was RESTORED 2026-08-22, but it must
+    # NOT poll his vanilla recruit bit (249) — the client pins that bit
+    # every tick (:meth:`DigimonWorldClient._enforce_coelamon_beaten`),
+    # so polling it would self-fire the location instantly. His shore
+    # cutscene is ROM-remapped to set trigger 779 instead, polled via
+    # :data:`COELAMON_RECRUIT_LOCATION_RAM_BITS` below under the same
+    # ``Coelamon`` location name. Keep him filtered out of the
+    # vanilla-bit poll here.
     "Coelamon",
     # 2026-05-27 — All three Mt. Infinity recruits dropped as post-game
     # AP locations. Their recruit bits get set as part of the post-
@@ -455,6 +462,10 @@ LOCATION_RAM_BITS: dict[str, tuple[int, int]] = {
     **DWAP_CHEST_RAM_BITS,
     **{name: bits for name, bits in RECRUIT_RAM_BITS.items()
        if name not in _DROPPED_RECRUITS_BLACKLIST},
+    # Coelamon's location polls the remapped shore-cutscene trigger 779
+    # (0x001BE02E bit 3) — outside the recruit block, so the arena
+    # enforcer's suppression window is not needed and cannot miss it.
+    **COELAMON_RECRUIT_LOCATION_RAM_BITS,
     **KEYITEM_LOCATION_RAM_BITS,
     **PIXIMON_MANUAL_LOCATION_RAM_BITS,
     **VENDING_LOCATION_RAM_BITS,
@@ -1953,15 +1964,22 @@ class DigimonWorldClient:
         )
 
     async def _enforce_coelamon_beaten(self, ctx: DigimonWorldClientContext) -> None:
-        """Pin Coelamon's recruit-block bit on every tick.
+        """Pin Coelamon's vanilla recruit-block bit on every tick.
 
-        Coelamon's recruit cutscene is bugged and Coelamon was dropped
-        from the AP pool (:data:`_AP_RECRUIT_EXCLUDED`). The File City
-        Item Shop is gated in vanilla DW1 on Coelamon's recruit-block
-        bit; pinning it to 1 makes the game treat the shop as built so
-        Andromon's recruit chain (which requires all four major
-        buildings) doesn't permanently stall. Same shape as
-        :meth:`_enforce_agumon_recruited` — read, OR the bit in if
+        Every remaining vanilla reader of bit 249 — the File City Item
+        Shop "is built" state (so Andromon's recruit chain, which
+        requires all four major buildings, doesn't permanently stall)
+        and the Script 211 hint NPC — sees Coelamon as recruited.
+
+        The pin is SAFE alongside the restored Coelamon AP location
+        (2026-08-22): the shore state machine (Script 6 — recruit
+        cutscene, ferry, spawn guards) is ROM-remapped to trigger 779
+        and never reads bit 249, so the pin can neither block the
+        cutscene nor re-fire it, and the location (which polls 779,
+        :data:`COELAMON_RECRUIT_LOCATION_RAM_BITS`) can't self-fire
+        from the pin. Pin-immunity live-verified in the lab (see
+        ``work/dw1_re/decomp/_coelamon_recruit/NOTES.md``). Same shape
+        as :meth:`_enforce_agumon_recruited` — read, OR the bit in if
         unset, write back. Cheap: one read per tick, at most one write
         per save load (the bit is sticky once set).
         """
