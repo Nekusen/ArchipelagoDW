@@ -109,6 +109,23 @@ class SkipIntro(DefaultOnToggle):
     display_name = "Skip Intro"
 
 
+class InfiniteAutoPilot(Toggle):
+    """Always keep one Auto Pilot in the on-hand inventory.
+
+    The Auto Pilot consumable warps the player back to File City from
+    anywhere. With this on, the client checks the inventory every tick
+    and adds a single Auto Pilot (count 1) whenever none is present
+    and a slot is free — so using one simply makes it reappear a
+    moment later, and warping home never costs a banking trip.
+
+    Never stacks extras and never displaces another item: with a full
+    inventory the top-up waits until a slot frees up. Client-side
+    only (no ROM change); shipped to the client via slot_data.
+    """
+
+    display_name = "Infinite Auto Pilot"
+
+
 class BridgeUnlock(Choice):
     """Tropical Jungle bridge unlock state.
 
@@ -1065,6 +1082,7 @@ class DigimonWorldOptions(PerGameCommonOptions):
     fast_drimogemon: FastDrimogemon
     easy_monochromon: EasyMonochromon
     skip_intro: SkipIntro
+    infinite_auto_pilot: InfiniteAutoPilot
     item_stat_gain: ItemStatGain
     type_lock_unlocks: TypeLockUnlocks
     bridge_unlock: BridgeUnlock
@@ -1131,7 +1149,8 @@ option_groups: list[OptionGroup] = [
     OptionGroup(
         "Quality of Life",
         [
-            FastDrimogemon, EasyMonochromon, SkipIntro, ItemStatGain,
+            FastDrimogemon, EasyMonochromon, SkipIntro, InfiniteAutoPilot,
+            ItemStatGain,
             TypeLockUnlocks, BridgeUnlock, GreatCanyonUnlock, LavaCaveAccess,
             RegionLocking, RegionLockingList, StartingRegion,
             SpawnRateBoost, StatGainMultiplier, CombatStatMultiplier,

@@ -8,7 +8,8 @@ What this client does:
   the player can fight any Digimon without auto-joining the city).
 * Polls every chest AP location via DWAP's chest-bit table (65).
 * On items_received, dispatches each item to a deliverer:
-  - bank deliverers for the 2000-block items;
+  - inventory-first deliverers (bank fallback; fish ids bank-only) for
+    the 2000-block items;
   - money deliverers for the 3001/3002 bits items;
   - prosperity deliverer for the ``Prosperity Point`` item
     (delivers ``PROSPERITY_PER_ITEM`` = 2 PP per item);
@@ -38,18 +39,48 @@ from ..client import (
     DigimonWorldClient,
 )
 from ..data.addresses import (
+    AUTO_PILOT_ITEM_ID,
     BEATEN_RAM_BITS,
     DWAP_CHEST_RAM_BITS,
+    FISH_LOCATION_INVENTORY_IDS,
+    RAM_INVENTORY_EMPTY_SLOT_ID,
+    RAM_INVENTORY_ITEM_IDS_BASE,
+    RAM_INVENTORY_MAX_SIZE,
+    RAM_INVENTORY_QUANTITIES_BASE,
+    RAM_INVENTORY_STACK_CAP,
+    RAM_ITEM_BANK_BASE,
     RAM_PROSPERITY_POINTS,
     RECRUIT_RAM_BITS,
 )
-from ..items import PROSPERITY_PER_ITEM, PROSPERITY_POINT_NAME
+from ..items import (
+    ITEM_NAME_TO_ID,
+    KEYCHAIN_ITEM_NAME,
+    PROSPERITY_PER_ITEM,
+    PROSPERITY_POINT_NAME,
+)
 from ..locations import CHEST_NAMES, RECRUIT_NAMES
 from .bases import DigimonWorldTestBase
 
 
 def _run(coro: Any) -> Any:
     return asyncio.get_event_loop().run_until_complete(coro)
+
+
+class _FakeItemNames:
+    """Stand-in for ``ctx.item_names`` — maps AP item codes to names."""
+
+    def __init__(self, mapping: dict[int, str] | None = None) -> None:
+        self._mapping = dict(mapping or {})
+
+    def lookup_in_game(self, code: int, game: str | None = None) -> str:
+        return self._mapping.get(code, f"Unknown Item {code}")
+
+
+class _RecvItem:
+    """Minimal ``NetworkItem`` stand-in (only ``.item`` is read)."""
+
+    def __init__(self, item: int) -> None:
+        self.item = item
 
 
 class _FakeClientCtx:
@@ -70,6 +101,7 @@ class _FakeClientCtx:
         self.items_handling = 0
         self.want_slot_data = False
         self.items_received: list[Any] = []
+        self.item_names = _FakeItemNames()
         self.locations_checked: set[int] = set()
         self.finished_game = finished_game
         self.sent_msgs: list[Any] = []
@@ -302,6 +334,234 @@ class TestProsperityDelivery(DigimonWorldTestBase):
             writes = _run(deliverer(ctx))
 
         self.assertEqual(writes, [])
+
+
+# =============================================================================
+# Inventory-first item delivery (2000-block)
+# =============================================================================
+
+
+def _pad_inventory(values: list[int], fill: int) -> bytes:
+    """Extend a slot list to the structural 30-byte array."""
+
+    assert len(values) <= RAM_INVENTORY_MAX_SIZE
+    return bytes(values) + bytes(
+        [fill] * (RAM_INVENTORY_MAX_SIZE - len(values)),
+    )
+
+
+class TestInventoryFirstDelivery(DigimonWorldTestBase):
+    """2000-block deliveries go to the on-hand inventory when a slot is
+    available (stack merge or first empty slot, mirroring vanilla
+    ``giveItem``), falling back to the bank byte otherwise. Fish ids
+    are bank-only so fishing detection can't false-fire."""
+
+    options: ClassVar[dict[str, Any]] = {}
+
+    # "Meat" = dw_code 2038 → in-game item id 38.
+    ITEM_NAME = "Meat"
+    ITEM_ID = 38
+    BANK_ADDR = RAM_ITEM_BANK_BASE + ITEM_ID
+
+    def _deliver(self, item_name: str, *, bank_qty: int = 0,
+                 size: int = 10, ids: bytes, counts: bytes,
+                 items_received: list[Any] | None = None,
+                 item_names: _FakeItemNames | None = None) -> list[Any]:
+        deliverer = ITEM_DELIVERY_ROUTES[item_name]
+        ctx = _FakeClientCtx()
+        if items_received is not None:
+            ctx.items_received = items_received
+        if item_names is not None:
+            ctx.item_names = item_names
+
+        async def fake_read(_bizhawk_ctx: Any, _requests: list[Any]) -> list[bytes]:
+            return [bytes([bank_qty]), bytes([size]), ids, counts]
+
+        with mock.patch.object(client_module.bizhawk, "read", fake_read):
+            return _run(deliverer(ctx))
+
+    def test_lands_in_first_empty_slot(self) -> None:
+        ids = _pad_inventory([5], RAM_INVENTORY_EMPTY_SLOT_ID)
+        counts = _pad_inventory([1], 0)
+        writes = self._deliver(self.ITEM_NAME, ids=ids, counts=counts)
+        self.assertEqual(writes, [
+            (RAM_INVENTORY_ITEM_IDS_BASE + 1, [self.ITEM_ID], DOMAIN_MAIN_RAM),
+            (RAM_INVENTORY_QUANTITIES_BASE + 1, [1], DOMAIN_MAIN_RAM),
+        ])
+
+    def test_stacks_onto_existing_slot(self) -> None:
+        ids = _pad_inventory([self.ITEM_ID], RAM_INVENTORY_EMPTY_SLOT_ID)
+        counts = _pad_inventory([4], 0)
+        writes = self._deliver(self.ITEM_NAME, ids=ids, counts=counts)
+        self.assertEqual(writes, [
+            (RAM_INVENTORY_QUANTITIES_BASE + 0, [5], DOMAIN_MAIN_RAM),
+        ])
+
+    def test_first_matching_slot_wins(self) -> None:
+        # Duplicate stacks (poked/glitched state): mirror getItemCount —
+        # only the first is touched.
+        ids = _pad_inventory(
+            [7, 7, self.ITEM_ID, 9, 9, self.ITEM_ID],
+            RAM_INVENTORY_EMPTY_SLOT_ID,
+        )
+        counts = _pad_inventory([1, 1, 10, 1, 1, 20], 0)
+        writes = self._deliver(self.ITEM_NAME, ids=ids, counts=counts)
+        self.assertEqual(writes, [
+            (RAM_INVENTORY_QUANTITIES_BASE + 2, [11], DOMAIN_MAIN_RAM),
+        ])
+
+    def test_full_stack_falls_back_to_bank(self) -> None:
+        # Vanilla keeps one stack per id: a full stack refuses the give
+        # even with empty slots free, so AP routes to the bank instead
+        # of opening a second stack.
+        ids = _pad_inventory([self.ITEM_ID], RAM_INVENTORY_EMPTY_SLOT_ID)
+        counts = _pad_inventory([RAM_INVENTORY_STACK_CAP], 0)
+        writes = self._deliver(
+            self.ITEM_NAME, bank_qty=7, ids=ids, counts=counts,
+        )
+        self.assertEqual(writes, [(self.BANK_ADDR, [8], DOMAIN_MAIN_RAM)])
+
+    def test_full_inventory_falls_back_to_bank(self) -> None:
+        # 10 occupied slots at capacity 10; the empty slots at 10..29
+        # are beyond the scan bound and must NOT be used.
+        ids = _pad_inventory(list(range(1, 11)), RAM_INVENTORY_EMPTY_SLOT_ID)
+        counts = _pad_inventory([1] * 10, 0)
+        writes = self._deliver(
+            self.ITEM_NAME, bank_qty=0, size=10, ids=ids, counts=counts,
+        )
+        self.assertEqual(writes, [(self.BANK_ADDR, [1], DOMAIN_MAIN_RAM)])
+
+    def test_fish_ids_stay_bank_only(self) -> None:
+        # Every fish delivery goes to the bank even with a fully empty
+        # inventory — an inventory landing while the player stands on a
+        # fishing screen would false-fire the fish AP location.
+        ids = _pad_inventory([], RAM_INVENTORY_EMPTY_SLOT_ID)
+        counts = _pad_inventory([], 0)
+        for location_name, fish_id in FISH_LOCATION_INVENTORY_IDS:
+            fish_item = location_name.removeprefix("Fishing: ")
+            writes = self._deliver(fish_item, ids=ids, counts=counts)
+            self.assertEqual(
+                writes,
+                [(RAM_ITEM_BANK_BASE + fish_id, [1], DOMAIN_MAIN_RAM)],
+                fish_item,
+            )
+
+    def test_size_zero_treated_as_vanilla_default(self) -> None:
+        # Uninitialized save: size byte 0 → scan the vanilla 10 slots.
+        ids = _pad_inventory([], RAM_INVENTORY_EMPTY_SLOT_ID)
+        counts = _pad_inventory([], 0)
+        writes = self._deliver(self.ITEM_NAME, size=0, ids=ids, counts=counts)
+        self.assertEqual(writes, [
+            (RAM_INVENTORY_ITEM_IDS_BASE + 0, [self.ITEM_ID], DOMAIN_MAIN_RAM),
+            (RAM_INVENTORY_QUANTITIES_BASE + 0, [1], DOMAIN_MAIN_RAM),
+        ])
+
+    def test_vanilla_size_flicker_clamped_to_keychain_target(self) -> None:
+        # A vanilla ``setInventorySize 30`` flicker (Nanimon cutscene)
+        # inflates the live size byte before the keychain reconciler
+        # re-pins it. With zero keychains received the AP capacity is
+        # 10, so the free slot at index 12 must NOT be used.
+        ids = _pad_inventory(list(range(1, 11)), RAM_INVENTORY_EMPTY_SLOT_ID)
+        counts = _pad_inventory([1] * 10, 0)
+        writes = self._deliver(
+            self.ITEM_NAME, size=30, ids=ids, counts=counts,
+        )
+        self.assertEqual(writes, [(self.BANK_ADDR, [1], DOMAIN_MAIN_RAM)])
+
+    def test_keychain_expansion_widens_scan_bound(self) -> None:
+        # One received Progressive Keychain → AP capacity 20: the free
+        # slot at index 10 becomes usable.
+        kc_code = ITEM_NAME_TO_ID[KEYCHAIN_ITEM_NAME]
+        ids = _pad_inventory(list(range(1, 11)), RAM_INVENTORY_EMPTY_SLOT_ID)
+        counts = _pad_inventory([1] * 10, 0)
+        writes = self._deliver(
+            self.ITEM_NAME, size=20, ids=ids, counts=counts,
+            items_received=[_RecvItem(kc_code)],
+            item_names=_FakeItemNames({kc_code: KEYCHAIN_ITEM_NAME}),
+        )
+        self.assertEqual(writes, [
+            (RAM_INVENTORY_ITEM_IDS_BASE + 10, [self.ITEM_ID], DOMAIN_MAIN_RAM),
+            (RAM_INVENTORY_QUANTITIES_BASE + 10, [1], DOMAIN_MAIN_RAM),
+        ])
+
+    def test_bank_cap_drops_delivery(self) -> None:
+        # Bank fallback at the 99 cap: the delivery is quietly dropped
+        # (historical bank-deliverer behavior preserved).
+        ids = _pad_inventory([self.ITEM_ID], RAM_INVENTORY_EMPTY_SLOT_ID)
+        counts = _pad_inventory([RAM_INVENTORY_STACK_CAP], 0)
+        writes = self._deliver(
+            self.ITEM_NAME, bank_qty=99, ids=ids, counts=counts,
+        )
+        self.assertEqual(writes, [])
+
+
+# =============================================================================
+# Infinite Auto Pilot reconciler
+# =============================================================================
+
+
+class TestAutoPilotReconciler(DigimonWorldTestBase):
+    """``infinite_auto_pilot`` QoL: keep exactly one Auto Pilot (id 22)
+    in the on-hand inventory — top up when absent and a slot is free,
+    never stack extras, never displace an item."""
+
+    options: ClassVar[dict[str, Any]] = {}
+
+    def _reconcile(self, *, size: int = 10, ids: bytes,
+                   counts: bytes) -> list[Any]:
+        client = DigimonWorldClient()
+        ctx = _FakeClientCtx()
+        seen: list[Any] = []
+
+        async def fake_read(_bizhawk_ctx: Any, _requests: list[Any]) -> list[bytes]:
+            return [bytes([size]), ids, counts]
+
+        async def fake_write(_bizhawk_ctx: Any, writes: list[Any]) -> None:
+            seen.extend(writes)
+
+        with mock.patch.object(client_module.bizhawk, "read", fake_read), \
+                mock.patch.object(client_module.bizhawk, "write", fake_write):
+            _run(client._reconcile_auto_pilot(ctx))
+        return seen
+
+    def test_tops_up_when_absent(self) -> None:
+        ids = _pad_inventory([5, 7], RAM_INVENTORY_EMPTY_SLOT_ID)
+        counts = _pad_inventory([1, 1], 0)
+        writes = self._reconcile(ids=ids, counts=counts)
+        self.assertEqual(writes, [
+            (RAM_INVENTORY_ITEM_IDS_BASE + 2, [AUTO_PILOT_ITEM_ID],
+             DOMAIN_MAIN_RAM),
+            (RAM_INVENTORY_QUANTITIES_BASE + 2, [1], DOMAIN_MAIN_RAM),
+        ])
+
+    def test_present_copy_is_left_alone(self) -> None:
+        # One copy present (any positive count) → no writes, even with
+        # free slots available: never stack extras.
+        ids = _pad_inventory([AUTO_PILOT_ITEM_ID], RAM_INVENTORY_EMPTY_SLOT_ID)
+        counts = _pad_inventory([1], 0)
+        self.assertEqual(self._reconcile(ids=ids, counts=counts), [])
+
+    def test_zero_count_copy_topped_in_place(self) -> None:
+        # Defensive: a held id-22 slot with count 0 is topped back to 1
+        # in place (covers either consumption semantic without ever
+        # creating a second copy).
+        ids = _pad_inventory([AUTO_PILOT_ITEM_ID], RAM_INVENTORY_EMPTY_SLOT_ID)
+        counts = _pad_inventory([0], 0)
+        writes = self._reconcile(ids=ids, counts=counts)
+        self.assertEqual(writes, [
+            (RAM_INVENTORY_QUANTITIES_BASE + 0, [1], DOMAIN_MAIN_RAM),
+        ])
+
+    def test_full_inventory_waits_for_free_slot(self) -> None:
+        ids = _pad_inventory(list(range(1, 11)), RAM_INVENTORY_EMPTY_SLOT_ID)
+        counts = _pad_inventory([1] * 10, 0)
+        self.assertEqual(self._reconcile(ids=ids, counts=counts), [])
+
+    def test_watcher_flag_defaults_off(self) -> None:
+        # Until slot_data arrives (or with the option off) the watcher
+        # must not run the reconciler: the flag is None/False-y.
+        client = DigimonWorldClient()
+        self.assertFalse(client._infinite_auto_pilot)
 
 
 # =============================================================================

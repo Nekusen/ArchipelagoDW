@@ -1480,8 +1480,9 @@ def _write_frig_key_neuter_tokens(patch: DigimonWorldProcedurePatch) -> None:
     (Myotismon Frig-Key dialog) with ``setTrigger 104``.
 
     Same shape as the Mansion Key neuter: vanilla Frig Key delivery
-    bypassed; only AP delivery (bank slot 123 via
-    :func:`_make_bank_deliverer`) puts the key in the player's hands.
+    bypassed; only AP delivery (item id 123, inventory-first with bank
+    fallback via the client's ``_make_item_deliverer``) puts the key
+    in the player's hands.
     The cutscene's existing ``setTrigger 104`` at script offset 238
     stays in place, so trigger 104 still flips at the cutscene's
     intro — the substituted setTrigger calls at offsets 670 and 780
@@ -1501,7 +1502,8 @@ def _write_mansion_key_neuter_tokens(patch: DigimonWorldProcedurePatch) -> None:
 
     The vanilla Mansion Key cutscene gives the player the key in their
     inventory; in AP rando the key must come exclusively through AP
-    delivery (bank slot 119 via :func:`_make_bank_deliverer`). Both
+    delivery (item id 119, inventory-first with bank fallback via the
+    client's ``_make_item_deliverer``). Both
     giveItem sites — primary (script offset 178) and inventory-full
     retry (script offset 438) — are rewritten across two ROM copies =
     4 sites total. The cutscene's existing ``setTrigger 110`` at offset

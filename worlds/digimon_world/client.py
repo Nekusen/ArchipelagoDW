@@ -76,6 +76,7 @@ from .data.addresses import (
     AGUMON_RECRUIT_BIT,
     AP_CHEST_SENTINEL_ITEM_ID,
     AP_RECRUIT_ITEM_DIGIMON,
+    AUTO_PILOT_ITEM_ID,
     BEATEN_RAM_BITS,
     BIRDRA_FLIGHT_GCANYON_RAM_BIT,
     BIRDRAMON_FLIGHT_RAM_BITS,
@@ -135,6 +136,7 @@ from .data.addresses import (
     RAM_INVENTORY_QUANTITIES_BASE,
     RAM_INVENTORY_SIZE,
     RAM_INVENTORY_SLOT_COUNT,
+    RAM_INVENTORY_STACK_CAP,
     RAM_ITEM_BANK_BASE,
     RAM_ITEM_BANK_SIZE,
     RAM_MAX_HP,
@@ -485,14 +487,18 @@ LOCATION_RAM_THRESHOLDS: dict[str, tuple[int, int]] = {}
 #   fire that recruit location immediately, returning whatever was
 #   placed there — feedback loop. The recruit bit only flips when
 #   DW1 itself sets it (i.e. when the player actually recruits).
-# * **Bank items** (consumables, DV items, key items, all in DWAP's
-#   2000-block, dw_codes 2000..2127) — increment the byte at
+# * **Bank-slot items** (consumables, DV items, key items, all in
+#   DWAP's 2000-block, dw_codes 2000..2127) — **inventory-first**
+#   (2026-08-22): placed into the player's on-hand inventory when a
+#   slot is available (stack merge or first empty slot, mirroring
+#   vanilla ``giveItem``), else increment the byte at
 #   ``RAM_ITEM_BANK_BASE + (dw_code - 2000)``, capped at
-#   :data:`_BANK_QUANTITY_CAP`. The bank layout was verified live
-#   2026-04-28; see ``data.addresses`` for details. **NOT idempotent**:
-#   re-delivery would stack quantity. Hence the
-#   :data:`ITEMS_RECEIVED_COUNTER` is required to gate against
-#   re-delivery on reconnect.
+#   :data:`_BANK_QUANTITY_CAP`. Fish ids stay bank-only (fishing
+#   detection would false-fire; see :data:`_INVENTORY_BANK_ONLY_IDS`).
+#   The bank layout was verified live 2026-04-28; see
+#   ``data.addresses`` for details. **NOT idempotent**: re-delivery
+#   would stack quantity. Hence the :data:`ITEMS_RECEIVED_COUNTER` is
+#   required to gate against re-delivery on reconnect.
 # * **Money** (1000 Bits, 5000 Bits — dw_codes 3001, 3002) — 4-byte LE
 #   add at :data:`RAM_CURRENT_BITS`, capped at :data:`_MONEY_CAP`.
 #   Same idempotency caveat as bank items.
@@ -640,33 +646,155 @@ def _make_technique_bit_deliverer(slot: int) -> ItemDeliverer:
     return deliver
 
 
-def _make_bank_deliverer(dw_code: int) -> ItemDeliverer:
-    """Return an :class:`ItemDeliverer` that increments the bank slot
-    quantity for a 2000-block ``dw_code`` (capped at
-    :data:`_BANK_QUANTITY_CAP`).
+def _keychain_inventory_target(ctx: DigimonWorldClientContext) -> int:
+    """AP-controlled inventory capacity for this tick.
+
+    ``RAM_INVENTORY_DEFAULT_SIZE + KEYCHAIN_INVENTORY_PER_ITEM *
+    min(received keychains, KEYCHAIN_MAX_COPIES)`` clamped to the
+    structural :data:`RAM_INVENTORY_MAX_SIZE` — i.e. 10, 20 or 30.
+
+    Single source of truth shared by
+    :meth:`DigimonWorldClient._reconcile_keychain_inventory` (which pins
+    the live size byte to this value) and the inventory writers
+    (:func:`_make_item_deliverer`,
+    :meth:`DigimonWorldClient._reconcile_auto_pilot`), which use it as a
+    slot-scan bound so a 1-tick vanilla ``setInventorySize`` flicker
+    can never park an item in a slot the reconciler is about to hide.
+    """
+
+    kc_count = sum(
+        1
+        for item in ctx.items_received
+        if ctx.item_names.lookup_in_game(item.item, ctx.game)
+        == KEYCHAIN_ITEM_NAME
+    )
+    target = (
+        RAM_INVENTORY_DEFAULT_SIZE
+        + KEYCHAIN_INVENTORY_PER_ITEM * min(kc_count, KEYCHAIN_MAX_COPIES)
+    )
+    return min(target, RAM_INVENTORY_MAX_SIZE)
+
+
+def _inventory_scan_bound(live_size: int, ctx: DigimonWorldClientContext) -> int:
+    """Number of on-hand inventory slots writers may scan this tick.
+
+    Combines the live ``RAM_INVENTORY_SIZE`` byte (0 = uninitialized
+    save → vanilla default; clamped to the structural cap) with the
+    AP-controlled keychain target, taking the minimum of both so
+    neither a stale/flickered size byte nor a not-yet-pinned one can
+    widen the writable range.
+    """
+
+    if live_size == 0:
+        live_size = RAM_INVENTORY_DEFAULT_SIZE
+    live_size = min(live_size, RAM_INVENTORY_MAX_SIZE)
+    return min(live_size, _keychain_inventory_target(ctx))
+
+
+# Item ids the deliverer must NEVER place in the on-hand inventory.
+# The 6 fish ids (62..67): :meth:`DigimonWorldClient._check_fishing_locations`
+# fires a fish AP location when that fish's inventory count increases
+# while the player stands on a fishing screen. An AP-delivered fish
+# landing in the inventory at that moment would be indistinguishable
+# from a genuine catch, so fish deliveries stay bank-only (documented
+# in ``data.addresses`` next to :data:`FISH_LOCATION_INVENTORY_IDS`).
+_INVENTORY_BANK_ONLY_IDS: frozenset[int] = frozenset(
+    fish_id for _name, fish_id in FISH_LOCATION_INVENTORY_IDS
+)
+
+
+def _make_item_deliverer(dw_code: int) -> ItemDeliverer:
+    """Return an :class:`ItemDeliverer` for a 2000-block ``dw_code``:
+    on-hand inventory first, bank fallback.
+
+    Inventory placement mirrors vanilla ``giveItem`` semantics as
+    ground-truthed by the VERIFIED ``getItemCount`` decomp and the
+    shop inventory-fit scan (``build_shop_runtime_list`` NOTES):
+
+    * **First matching slot wins** — if the item id is already held
+      with a non-full stack (count < :data:`RAM_INVENTORY_STACK_CAP`
+      = 99), increment that slot's count.
+    * The game keeps **one stack per item id**: a full stack means
+      vanilla would refuse the give even with empty slots free, so we
+      fall back to the bank rather than opening a second stack.
+    * Otherwise the first empty slot (id ``0xFF``) within the scan
+      bound (see :func:`_inventory_scan_bound`) receives the item
+      with count 1.
+    * No eligible slot (inventory full), a bank-only id (fish — see
+      :data:`_INVENTORY_BANK_ONLY_IDS`), or a short read → bank
+      increment exactly as the historical bank deliverer did (capped
+      at :data:`_BANK_QUANTITY_CAP`; at-cap deliveries are dropped).
+
+    Concurrency: the adapter interface has no guarded/conditional
+    write (deliberately — PINE can't provide one), so this follows the
+    codebase-wide read → compute → single-batched-write pattern: the
+    returned writes are merged with the items_received counter advance
+    into ONE ``bizhawk.write`` call by ``_deliver_items``, keeping the
+    id+count pair and the counter atomic per transport call. The
+    remaining read→write race window is one watcher tick, same as
+    every other deliverer/reconciler in this module.
 
     NOT idempotent: relies on :data:`ITEMS_RECEIVED_COUNTER` gating to
     avoid re-delivery on reconnect.
     """
 
-    slot = dw_code - 2000
-    if slot < 0 or slot >= RAM_ITEM_BANK_SIZE:
+    item_id = dw_code - 2000
+    if item_id < 0 or item_id >= RAM_ITEM_BANK_SIZE:
         raise ValueError(
-            f"dw_code {dw_code} maps to bank slot {slot}, outside "
+            f"dw_code {dw_code} maps to bank slot {item_id}, outside "
             f"the 0..{RAM_ITEM_BANK_SIZE - 1} range",
         )
-    address = RAM_ITEM_BANK_BASE + slot
+    bank_address = RAM_ITEM_BANK_BASE + item_id
+    inventory_eligible = item_id not in _INVENTORY_BANK_ONLY_IDS
 
     async def deliver(ctx: DigimonWorldClientContext) -> list[RamWrite]:
-        current = (await bizhawk.read(
-            ctx.bizhawk_ctx, [(address, 1, DOMAIN_MAIN_RAM)],
-        ))[0]
-        if not current:
+        blocks = await bizhawk.read(ctx.bizhawk_ctx, [
+            (bank_address, 1, DOMAIN_MAIN_RAM),
+            (RAM_INVENTORY_SIZE, 1, DOMAIN_MAIN_RAM),
+            (RAM_INVENTORY_ITEM_IDS_BASE, RAM_INVENTORY_MAX_SIZE, DOMAIN_MAIN_RAM),
+            (RAM_INVENTORY_QUANTITIES_BASE, RAM_INVENTORY_MAX_SIZE, DOMAIN_MAIN_RAM),
+        ])
+        if len(blocks) != 4 or len(blocks[0]) != 1:
             return []
-        new_qty = min(_BANK_QUANTITY_CAP, current[0] + 1)
-        if new_qty == current[0]:
+        if (inventory_eligible
+                and len(blocks[1]) == 1
+                and len(blocks[2]) == RAM_INVENTORY_MAX_SIZE
+                and len(blocks[3]) == RAM_INVENTORY_MAX_SIZE):
+            bound = _inventory_scan_bound(blocks[1][0], ctx)
+            ids = blocks[2]
+            counts = blocks[3]
+            # First matching slot wins — mirrors getItemCount/giveItem.
+            held = next(
+                (i for i in range(bound) if ids[i] == item_id), None,
+            )
+            if held is not None:
+                if counts[held] < RAM_INVENTORY_STACK_CAP:
+                    return [(
+                        RAM_INVENTORY_QUANTITIES_BASE + held,
+                        [counts[held] + 1],
+                        DOMAIN_MAIN_RAM,
+                    )]
+                # Full stack: vanilla keeps one stack per id — bank.
+            else:
+                free = next(
+                    (i for i in range(bound)
+                     if ids[i] == RAM_INVENTORY_EMPTY_SLOT_ID),
+                    None,
+                )
+                if free is not None:
+                    return [
+                        (RAM_INVENTORY_ITEM_IDS_BASE + free, [item_id],
+                         DOMAIN_MAIN_RAM),
+                        (RAM_INVENTORY_QUANTITIES_BASE + free, [1],
+                         DOMAIN_MAIN_RAM),
+                    ]
+        # Bank fallback: fish ids, full stack, no free slot, or a
+        # short inventory read.
+        bank_qty = blocks[0][0]
+        new_qty = min(_BANK_QUANTITY_CAP, bank_qty + 1)
+        if new_qty == bank_qty:
             return []  # already at cap; quietly drop the delivery
-        return [(address, [new_qty], DOMAIN_MAIN_RAM)]
+        return [(bank_address, [new_qty], DOMAIN_MAIN_RAM)]
 
     return deliver
 
@@ -737,8 +865,9 @@ def _build_item_delivery_routes() -> dict[str, ItemDeliverer]:
       ``RAM_INVENTORY_SIZE`` write happens each tick in
       :meth:`DigimonWorldClient._reconcile_keychain_inventory` from
       the received-keychain count.
-    * 2000-block dw_code (consumables, DV items, key items) → bank-byte
-      increment.
+    * 2000-block dw_code (consumables, DV items, key items) →
+      inventory-first delivery with bank fallback (fish ids stay
+      bank-only; see :func:`_make_item_deliverer`).
     * 3001 → 1000-bit money deliverer.
     * 3002 → 5000-bit money deliverer.
 
@@ -815,7 +944,7 @@ def _build_item_delivery_routes() -> dict[str, ItemDeliverer]:
             routes[name] = _make_technique_bit_deliverer(tech_slot)
             continue
         if 2000 <= dw_code < 2000 + RAM_ITEM_BANK_SIZE:
-            routes[name] = _make_bank_deliverer(dw_code)
+            routes[name] = _make_item_deliverer(dw_code)
         elif dw_code == 3001:
             routes[name] = _make_money_deliverer(1000)
         elif dw_code == 3002:
@@ -970,6 +1099,11 @@ class DigimonWorldClient:
         # God Mode: when True, partner stats are pinned to near-max each
         # tick. Testing-only.
         self._god_mode: bool | None = None
+        # Infinite Auto Pilot QoL: when True, the watcher tops the
+        # on-hand inventory back up to one Auto Pilot (id 22) whenever
+        # none is present and a slot is free. ``None`` = slot_data not
+        # yet received; treated as off (also the option default).
+        self._infinite_auto_pilot: bool | None = None
         # Goal selection from the user's yaml. 0 = machinedramon (fires
         # when DW1's post-Machinedramon ``setTrigger 50`` flips), 1 =
         # prosperity (fires when in-game prosperity meets the
@@ -1110,6 +1244,11 @@ class DigimonWorldClient:
             )
         if self._god_mode is None and ctx.slot_data is not None:
             self._god_mode = bool(ctx.slot_data.get("god_mode", 0))
+        if self._infinite_auto_pilot is None and ctx.slot_data is not None:
+            # Default off — pre-feature seeds get no per-tick top-up.
+            self._infinite_auto_pilot = bool(
+                ctx.slot_data.get("infinite_auto_pilot", 0),
+            )
         if self._fishing_locations is None and ctx.slot_data is not None:
             # Default off — pre-fishing seeds get no per-tick inventory
             # scan.
@@ -1152,6 +1291,8 @@ class DigimonWorldClient:
                 await self._enforce_stat_gain_multiplier(ctx)
             await self._enforce_prosperity(ctx)
             await self._reconcile_keychain_inventory(ctx)
+            if self._infinite_auto_pilot:
+                await self._reconcile_auto_pilot(ctx)
             await self._enforce_agumon_recruited(ctx)
             await self._enforce_coelamon_beaten(ctx)
             if self._bridge_always_open:
@@ -1167,19 +1308,34 @@ class DigimonWorldClient:
             return
 
     async def _wipe_chest_sentinels(self, ctx: DigimonWorldClientContext) -> None:
-        """Remove any AP chest-sentinel items (id 129) from the player's
-        inventory.
+        """Remove any AP chest-sentinel items
+        (:data:`AP_CHEST_SENTINEL_ITEM_ID` = 83, the "AP Item" slot)
+        from the player's on-hand inventory.
 
-        Defensive belt-and-suspenders pairing with the chestGiveItem
-        wrapper installed by Phase 5 piece A's patcher: the wrapper
-        intercepts ``giveItem(129, ...)`` at the script-bytecode chest
-        pickup callsite and short-circuits the inventory write. Live
-        testing showed AP ITEM still landing in inventory in some
-        flows — likely because vanilla DW1 has additional grant paths
-        (NPC dialog, plot triggers, possibly a non-script chest path)
-        that bypass the patched ``jal``. This wipe catches whatever the
-        wrapper missed: each tick, scan the current inventory slots and
-        clear any holding the sentinel ID.
+        **Verdict 2026-08-22: KEEP.** The chestGiveItem wrapper covers
+        exactly ONE ``jal giveItem`` callsite (the chest-take handler
+        at RAM ``0x80102E6C``), but a scan of the SLUS executable finds
+        **11** ``jal 0x800C5240`` callsites, and the FISH_REL overlay
+        carries 2 more (per ``references/DW1-SydPatches/Items.asm``);
+        only the chest handler and the merit-shop callsite are patched.
+        Known/suspected ways id 83 can still reach the inventory:
+
+        * 8 of the 73 patched ``spawnChest`` item bytes belong to
+          mid-cutscene / secondary chest spawns that are not AP
+          locations — any grant of those that flows through a
+          non-wrapped callsite delivers the sentinel.
+        * The merit-shop wrapper's ``mark_bought`` path empirically
+          never executes (see ``docs/merit_shop.md`` §2c); if control
+          instead falls through to its give-item path, buying the "AP
+          Item" merit row delivers id 83.
+        * Historical live testing (pre-2026-05) observed "AP ITEM"
+          landing in inventory in some flows — consistent with the
+          unwrapped-callsite inventory above.
+
+        The wipe is cheap (see below) and idempotent, so it stays as
+        the safety net for every grant path the wrapper does not own.
+        Each tick, scan the current inventory slots and clear any
+        holding the sentinel ID.
 
         Reads the live ``RAM_INVENTORY_SIZE`` byte so the scan covers
         the full active inventory range — Progressive Keychain
@@ -2142,17 +2298,7 @@ class DigimonWorldClient:
         small blank blocks when growing).
         """
 
-        kc_count = sum(
-            1
-            for item in ctx.items_received
-            if ctx.item_names.lookup_in_game(item.item, ctx.game)
-            == KEYCHAIN_ITEM_NAME
-        )
-        target = (
-            RAM_INVENTORY_DEFAULT_SIZE
-            + KEYCHAIN_INVENTORY_PER_ITEM * min(kc_count, KEYCHAIN_MAX_COPIES)
-        )
-        target = min(target, RAM_INVENTORY_MAX_SIZE)
+        target = _keychain_inventory_target(ctx)
         current = (await bizhawk.read(
             ctx.bizhawk_ctx, [(RAM_INVENTORY_SIZE, 1, DOMAIN_MAIN_RAM)],
         ))[0]
@@ -2176,6 +2322,64 @@ class DigimonWorldClient:
                 DOMAIN_MAIN_RAM,
             ))
         await bizhawk.write(ctx.bizhawk_ctx, writes)
+
+    async def _reconcile_auto_pilot(self, ctx: DigimonWorldClientContext) -> None:
+        """Infinite Auto Pilot QoL (slot_data ``infinite_auto_pilot``).
+
+        Each tick, ensure exactly ONE Auto Pilot consumable
+        (:data:`AUTO_PILOT_ITEM_ID` = 22, "warp back to File City") is
+        present in the on-hand inventory:
+
+        * Any slot already holding id 22 → nothing to do (never stack
+          extras, never add a second copy). A held copy with count 0
+          is defensively topped back to 1 in place.
+        * Absent and a free slot exists within the scan bound
+          (:func:`_inventory_scan_bound`) → write id 22 / count 1
+          there. A used-up Auto Pilot therefore reappears on the next
+          watcher tick.
+        * Absent and no free slot → skip this tick and retry on the
+          next one; the top-up waits for a free slot rather than
+          displacing an item (documented in the option's YAML text).
+
+        Runs after :meth:`_reconcile_keychain_inventory` so the size
+        byte is already pinned to the AP-controlled capacity.
+        """
+
+        blocks = await bizhawk.read(ctx.bizhawk_ctx, [
+            (RAM_INVENTORY_SIZE, 1, DOMAIN_MAIN_RAM),
+            (RAM_INVENTORY_ITEM_IDS_BASE, RAM_INVENTORY_MAX_SIZE, DOMAIN_MAIN_RAM),
+            (RAM_INVENTORY_QUANTITIES_BASE, RAM_INVENTORY_MAX_SIZE, DOMAIN_MAIN_RAM),
+        ])
+        if (len(blocks) != 3
+                or len(blocks[0]) != 1
+                or len(blocks[1]) != RAM_INVENTORY_MAX_SIZE
+                or len(blocks[2]) != RAM_INVENTORY_MAX_SIZE):
+            return
+        bound = _inventory_scan_bound(blocks[0][0], ctx)
+        ids = blocks[1]
+        counts = blocks[2]
+        held = next(
+            (i for i in range(bound) if ids[i] == AUTO_PILOT_ITEM_ID), None,
+        )
+        if held is not None:
+            if counts[held] == 0:
+                await bizhawk.write(ctx.bizhawk_ctx, [(
+                    RAM_INVENTORY_QUANTITIES_BASE + held, [1],
+                    DOMAIN_MAIN_RAM,
+                )])
+            return
+        free = next(
+            (i for i in range(bound)
+             if ids[i] == RAM_INVENTORY_EMPTY_SLOT_ID),
+            None,
+        )
+        if free is None:
+            return  # inventory full — wait for a free slot
+        await bizhawk.write(ctx.bizhawk_ctx, [
+            (RAM_INVENTORY_ITEM_IDS_BASE + free, [AUTO_PILOT_ITEM_ID],
+             DOMAIN_MAIN_RAM),
+            (RAM_INVENTORY_QUANTITIES_BASE + free, [1], DOMAIN_MAIN_RAM),
+        ])
 
     async def _check_locations(self, ctx: DigimonWorldClientContext) -> None:
         """Poll per-location RAM signals and send LocationChecks for new ones.
@@ -2318,13 +2522,16 @@ class DigimonWorldClient:
         would re-fire on every revisit. Firing on "count increased"
         only triggers on a genuine catch.
 
-        Why the screen gate: AP-delivered items land in the bank, not
-        the inventory, so a same-tick foreign-world ``Digiseabass``
-        cannot inflate the inventory count. But the player can grab a
-        fish out of the bank and walk into MAYO06 — that would inflate
-        the count off-screen. Gating on the screen makes the only
-        remaining false-positive path "open the Dragon Eye Lake chest
-        while standing on a fishing screen", which we accept.
+        Why the screen gate: AP-delivered fish always land in the bank
+        (the inventory-first deliverer carves the 6 fish ids out as
+        bank-only via :data:`_INVENTORY_BANK_ONLY_IDS` precisely to
+        keep this invariant), so a same-tick foreign-world
+        ``Digiseabass`` cannot inflate the inventory count. But the
+        player can grab a fish out of the bank and walk into MAYO06 —
+        that would inflate the count off-screen. Gating on the screen
+        makes the only remaining false-positive path "open the Dragon
+        Eye Lake chest while standing on a fishing screen", which we
+        accept.
 
         Baseline handling: on the first watcher tick after connect
         (``_last_fish_counts is None``) we record the inventory

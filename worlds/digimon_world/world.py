@@ -140,6 +140,7 @@ class DigimonWorldWorld(World):
             "prosperity_goal",
             "fast_drimogemon",
             "easy_monochromon",
+            "infinite_auto_pilot",
             "stat_gain_multiplier",
             "bridge_unlock",
             "great_canyon_unlock",

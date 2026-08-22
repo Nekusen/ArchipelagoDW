@@ -179,6 +179,25 @@ RAM_INVENTORY_QUANTITIES_BASE: Final = 0x0013D492
 RAM_INVENTORY_SLOT_COUNT: Final = 10
 RAM_INVENTORY_EMPTY_SLOT_ID: Final = 0xFF
 
+# Full-stack quantity for one on-hand inventory slot. Ground truth: the
+# shop inventory-fit scan (``build_shop_runtime_list``, VERIFIED decomp
+# 2026-08-20, ``work/dw1_re/decomp/build_shop_runtime_list/NOTES.md``)
+# treats a held item as mergeable only while its count byte is below
+# 0x63, and refuses a purchase when the item is held with a full stack
+# even when empty slots remain — vanilla keeps ONE stack per item id.
+# The client's inventory-first delivery mirrors these semantics.
+RAM_INVENTORY_STACK_CAP: Final = 0x63  # 99
+
+# DW1 internal item id for "Auto Pilot" (consumable that warps the
+# player back to File City when used from the on-hand inventory).
+# Cross-verified three ways: ITEM_PARA name scan
+# (``tools/dw1_scan_recycle_shop_flex.py`` matches ``b"Auto Pilot\x00"``
+# at slot 0x16), the recycle-shop stock table (id 0x16, price 300), and
+# the items.py catalog ("slot 22 = Auto Pilot — omitted, already in the
+# player's starting inventory"). Used by the client's Infinite Auto
+# Pilot reconciler (``infinite_auto_pilot`` option).
+AUTO_PILOT_ITEM_ID: Final = 0x16  # 22
+
 RAM_ITEM_BANK_BASE: Final = 0x001BDF2C         # per-slot bank entries (verified live)
 RAM_ITEM_BANK_SIZE: Final = 128                # one byte per slot, 128 slots
 RAM_CURRENT_BITS: Final = 0x00134EB8           # u32 LE — money (verified live 2026-04-28)
@@ -198,11 +217,13 @@ RAM_MONOCHROME_PROFIT: Final = 0x0013500C      # Monochromon side-business cash
 # fishing session whose AP location was already fired). The
 # already-present-fish case must NOT fire the location.
 #
-# AP items delivered by the server land in the **bank**, not the inventory
-# (see ``RAM_ITEM_BANK_BASE`` above), so a foreign-world ``Digiseabass``
-# delivery cannot cause a false fire. The only real false-positive path is
-# opening the Dragon Eye Lake chest while standing on screen 6 or 8 — small
-# enough to accept per user direction.
+# AP-delivered fish items always land in the **bank** (the inventory-first
+# delivery added 2026-08-22 carves the 6 fish ids out as bank-only exactly
+# so a foreign-world ``Digiseabass`` delivery cannot inflate the inventory
+# count and cause a false fire — see ``client._INVENTORY_BANK_ONLY_IDS``).
+# The only real false-positive path is opening the Dragon Eye Lake chest
+# while standing on screen 6 or 8 — small enough to accept per user
+# direction.
 #
 # DW1 internal item IDs for the 6 fish (= ``dw_code - 2000`` per the bank
 # layout above; verified against ``worlds.digimon_world.items`` slot 62..67):
@@ -3188,8 +3209,9 @@ ROM_OLD_FISHROD_REMAP_VALUE: Final = bytes((
 #     000452 endSection
 #
 # In AP rando the vanilla giveItem must be neutered — the player
-# receives Mansion Key only via AP delivery (bank slot 119, routed by
-# :func:`_make_bank_deliverer`). Both giveItem sites are rewritten
+# receives Mansion Key only via AP delivery (item id 119, routed
+# inventory-first with bank fallback by the client's
+# :func:`_make_item_deliverer`). Both giveItem sites are rewritten
 # with ``setTrigger 110`` (same 4-byte length: ``1C 00 6E 00``); the
 # cutscene's existing ``setTrigger 110`` at offset 442 becomes
 # redundant but harmless. Net effect: the cutscene plays normally

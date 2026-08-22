@@ -1116,6 +1116,7 @@ class TestQoLSlotData(DigimonWorldTestBase):
     options: ClassVar[dict[str, Any]] = {
         "fast_drimogemon": 1,
         "easy_monochromon": 0,
+        "infinite_auto_pilot": 1,
         "card_locations": True,  # fill capacity for EXCLUDED chests
     }
 
@@ -1123,6 +1124,7 @@ class TestQoLSlotData(DigimonWorldTestBase):
         slot_data = self.world.fill_slot_data()
         self.assertEqual(slot_data["fast_drimogemon"], 1)
         self.assertEqual(slot_data["easy_monochromon"], 0)
+        self.assertEqual(slot_data["infinite_auto_pilot"], 1)
 
 
 # =============================================================================

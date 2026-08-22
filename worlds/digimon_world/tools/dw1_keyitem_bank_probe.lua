@@ -1,8 +1,10 @@
 -- DW1 Key-Item Bank Probe (BizHawk; Nymashock OR Octoshock)
 --
 -- Diagnoses why AP-delivered Mansion Key / Frig Key reportedly do not
--- appear in the in-game bank UI, even though the bank deliverer
--- (`_make_bank_deliverer` in client.py) writes 1 byte to
+-- appear in the in-game bank UI, even though the deliverer
+-- (`_make_item_deliverer` in client.py — historically
+-- `_make_bank_deliverer`; since 2026-08-22 the bank write is the
+-- fallback when the on-hand inventory has no room) writes 1 byte to
 -- `RAM_ITEM_BANK_BASE + slot`. Slot 119 = Mansion Key, slot 123 =
 -- Frig Key.
 --

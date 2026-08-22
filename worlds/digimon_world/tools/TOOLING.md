@@ -123,3 +123,11 @@ decompiled C — prepend its bin to PATH so gcc finds `as`).
 - Long-lived Lua pollers must RE-FETCH `PCSX.getMemPtr()` inside the poll loop — a pointer
   captured once at script load can go stale across internal reallocation (observed
   2026-08-20: canary probe reading stale memory).
+- **Crash root cause found (2026-08-22)**: the REST raw-RAM endpoint IGNORES the `size`
+  parameter and always returns the full 2 MB per call — `dw1_redux_api.py peek` therefore
+  transfers 2 MB every time, which reliably crashes `pcsx-redux.main` mid-play. Read via
+  small Lua `getMemPtr` loops in an `eval` instead; keep REST `peek`/`dump` for parked,
+  breakpoint-free moments only.
+- Reusable in-situ call harness: `work\dw1_re\dw1_call_harness.lua` (pause → forge
+  GPR/pc, park ra at a scratch address → resume → read v0/memory). Judge results by
+  v0+memory effects, never by the paused pc (often mid-vblank at 0x80000080).
