@@ -40,6 +40,7 @@ local mem = PCSX.getMemPtr()
 local out = Support.File.open(cfg.out or "vectors.jsonl", "TRUNCATE")
 local total = 0
 local counts = {}
+local leaked = {}   -- per function: return breakpoints reclaimed because the call never returned
 _G.dw1_vec_bps = {}
 
 local function phys(a) return bit.band(a, 0x1FFFFF) end
@@ -99,6 +100,7 @@ end
 for _, fn in ipairs(cfg.funcs) do
     counts[fn.name] = 0
     local pending = nil
+    local prev_ret_bp = nil
     local entry_bp = PCSX.addBreakpoint(fn.addr, "Exec", 4, "vec:" .. fn.name, function()
         local ok, err = pcall(function()
             if total >= (cfg.max_total or 2000) then return end
@@ -108,6 +110,15 @@ for _, fn in ipairs(cfg.funcs) do
                 a0 = regs.a0, a1 = regs.a1, a2 = regs.a2, a3 = regs.a3,
                 ra = regs.ra, pre = regions_json(fn.pre, regs), regs = regs,
             }
+            -- Reclaim the previous call's return breakpoint if it never fired. A call that does
+            -- not come back through the captured `ra` (tail call, longjmp, or a nested entry
+            -- overwriting the pending slot) would otherwise leave its one-shot breakpoint armed
+            -- forever; across a long session those accumulate until addBreakpoint starts failing
+            -- and the emulator dies. That failure was observed repeatedly before this existed.
+            if prev_ret_bp then
+                pcall(function() prev_ret_bp:remove() end)
+                leaked[fn.name] = (leaked[fn.name] or 0) + 1
+            end
             local ret_bp
             ret_bp = PCSX.addBreakpoint(regs.ra, "Exec", 4, "ret:" .. fn.name, function()
                 local ok2, err2 = pcall(function()
@@ -125,12 +136,14 @@ for _, fn in ipairs(cfg.funcs) do
                         table.concat(dparts, ","), pending.pre, regions_json(fn.post, pending.regs))
                     out:write(line)
                     pending = nil
+                    prev_ret_bp = nil  -- fired: nothing left to reclaim
                     total = total + 1
                     counts[fn.name] = counts[fn.name] + 1
                 end)
                 if not ok2 then print("DW1_VEC ret error: " .. tostring(err2)) end
                 return false  -- one-shot: remove this return breakpoint
             end)
+            prev_ret_bp = ret_bp
         end)
         if not ok then print("DW1_VEC entry error: " .. tostring(err)) end
     end)
@@ -144,7 +157,10 @@ PCSX.WebServer.Handlers = PCSX.WebServer.Handlers or {}
 PCSX.WebServer.Handlers.vecstat = function()
     local parts = {}
     for k, v in pairs(counts) do parts[#parts + 1] = string.format('"%s":%u', k, v) end
-    return string.format('{"total":%u,%s}\n', total, table.concat(parts, ","))
+    local lparts = {}
+    for k, v in pairs(leaked) do lparts[#lparts + 1] = string.format('"%s":%u', k, v) end
+    local fmt = '{"total":%u,%s,"unreturned":{%s}}' .. string.char(10)
+    return string.format(fmt, total, table.concat(parts, ","), table.concat(lparts, ","))
 end
 
 -- Crude autoplay: alternate START and X (cross) presses to get from the title screen into the

@@ -11,7 +11,13 @@
 -- of each press. Known blind-mash blockers: the two name-entry screens in the intro (cursor
 -- starts on OK with an empty name; type a letter first: RIGHT, CROSS, then LEFT, DOWN, CROSS).
 
-local pad = PCSX.SIO0.slots[1].pads[1]
+-- Resolve the pad on EVERY use, never once at load time. `PCSX.loadSaveState()` replaces the
+-- pad object, and a cached reference silently no-ops afterwards: `setOverride` appears to work,
+-- returns no error, and the game just never sees the button. That failure mode reads exactly
+-- like "the game ignored the input" and has cost more than one confused capture session.
+local function pad()
+    return PCSX.SIO0.slots[1].pads[1]
+end
 local B = PCSX.CONSTS.PAD.BUTTON
 
 if _G.dw1_seq and _G.dw1_seq.listener then _G.dw1_seq.listener:remove() end
@@ -22,11 +28,11 @@ _G.dw1_seq.listener = PCSX.Events.createEventListener("GPU::Vsync", function()
     local q = s.queue[1]
     if not q then return end
     if s.frame >= q.at and not q.pressed then
-        pad.setOverride(B[q.btn])
+        pad().setOverride(B[q.btn])
         q.pressed = true
     end
     if s.frame >= q.at + (q.hold or 8) and q.pressed then
-        pad.clearOverride(B[q.btn])
+        pad().clearOverride(B[q.btn])
         table.remove(s.queue, 1)
     end
 end)
@@ -48,20 +54,20 @@ function _G.dw1_masher(mode)
         _G.dw1_masher_listener:remove()
         _G.dw1_masher_listener = nil
     end
-    for _, b in pairs(B) do pad.clearOverride(b) end
+    for _, b in pairs(B) do pad().clearOverride(b) end
     if not mode then return "masher off" end
     local f = 0
     _G.dw1_masher_listener = PCSX.Events.createEventListener("GPU::Vsync", function()
         f = f + 1
         if mode == "x" then
             local ph = f % 50
-            if ph == 0 then pad.setOverride(B.CROSS) elseif ph == 10 then pad.clearOverride(B.CROSS) end
+            if ph == 0 then pad().setOverride(B.CROSS) elseif ph == 10 then pad().clearOverride(B.CROSS) end
         else -- 'title'
             local ph = f % 120
-            if ph == 0 then pad.setOverride(B.START)
-            elseif ph == 20 then pad.clearOverride(B.START)
-            elseif ph == 60 then pad.setOverride(B.CROSS)
-            elseif ph == 80 then pad.clearOverride(B.CROSS)
+            if ph == 0 then pad().setOverride(B.START)
+            elseif ph == 20 then pad().clearOverride(B.START)
+            elseif ph == 60 then pad().setOverride(B.CROSS)
+            elseif ph == 80 then pad().clearOverride(B.CROSS)
             end
         end
     end)
