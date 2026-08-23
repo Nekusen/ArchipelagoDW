@@ -1137,6 +1137,11 @@ assert set(TECH_NAMES_BY_SLOT) == set(TECH_MASTERY_SLOTS), (
 # mirrors vanilla by setting both bits (see the client's technique
 # deliverer and reconcile loop). Note ``forgetMove`` @ 0x800E66E0 never
 # clears slot 48 on its own, matching vanilla's asymmetry.
+# Vanilla's pairing is SYMMETRIC -- learnMove(0x30) sets 44 as well, and
+# learnMove(0x39) sets 55 as well (8 replayed vectors each). This table is
+# directional because AP only ever grants the primary of each pair: 48 and 57
+# are outside TECH_MASTERY_SLOTS, so they never appear as a delivered slot.
+# If either is ever added to TECH_NAMES_BY_SLOT, make this bidirectional.
 TECH_MASTERY_COMPANION_SLOTS: Final[dict[int, int]] = {
     44: 48,  # Dynamite Kick   -> the "Dynamite Kick v2" duplicate slot
     55: 57,  # Horizontal Kick -> the slot past the player-masterable range
