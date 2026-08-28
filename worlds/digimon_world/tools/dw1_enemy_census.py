@@ -97,6 +97,24 @@ def load_move_names(slus: bytes) -> list[str]:
     return names
 
 
+MOVE_DATA = 0x8012623C        # Move[122] x 16 B: i32 distance, i16 power, u8 mpCost, iframes, range,
+NUM_MOVE_DATA = 122           # special (element), status, accuracy, statusChance, 3 unknown
+
+
+def load_move_data(slus: bytes) -> list[dict]:
+    """Every technique: id, name (MOVE_NAMES has 121 entries; the rest fall back to ``techNN``),
+    power, MP cost, element and status class."""
+    out = []
+    for i in range(NUM_MOVE_DATA):
+        ptr = struct.unpack_from("<I", slus_bytes(slus, MOVE_NAMES + i * 4, 4))[0]
+        name = cstr(slus, ptr) if 0x80090800 <= ptr < 0x80200000 else f"tech{i:02X}"
+        rec = slus_bytes(slus, MOVE_DATA + i * 16, 16)
+        _distance, power, mp_cost, _iframes, rng, element, status = struct.unpack_from("<ihBBBBB", rec, 0)
+        out.append({"id": i, "name": name, "power": power, "mp": mp_cost, "range": rng,
+                    "element": element, "status": status})
+    return out
+
+
 def read_disc_file(binf, lba: int, size: int) -> bytes:
     chunks = []
     for s in range((size + USER - 1) // USER):
@@ -244,12 +262,15 @@ def check_dump(sites: list[tuple[int, int, int, int, int]]) -> int:
 
 
 def emit_python(path: str, digimon: list[dict], models: dict[int, int], rows: list[dict],
-                sites: list[tuple[int, int, int, int, int]]) -> None:
+                sites: list[tuple[int, int, int, int, int]], moves: list[dict]) -> None:
     lines = [
         '"""Field-Digimon data for Digimon World 1 (SLUS-01032) -- GENERATED, do not edit by hand.',
         "",
-        "Produced by ``tools/dw1_enemy_census.py --emit-python`` from the vanilla disc.  Three tables:",
+        "Produced by ``tools/dw1_enemy_census.py --emit-python`` from the vanilla disc.  Four tables:",
         "",
+        "* :data:`MOVES` -- one row per ``MOVE_DATA`` technique (122): ``(id, name, power, mp_cost, element,",
+        "  status)``.  ``power`` is the damage base the battle uses (0 = buff / status-only move); ``element``",
+        "  indexes the 7x7 affinity matrix the enemy AI and the partner's battle-learn check consult.",
         "* :data:`SPECIES` -- one row per ``DIGIMON_DATA`` entry (180): ``(id, name, level, moves16, heap)``.",
         "  ``moves16`` is the species' 16-slot technique list as a 32-char hex string (``ff`` = empty slot);",
         "  a field record's move byte ``0x2E + k`` selects slot ``k``.  ``heap`` is the malloc3 footprint of",
@@ -269,8 +290,15 @@ def emit_python(path: str, digimon: list[dict], models: dict[int, int], rows: li
         "",
         "from typing import Final",
         "",
-        "SPECIES: Final[tuple[tuple[int, str, int, str, int], ...]] = (",
+        "MOVES: Final[tuple[tuple[int, str, int, int, int, int], ...]] = (",
     ]
+    lines.extend(
+        f"    ({m['id']}, {json.dumps(m['name'])}, {m['power']}, {m['mp']}, {m['element']}, {m['status']}),"
+        for m in moves
+    )
+    lines.append(")")
+    lines.append("")
+    lines.append("SPECIES: Final[tuple[tuple[int, str, int, str, int], ...]] = (")
     for d in digimon:
         mv = bytes(d["moves"]).hex()
         lines.append(f"    ({d['id']}, {json.dumps(d['name'])}, {d['level']}, \"{mv}\", {models.get(d['id'], 0)}),")
@@ -380,7 +408,7 @@ def main() -> int:
                 code = cstr(slus, ptr)
                 entry = files.get(f"/CHDAT/MMD{d['id'] // 30}/{code}.MMD")
                 models[d["id"]] = ((entry[1] + 0x7FF) & ~0x7FF) if entry else 0
-            emit_python(args.emit_python, digimon, models, rows, sites)
+            emit_python(args.emit_python, digimon, models, rows, sites, load_move_data(slus))
             print(f"wrote {args.emit_python}")
     if args.map is not None:
         for r in rows:

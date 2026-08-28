@@ -178,12 +178,23 @@ class DigimonWorldWorld(World):
         if plan.empty:
             return
         name = self.multiworld.player_name[self.player]
-        if plan.region_factors:
-            spoiler_handle.write(f"\n\nEnemy stat scaling ({name}):\n")
-            for region in sorted(plan.region_factors, key=lambda r: (plan.region_depths.get(r, 0), r)):
+
+        def describe(target: enemies.Targets) -> str:
+            level = "vanilla" if target.tech_level is None else f"~{target.tech_level:.0f} power"
+            return f"stats x{target.stat_factor:.2f}, techniques {level}"
+
+        if plan.region_targets:
+            spoiler_handle.write(f"\n\nEnemy stats, progressive ({name}):\n")
+            for region in sorted(plan.region_targets, key=lambda r: (plan.region_depths.get(r, 0), r)):
                 spoiler_handle.write(
-                    f"  {region}: sphere {plan.region_depths.get(region, '?')}, x{plan.region_factors[region]:.2f}\n"
+                    f"  {region}: sphere {plan.region_depths.get(region, '?')}, "
+                    f"{describe(plan.region_targets[region])}\n"
                 )
+        if plan.screen_targets:
+            spoiler_handle.write(f"\n\nEnemy stats, full random ({name}):\n")
+            for map_id in sorted(plan.screen_targets):
+                screen = enemies.SCREEN_FILENAMES.get(map_id, str(map_id))
+                spoiler_handle.write(f"  {screen}: {describe(plan.screen_targets[map_id])}\n")
         if plan.substitutions:
             spoiler_handle.write(f"\n\nEnemy randomization ({name}):\n")
             for (map_id, species), substitute in sorted(plan.substitutions.items()):

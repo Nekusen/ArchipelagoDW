@@ -22,9 +22,9 @@ project moved out of "build the world" and into **feature expansion + polish + v
 | World version | 0.6.0 (`minimum_ap_version` 0.6.7) |
 | Locations / items | 279 / 217 |
 | YAML options | 51, in 5 option groups |
-| World test suite | **1037 passed**, 4 skipped, 9304 subtests, ~15 s with `-n auto` |
+| World test suite | **1044 passed**, 4 skipped, 9427 subtests, ~16 s with `-n auto` |
 | Lint | `ruff` at a 311-finding baseline (303 pre-existing + the census tool's CLI prints, T201, like the other lab tools) |
-| Commits ahead of `main` | 98 |
+| Commits ahead of `main` | 99 |
 | Decomp coverage | **31 / 1120** SLUS game functions verified — 2.8 % by count, **14.5 % of static call sites** |
 
 ### 1.1 What is shipped
@@ -79,9 +79,11 @@ the record type plus the `loadDigimon`/`setDigimon` operands of the boot-residen
 Both requested features are therefore **pure data patches** (no engine hook), lab-validated
 through the three nets including two real battles on a patched disc:
 
-- **`enemy_scaling`** ("progressive balancing") — each region's vanilla stat budget is
-  re-assigned by the region's sphere depth in the seed, same factor for a region's bosses;
-  `enemy_scaling_strength` blends towards vanilla.
+- **`enemy_stats`** (`vanilla` / `progressive` / `full_random`) — `progressive` re-assigns each
+  region's vanilla stat budget **and technique power** by the region's sphere depth in the seed
+  (same factor for a region's bosses; `enemy_stats_strength` blends towards vanilla);
+  `full_random` gives every screen the difficulty of a random vanilla screen and random
+  techniques from each species' list.
 - **`enemy_randomization`** (`wild` / `wild_and_story`, `same_level` / `any`) — per-screen species
   swaps drawn from fighters whose model fits the original's heap budget; stats kept, movesets
   re-picked from the substitute's technique list.
@@ -139,7 +141,7 @@ savestates are now for.
 | Item | Code source (dw_decomp unless noted) | Savestates required | Effort |
 | --- | --- | --- | --- |
 | **In-game check notifications** | Dialog page/box driver `MAIN_func_800FF0FC` and renderer `drawString2` in `src/main/script_common.c` — **in C, nothing left to decompile**. | `dialog_columns.state` — now for *testing* an injected string that uses the tab/column codes, not for understanding them | **MEDIUM → LOW-MEDIUM**: design + one patch. Low-risk route is a line-buffer substitution at `0x801BE174 + row*0x40`, not a renderer hook. |
-| ~~**Enemy-stat scaling by sphere**~~ **SHIPPED 2026-08-28** as `enemy_scaling` | Turned out to be data: every field Digimon is a `.MAP` record (`loadMapDigimon`, Ghidra export) that the battle copies verbatim (`BTL_initializeCombat`); no code hook. | Validated: `enemy_poc_map2.state`, `enemy_poc_battle.state` (edited record fought) | Done in the lab (3 nets). **Open**: the user's BizHawk pass, and whether the default policy (vanilla region budgets re-assigned by sphere depth, one factor per region so bosses stay proportionally tougher) is the balance they want. |
+| ~~**Enemy-stat scaling by sphere**~~ **SHIPPED 2026-08-28** as `enemy_stats: progressive` | Turned out to be data: every field Digimon is a `.MAP` record (`loadMapDigimon`, Ghidra export) that the battle copies verbatim (`BTL_initializeCombat`); no code hook. | Validated: `enemy_poc_map2.state`, `enemy_poc_battle.state` (edited record fought) | Done in the lab (3 nets). **Open**: the user's BizHawk pass, and whether the default policy (vanilla region budgets re-assigned by sphere depth, one factor per region so bosses stay proportionally tougher) is the balance they want. |
 | ~~**Wild-digimon randomization**~~ **SHIPPED 2026-08-28** as `enemy_randomization` | Species = record type + MAPHEAD.SCN `loadDigimon`/`setDigimon` operands (`scriptSetDigimon` guard); models are malloc3'd whole (`loadMMD`), so swaps are heap-budgeted. | Validated: `enemy_poc_map0.state`, `enemy_poc_icemon_battle.state` (Icemon swap fought to the end) | Done for `wild`; `wild_and_story` ships **untested in a story cutscene** (a substitute may lack a scripted animation). Heap slack beyond size-neutral swaps unmeasured. |
 | **Fishing locations (expansion)** | `src/fish/` (95 % in C). The 6 `FISH_REL` ITEM_PARA readers our relocation patched can now be read in C. | `fishing.state` — **still needed**: the relocation's FISH_REL readers have never been *exercised*; the lab has no fishing state | MEDIUM |
 | **Digivolution (v2 scope)** | `calculateRequirementScore`, `getNumMasteredMoves`, `hasDigimonRaised` in `src/main/evolution.c` / `script_common.c`; requirement table `EVO_REQ_DATA` @ 0x8012ABEC | `digivolve_accepted.state`, `species_raised.state` — for validating an AP digivolution item, not for RE | MEDIUM. The "ever raised" flag (trigger 512+form) can **veto** a digivolution whose stat requirements are met — an AP digivolution item must account for it. |

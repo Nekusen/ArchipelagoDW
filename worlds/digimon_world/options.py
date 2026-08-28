@@ -1082,36 +1082,45 @@ def get_locked_regions(options: "DigimonWorldOptions") -> frozenset[str]:
     return frozenset(options.region_locking_list.value) & frozenset(LOCKABLE_REGIONS)
 
 
-class EnemyScaling(Choice):
-    """Re-balance every field Digimon's stats by where its area falls in this seed's logic.
+class EnemyStats(Choice):
+    """How every field Digimon's stats and techniques are set (wild fodder and bosses alike).
 
-    * ``off`` — vanilla stats everywhere.
-    * ``vanilla_curve`` — each region's vanilla difficulty is re-assigned by the
-      region's logical depth (the sphere in which it first becomes reachable): the
-      regions you can reach first get the weakest vanilla stat budgets, the deepest
-      the strongest, so an area that the item placement opens early plays like an
-      early area regardless of where it sits in the vanilla game. All Digimon of a
-      region scale by the same factor, so bosses stay proportionally tougher than
-      the fodder around them. Combat stat gains and the Bits a fight pays follow
-      the enemy's stats, as in vanilla.
+    * ``vanilla`` — stats and techniques as on the disc. A species swapped in by
+      ``enemy_randomization`` receives the techniques of its own list closest in
+      power to the ones the original used.
+    * ``progressive`` — each region's vanilla difficulty (stat budget *and* technique
+      power) is re-assigned by the region's logical depth in this seed, i.e. the
+      sphere in which it first becomes reachable: the regions you can reach first
+      get the weakest vanilla numbers, the deepest the strongest, so an area the
+      item placement opens early plays like an early area wherever it sits in the
+      vanilla game. All Digimon of a region scale by the same factor and re-pick
+      their techniques around the region's target power, so bosses stay
+      proportionally tougher than the fodder around them.
+    * ``full_random`` — every screen borrows the difficulty of a random vanilla
+      screen (stats stay inside the vanilla range) and its Digimon draw random
+      techniques from their lists.
 
-    Pure data rewrite of the per-screen enemy records on the disc — no code hooks.
+    A Digimon can only ever use the 16 techniques of its species list; AI weights
+    and the number of techniques per Digimon never change. Combat stat gains and
+    the Bits a fight pays follow the enemy's stats, as in vanilla. Pure data
+    rewrite of the per-screen enemy records — no code hooks.
     """
 
-    display_name = "Enemy Stat Scaling"
-    option_off = 0
-    option_vanilla_curve = 1
-    default = option_off
+    display_name = "Enemy Stats"
+    option_vanilla = 0
+    option_progressive = 1
+    option_full_random = 2
+    default = option_vanilla
 
 
-class EnemyScalingStrength(Range):
-    """How far ``enemy_scaling`` moves a region from its vanilla stats (percent).
-
-    0 leaves vanilla stats; 100 applies the full depth-based re-assignment; values
-    in between blend the two. Ignored when ``enemy_scaling`` is ``off``.
+class EnemyStatsStrength(Range):
+    """How far ``enemy_stats: progressive`` moves a region from its vanilla numbers
+    (percent). 0 leaves vanilla stats and techniques; 100 applies the full
+    depth-based re-assignment; values in between blend the two. Ignored by the
+    other modes.
     """
 
-    display_name = "Enemy Stat Scaling Strength"
+    display_name = "Enemy Stats Strength"
     range_start = 0
     range_end = 100
     default = 100
@@ -1130,9 +1139,9 @@ class EnemyRandomization(Choice):
       animation and stand still where the original posed.
 
     Substitutes are drawn from species whose 3D model needs no more memory than the
-    original's, so no screen ever loads more model data than vanilla. Each swapped
-    Digimon keeps the original's stats and receives a moveset re-picked from its own
-    technique list.
+    original's, so no screen ever loads more model data than vanilla. A swapped
+    Digimon keeps the original record's stats; its techniques come from its own
+    list, chosen as ``enemy_stats`` dictates (power-equivalent under ``vanilla``).
     """
 
     display_name = "Enemy Randomization"
@@ -1203,8 +1212,8 @@ class DigimonWorldOptions(PerGameCommonOptions):
     fishing_locations: FishingLocations
     arena_locations: ArenaLocations
     technique_rewards: TechniqueRewards
-    enemy_scaling: EnemyScaling
-    enemy_scaling_strength: EnemyScalingStrength
+    enemy_stats: EnemyStats
+    enemy_stats_strength: EnemyStatsStrength
     enemy_randomization: EnemyRandomization
     enemy_randomization_tier: EnemyRandomizationTier
     god_mode: GodMode
@@ -1222,7 +1231,7 @@ option_groups: list[OptionGroup] = [
             StarterAllowInTraining, StarterAllowRookie,
             StarterAllowChampion, StarterAllowUltimate,
             StarterUseWeakestTech,
-            EnemyScaling, EnemyScalingStrength,
+            EnemyStats, EnemyStatsStrength,
             EnemyRandomization, EnemyRandomizationTier,
         ],
     ),

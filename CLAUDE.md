@@ -184,7 +184,7 @@ These come from [docs/style.md](docs/style.md) and the ruff config and override 
   savestates captured; `tools/dw1_warp_state.py` produces a savestate on
   any screen unattended. Same day: the **enemy data model** was verified
   (every field Digimon is a `.MAP` record + MAPHEAD.SCN operands — no code
-  hooks needed) and shipped as `enemy_scaling` (stats re-balanced by
+  hooks needed) and shipped as `enemy_stats` (stats + techniques re-balanced by
   sphere depth) and `enemy_randomization` (species substitution, heap-
   budgeted), lab-validated through the three nets incl. real battles;
   data table `data/enemy_records.py`, module `enemies.py`. Full detail:

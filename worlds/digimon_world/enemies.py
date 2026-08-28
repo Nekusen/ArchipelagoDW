@@ -1,8 +1,8 @@
-"""Enemy stat scaling and species randomization for Digimon World 1.
+"""Enemy stats, technique and species randomization for Digimon World 1.
 
-Both features are pure data rewrites of the vanilla disc -- no code hooks:
+All of it is a pure data rewrite of the vanilla disc -- no code hooks:
 
-* Every field Digimon (wild fodder and story bosses alike) is a record in its screen's
+* Every field Digimon (wild fodder and story boss alike) is a record in its screen's
   ``.MAP`` file (:mod:`.data.enemy_records`). ``loadMapDigimon`` copies the record into
   ``NPC_ENTITIES`` when the screen loads and the battle engine takes stats and moveset from
   there verbatim, so rewriting the nine stat words / four move bytes of a record changes
@@ -13,25 +13,38 @@ Both features are pure data rewrites of the vanilla disc -- no code hooks:
   type). Rewriting all of them in lockstep substitutes the species; the model comes from the
   species' ``.MMD`` (malloc3'd whole, so the substitute must not need more heap than the
   original) and its techniques from ``DIGIMON_DATA``.
+* A record's move bytes are animation slots ``0x2E + k`` into the species' 16-slot technique
+  list, so a Digimon can only ever use its own list; "scaling techniques" means choosing the
+  entries of that list whose ``MOVE_DATA.power`` fits the intended level.
 
 Lab-validated 2026-08-28 through the three PATCH_PROCESS nets (parser round-trip, live RAM
 after a fresh screen load, cold boot from the patched disc), including two real battles
 (edited Goburimon stats, substituted Icemon fought to the end).
 
-**Scaling policy ("progressive balancing")** -- ``enemy_scaling: vanilla_curve``: each region's
-vanilla difficulty (mean stat budget of its wild records) is re-assigned by the region's
-*logical depth* in this seed (the sphere in which it first becomes reachable): the shallowest
-regions receive the weakest vanilla budgets, the deepest the strongest, interpolating over the
-vanilla distribution. All records of a region scale by the same factor, so a boss stays
-proportionally tougher than the fodder around it. ``enemy_scaling_strength`` blends between
-vanilla (0) and the full re-assignment (100).
+Two independent options:
 
-**Randomization policy** -- ``enemy_randomization: wild`` swaps every wild species on a screen
-for another fighting species whose model fits the original's heap budget (and, with
-``enemy_randomization_tier: same_level``, of the same evolution level), keeping the record's
-stats and re-picking its moveset from the substitute's technique list. ``wild_and_story`` also
+**``enemy_randomization``** (off / wild / wild_and_story, plus ``enemy_randomization_tier``) swaps
+every wild species on a screen for another fighting species whose model fits the original's
+heap budget (and, with ``same_level``, of the same evolution level). ``wild_and_story`` also
 swaps story and recruit fights. Non-fighting NPCs, the intro tutorial and cutscene rooms are
 never touched.
+
+**``enemy_stats``** decides stats *and* movesets together:
+
+* ``vanilla`` -- records keep their stats. A swapped species receives, from its own list, the
+  techniques closest in power to the ones the original record used.
+* ``progressive`` -- each region's vanilla difficulty (mean stat budget and mean technique
+  power of its wild records) is re-assigned by the region's *logical depth* in this seed (the
+  sphere in which it first becomes reachable): the shallowest regions receive the weakest
+  vanilla budgets, the deepest the strongest. All records of a region scale by the same
+  factor and re-pick their techniques around the region's target power, so a boss stays
+  proportionally tougher than the fodder around it. ``enemy_stats_strength`` blends between
+  vanilla (0) and the full re-assignment (100).
+* ``full_random`` -- every screen borrows the difficulty of a random vanilla screen (stats
+  scaled to that screen's budget, so nothing leaves the vanilla range) and its Digimon draw
+  random techniques from their lists.
+
+AI weights (priorities) are never changed; a record keeps as many techniques as it had.
 """
 
 from __future__ import annotations
@@ -42,7 +55,7 @@ from typing import TYPE_CHECKING, Final, NamedTuple
 from BaseClasses import CollectionState
 
 from .data.addresses import ROM_RECRUITMENT, SCREEN_FILENAMES
-from .data.enemy_records import FIELD_RECORDS, MAPHEAD_SITES, SPECIES
+from .data.enemy_records import FIELD_RECORDS, MAPHEAD_SITES, MOVES, SPECIES
 
 if TYPE_CHECKING:
     from .world import DigimonWorldWorld
@@ -51,6 +64,18 @@ if TYPE_CHECKING:
 # =============================================================================
 # Typed views over the generated tables
 # =============================================================================
+
+class Move(NamedTuple):
+    id: int
+    name: str
+    power: int          # damage base; 0 = buff / status-only technique
+    mp_cost: int
+    element: int        # 0..6, index into the affinity matrix
+    status: int
+
+
+MOVES_BY_ID: Final[dict[int, Move]] = {row[0]: Move(*row) for row in MOVES}
+
 
 class Species(NamedTuple):
     id: int
@@ -63,6 +88,14 @@ class Species(NamedTuple):
     def tech_slots(self) -> tuple[int, ...]:
         """Indices ``k`` whose technique exists; a record move byte is ``0x2E + k``."""
         return tuple(k for k, tech in enumerate(self.moves) if tech != 0xFF)
+
+    @property
+    def damaging_slots(self) -> tuple[int, ...]:
+        """Slots whose technique deals damage (power > 0)."""
+        return tuple(k for k in self.tech_slots if self.slot_power(k) > 0)
+
+    def slot_power(self, slot: int) -> int:
+        return MOVES_BY_ID[self.moves[slot]].power
 
     @property
     def fights(self) -> bool:
@@ -98,6 +131,24 @@ class FieldRecord(NamedTuple):
         """A scalar difficulty measure comparable across records."""
         return (self.hp + self.mp / 2) / 10 + self.off + self.defense + self.spd + self.brn
 
+    @property
+    def move_count(self) -> int:
+        """Techniques the record resolves to a real entry of its species list.
+
+        235 vanilla records point some slots past the end of their list (Ogremon clones,
+        Monochromon's shop customers ...); ``loadBattleData`` drops those, so a record with
+        no valid technique is a non-combat placement and is left alone.
+        """
+        return len(self.tech_powers())
+
+    def tech_powers(self, species: Species | None = None) -> tuple[int, ...]:
+        """Power of each technique the record uses, in slot order."""
+        species = species or SPECIES_BY_ID[self.type]
+        return tuple(
+            species.slot_power(move - ANIM_MOVE_BASE) for move in self.moves
+            if move != NO_MOVE and 0 <= move - ANIM_MOVE_BASE < 16 and species.moves[move - ANIM_MOVE_BASE] != 0xFF
+        )
+
 
 class MapheadSite(NamedTuple):
     map: int
@@ -129,6 +180,10 @@ STAT_CAP_HP_MP: Final = 9999
 STAT_CAP_OTHER: Final = 999
 BITS_CAP: Final = 9999
 
+STATS_VANILLA: Final = 0
+STATS_PROGRESSIVE: Final = 1
+STATS_FULL_RANDOM: Final = 2
+
 
 # =============================================================================
 # Record classification
@@ -151,6 +206,10 @@ CLONE_SPECIES_BASE: Final = 120
 #: the Sukamon quest variants of Native Forest, and the ending / opening rooms.
 EXCLUDED_SCREENS: Final[frozenset[int]] = frozenset({109, 110, 111, 236, 237, 238})
 
+#: Regions whose "wild" records are decoration (the baby Digimon strolling around File City)
+#: or otherwise never start a field battle: no metrics, no scaling, no substitution there.
+NON_COMBAT_REGIONS: Final[frozenset[str]] = frozenset({"File City"})
+
 CLASS_WILD: Final = "wild"
 CLASS_STORY: Final = "story"
 CLASS_NPC: Final = "npc"
@@ -166,6 +225,14 @@ def classify_record(record: FieldRecord) -> str:
             or record.type >= CLONE_SPECIES_BASE):
         return CLASS_STORY
     return CLASS_WILD
+
+
+def _combat_screen(map_id: int) -> bool:
+    return map_id not in EXCLUDED_SCREENS and screen_region(map_id) not in NON_COMBAT_REGIONS
+
+
+def _touchable(record: FieldRecord) -> bool:
+    return _combat_screen(record.map) and classify_record(record) != CLASS_NPC and record.move_count > 0
 
 
 # =============================================================================
@@ -254,33 +321,122 @@ def compute_region_depths(world: DigimonWorldWorld) -> dict[str, int]:
 
 
 # =============================================================================
-# Plans
+# Vanilla difficulty metrics
 # =============================================================================
 
-class EnemyPlan(NamedTuple):
-    """Everything the patcher needs; built once in ``post_fill``."""
-
-    #: ``(map, slot) -> nine stat words`` (hp, mp, cur_hp, cur_mp, off, def, spd, brn, bits)
-    stat_overrides: dict[tuple[int, int], tuple[int, ...]]
-    #: ``(map, original species) -> substitute species``
-    substitutions: dict[tuple[int, int], int]
-    #: ``(map, slot) -> (moves4, prio4)`` for records whose species changed
-    move_overrides: dict[tuple[int, int], tuple[tuple[int, ...], tuple[int, ...]]]
-    #: region -> depth, for the spoiler / tests
-    region_depths: dict[str, int]
-    #: region -> scale factor actually applied
-    region_factors: dict[str, float]
-
-    @property
-    def empty(self) -> bool:
-        return not (self.stat_overrides or self.substitutions or self.move_overrides)
+class WildMetrics(NamedTuple):
+    budget: float                 # mean stat budget of the wild records
+    tech_level: float | None      # mean power of the damaging techniques they use (None: none)
 
 
-EMPTY_PLAN: Final = EnemyPlan({}, {}, {}, {}, {})
+class Targets(NamedTuple):
+    stat_factor: float            # multiplier applied to every fighter record's stats
+    tech_level: float | None      # power the techniques are re-picked around (None: keep)
+
+
+def _metrics(records: list[FieldRecord]) -> WildMetrics:
+    powers = [p for record in records for p in record.tech_powers() if p > 0]
+    return WildMetrics(
+        sum(r.budget for r in records) / len(records),
+        sum(powers) / len(powers) if powers else None,
+    )
+
+
+def _wild_records() -> list[FieldRecord]:
+    return [r for r in RECORDS if _touchable(r) and classify_record(r) == CLASS_WILD
+            and screen_region(r.map) is not None]
+
+
+def region_wild_metrics() -> dict[str, WildMetrics]:
+    """Vanilla wild-record metrics per region (regions with at least one wild record)."""
+
+    groups: dict[str, list[FieldRecord]] = {}
+    for record in _wild_records():
+        groups.setdefault(screen_region(record.map), []).append(record)   # type: ignore[arg-type]
+    return {region: _metrics(records) for region, records in groups.items()}
+
+
+def screen_wild_metrics() -> dict[int, WildMetrics]:
+    """Vanilla wild-record metrics per screen (screens with at least one wild record)."""
+
+    groups: dict[int, list[FieldRecord]] = {}
+    for record in _wild_records():
+        groups.setdefault(record.map, []).append(record)
+    return {map_id: _metrics(records) for map_id, records in groups.items()}
+
+
+def region_wild_budgets() -> dict[str, float]:
+    return {region: metrics.budget for region, metrics in region_wild_metrics().items()}
+
+
+# =============================================================================
+# Targets: progressive (per region) and full random (per screen)
+# =============================================================================
 
 SCALE_FACTOR_MIN: Final = 0.2
 SCALE_FACTOR_MAX: Final = 5.0
 
+
+def _blend(vanilla: float, assigned: float, strength: int) -> float:
+    return vanilla + (assigned - vanilla) * strength / 100.0
+
+
+def plan_region_targets(region_depths: dict[str, int], strength: int) -> dict[str, Targets]:
+    """Progressive: vanilla difficulty distribution re-assigned by logical depth.
+
+    Regions are ranked by depth (ties broken by vanilla budget so the vanilla order survives
+    inside a sphere); rank ``i`` of ``n`` receives the ``i``-th smallest vanilla budget and,
+    among the regions that have one, the ``i``-th smallest vanilla technique level.
+    ``strength`` (0..100) blends both towards vanilla.
+    """
+
+    metrics = region_wild_metrics()
+    regions = [region for region in metrics if region in region_depths]
+    if len(regions) < 2 or strength <= 0:
+        return {}
+    ordered = sorted(regions, key=lambda region: (region_depths[region], metrics[region].budget))
+    budgets = sorted(metrics[region].budget for region in regions)
+    targets: dict[str, Targets] = {}
+    for region, budget in zip(ordered, budgets, strict=True):
+        raw = budget / metrics[region].budget
+        factor = max(SCALE_FACTOR_MIN, min(SCALE_FACTOR_MAX, _blend(1.0, raw, strength)))
+        targets[region] = Targets(factor, None)
+    with_level = [region for region in ordered if metrics[region].tech_level is not None]
+    levels = sorted(metrics[region].tech_level for region in with_level)   # type: ignore[type-var]
+    for region, level in zip(with_level, levels, strict=True):
+        vanilla_level = metrics[region].tech_level
+        assert vanilla_level is not None
+        targets[region] = Targets(targets[region].stat_factor, _blend(vanilla_level, level, strength))
+    return targets
+
+
+def plan_full_random_targets(rng: Random) -> dict[int, Targets]:
+    """Full random: every screen borrows the difficulty of a random vanilla screen."""
+
+    metrics = screen_wild_metrics()
+    donors = sorted(metrics)
+    targets: dict[int, Targets] = {}
+    for map_id in sorted(metrics):
+        donor = metrics[rng.choice(donors)]
+        factor = max(SCALE_FACTOR_MIN, min(SCALE_FACTOR_MAX, donor.budget / metrics[map_id].budget))
+        targets[map_id] = Targets(factor, donor.tech_level)
+    return targets
+
+
+def screen_targets_from_regions(region_targets: dict[str, Targets]) -> dict[int, Targets]:
+    """Expand per-region targets to every screen with records in those regions."""
+
+    out: dict[int, Targets] = {}
+    for map_id in RECORDS_BY_MAP:
+        region = screen_region(map_id)
+        if region in region_targets and _combat_screen(map_id):
+            out[map_id] = region_targets[region]
+    return out
+
+
+# =============================================================================
+# Stat and move rewrites
+# =============================================================================
 
 def _clamp(value: float, low: int, high: int) -> int:
     return max(low, min(high, round(value)))
@@ -301,54 +457,89 @@ def scale_stats(record: FieldRecord, factor: float) -> tuple[int, ...]:
     )
 
 
-def region_wild_budgets() -> dict[str, float]:
-    """Vanilla mean wild-record budget per region (regions with at least one wild record)."""
-
-    totals: dict[str, list[float]] = {}
-    for record in RECORDS:
-        if record.map in EXCLUDED_SCREENS or classify_record(record) != CLASS_WILD:
-            continue
-        region = screen_region(record.map)
-        if region is not None:
-            totals.setdefault(region, []).append(record.budget)
-    return {region: sum(values) / len(values) for region, values in totals.items()}
-
-
-def plan_region_factors(region_depths: dict[str, int], strength: int) -> dict[str, float]:
-    """Scale factor per region: vanilla budget distribution re-assigned by logical depth.
-
-    Regions are ranked by depth (ties broken by vanilla budget so the vanilla order survives
-    inside a sphere); rank ``i`` of ``n`` receives the ``i``-th smallest vanilla region budget.
-    ``strength`` (0..100) blends the resulting factor towards 1.0.
-    """
-
-    budgets = region_wild_budgets()
-    regions = [region for region in budgets if region in region_depths]
-    if len(regions) < 2 or strength <= 0:
-        return {}
-    ordered = sorted(regions, key=lambda region: (region_depths[region], budgets[region]))
-    targets = sorted(budgets[region] for region in regions)
-    factors: dict[str, float] = {}
-    for region, target in zip(ordered, targets, strict=True):
-        raw = target / budgets[region]
-        blended = 1.0 + (raw - 1.0) * strength / 100.0
-        factors[region] = max(SCALE_FACTOR_MIN, min(SCALE_FACTOR_MAX, blended))
-    return factors
-
-
-def plan_stat_overrides(region_factors: dict[str, float]) -> dict[tuple[int, int], tuple[int, ...]]:
+def plan_stat_overrides(screen_targets: dict[int, Targets]) -> dict[tuple[int, int], tuple[int, ...]]:
     overrides: dict[tuple[int, int], tuple[int, ...]] = {}
     for record in RECORDS:
-        if record.map in EXCLUDED_SCREENS or classify_record(record) == CLASS_NPC:
+        target = screen_targets.get(record.map)
+        if target is None or abs(target.stat_factor - 1.0) < 1e-9 or not _touchable(record):
             continue
-        factor = region_factors.get(screen_region(record.map) or "")
-        if factor is None or abs(factor - 1.0) < 1e-9:
-            continue
-        scaled = scale_stats(record, factor)
+        scaled = scale_stats(record, target.stat_factor)
         if scaled != record.stats:
             overrides[(record.map, record.slot)] = scaled
     return overrides
 
+
+def _moves_from_slots(slots: list[int]) -> tuple[int, ...]:
+    return tuple(ANIM_MOVE_BASE + k for k in slots) + (NO_MOVE,) * (4 - len(slots))
+
+
+def pick_moves_by_level(species: Species, count: int, target: float) -> tuple[int, ...]:
+    """The ``count`` damaging techniques of ``species`` closest in power to ``target``
+    (deterministic; buffs only fill in when the list runs out of damaging ones)."""
+
+    ranked = sorted(species.damaging_slots, key=lambda k: (abs(species.slot_power(k) - target), k))
+    chosen = ranked[:count]
+    if len(chosen) < count:
+        chosen += [k for k in species.tech_slots if k not in chosen][:count - len(chosen)]
+    return _moves_from_slots(sorted(chosen))
+
+
+def pick_moves_equivalent(record: FieldRecord, original: Species, substitute: Species) -> tuple[int, ...]:
+    """For each technique the record used, the substitute's unused technique closest in power."""
+
+    chosen: list[int] = []
+    for power in record.tech_powers(original):
+        candidates = [k for k in substitute.tech_slots if k not in chosen]
+        if not candidates:
+            break
+        chosen.append(min(candidates, key=lambda k: (abs(substitute.slot_power(k) - power), k)))
+    if not chosen and substitute.tech_slots:
+        chosen.append(substitute.tech_slots[0])
+    return _moves_from_slots(sorted(chosen))
+
+
+def pick_moves_random(rng: Random, species: Species, count: int) -> tuple[int, ...]:
+    slots = species.tech_slots
+    count = max(1, min(count, len(slots)))
+    return _moves_from_slots(sorted(rng.sample(slots, count)))
+
+
+def plan_move_overrides(
+    mode: int, rng: Random, final_species: dict[tuple[int, int], int], screen_targets: dict[int, Targets],
+) -> dict[tuple[int, int], tuple[tuple[int, ...], tuple[int, ...]]]:
+    """Movesets for every fighter record whose species or whose screen's technique level changed."""
+
+    overrides: dict[tuple[int, int], tuple[tuple[int, ...], tuple[int, ...]]] = {}
+    for record in RECORDS:
+        key = (record.map, record.slot)
+        if not _touchable(record):
+            # a swapped non-combat placement keeps "no techniques" explicitly: its dead slots
+            # could resolve to real entries of the substitute's longer list
+            if (key in final_species and final_species[key] != record.type
+                    and _combat_screen(record.map) and classify_record(record) != CLASS_NPC):
+                overrides[key] = ((NO_MOVE,) * 4, record.prio)
+            continue
+        species = SPECIES_BY_ID[final_species.get(key, record.type)]
+        swapped = species.id != record.type
+        target = screen_targets.get(record.map)
+        level = target.tech_level if target is not None else None
+        count = record.move_count
+        if mode == STATS_FULL_RANDOM and target is not None:
+            moves = pick_moves_random(rng, species, count)
+        elif mode == STATS_PROGRESSIVE and level is not None:
+            moves = pick_moves_by_level(species, count, level)
+        elif swapped:
+            moves = pick_moves_equivalent(record, SPECIES_BY_ID[record.type], species)
+        else:
+            continue
+        if swapped or moves != record.moves:
+            overrides[key] = (moves, record.prio)
+    return overrides
+
+
+# =============================================================================
+# Species substitution
+# =============================================================================
 
 def substitute_pool(original: Species, same_level: bool) -> list[Species]:
     """Fighting, non-story species whose model fits the original's heap budget."""
@@ -365,25 +556,15 @@ def substitute_pool(original: Species, same_level: bool) -> list[Species]:
     ]
 
 
-def pick_moveset(rng: Random, record: FieldRecord, species: Species) -> tuple[tuple[int, ...], tuple[int, ...]]:
-    """Moves for ``record`` after it becomes ``species``: as many techniques as it had, drawn
-    from the substitute's list; AI weights are kept."""
-
-    count = sum(1 for move in record.moves if move != NO_MOVE)
-    slots = species.tech_slots
-    count = max(1, min(count, len(slots)))
-    chosen = sorted(rng.sample(slots, count))
-    moves = tuple(ANIM_MOVE_BASE + k for k in chosen) + (NO_MOVE,) * (4 - count)
-    return moves, record.prio
-
-
 def plan_substitutions(
     rng: Random, include_story: bool, same_level: bool,
-) -> tuple[dict[tuple[int, int], int], dict[tuple[int, int], tuple[tuple[int, ...], tuple[int, ...]]]]:
+) -> tuple[dict[tuple[int, int], int], dict[tuple[int, int], int]]:
+    """Returns ``(map, original species) -> substitute`` and ``(map, slot) -> final species``."""
+
     substitutions: dict[tuple[int, int], int] = {}
-    move_overrides: dict[tuple[int, int], tuple[tuple[int, ...], tuple[int, ...]]] = {}
+    final_species: dict[tuple[int, int], int] = {}
     for map_id in sorted(RECORDS_BY_MAP):
-        if map_id in EXCLUDED_SCREENS or map_id not in SITES_BY_MAP:
+        if not _combat_screen(map_id) or map_id not in SITES_BY_MAP:
             continue
         records = RECORDS_BY_MAP[map_id]
         for species_id in sorted({record.type for record in records}):
@@ -397,33 +578,67 @@ def plan_substitutions(
             substitute = rng.choice(sorted(pool, key=lambda species: species.id))
             substitutions[(map_id, species_id)] = substitute.id
             for record in group:
-                move_overrides[(record.map, record.slot)] = pick_moveset(rng, record, substitute)
-    return substitutions, move_overrides
+                final_species[(record.map, record.slot)] = substitute.id
+    return substitutions, final_species
+
+
+# =============================================================================
+# Plan
+# =============================================================================
+
+class EnemyPlan(NamedTuple):
+    """Everything the patcher needs; built once in ``post_fill``."""
+
+    #: ``(map, slot) -> nine stat words`` (hp, mp, cur_hp, cur_mp, off, def, spd, brn, bits)
+    stat_overrides: dict[tuple[int, int], tuple[int, ...]]
+    #: ``(map, original species) -> substitute species``
+    substitutions: dict[tuple[int, int], int]
+    #: ``(map, slot) -> (moves4, prio4)``
+    move_overrides: dict[tuple[int, int], tuple[tuple[int, ...], tuple[int, ...]]]
+    #: region -> depth (progressive only), for the spoiler / tests
+    region_depths: dict[str, int]
+    #: region -> targets (progressive) for the spoiler
+    region_targets: dict[str, Targets]
+    #: screen -> targets (full random) for the spoiler
+    screen_targets: dict[int, Targets]
+
+    @property
+    def empty(self) -> bool:
+        return not (self.stat_overrides or self.substitutions or self.move_overrides)
+
+
+EMPTY_PLAN: Final = EnemyPlan({}, {}, {}, {}, {}, {})
 
 
 def build_enemy_plan(world: DigimonWorldWorld) -> EnemyPlan:
     """Resolve both options into concrete record / MAPHEAD rewrites (call from ``post_fill``)."""
 
     options = world.options
-    scaling = int(options.enemy_scaling.value)
+    mode = int(options.enemy_stats.value)
     randomization = int(options.enemy_randomization.value)
-    if not scaling and not randomization:
+    if mode == STATS_VANILLA and not randomization:
         return EMPTY_PLAN
-
-    region_depths: dict[str, int] = {}
-    region_factors: dict[str, float] = {}
-    stat_overrides: dict[tuple[int, int], tuple[int, ...]] = {}
-    if scaling:
-        region_depths = compute_region_depths(world)
-        region_factors = plan_region_factors(region_depths, int(options.enemy_scaling_strength.value))
-        stat_overrides = plan_stat_overrides(region_factors)
+    rng = world.random
 
     substitutions: dict[tuple[int, int], int] = {}
-    move_overrides: dict[tuple[int, int], tuple[tuple[int, ...], tuple[int, ...]]] = {}
+    final_species: dict[tuple[int, int], int] = {}
     if randomization:
-        substitutions, move_overrides = plan_substitutions(
-            world.random,
-            include_story=randomization >= 2,
+        substitutions, final_species = plan_substitutions(
+            rng, include_story=randomization >= 2,
             same_level=int(options.enemy_randomization_tier.value) == 0,
         )
-    return EnemyPlan(stat_overrides, substitutions, move_overrides, region_depths, region_factors)
+
+    region_depths: dict[str, int] = {}
+    region_targets: dict[str, Targets] = {}
+    screen_targets: dict[int, Targets] = {}
+    if mode == STATS_PROGRESSIVE:
+        region_depths = compute_region_depths(world)
+        region_targets = plan_region_targets(region_depths, int(options.enemy_stats_strength.value))
+        screen_targets = screen_targets_from_regions(region_targets)
+    elif mode == STATS_FULL_RANDOM:
+        screen_targets = plan_full_random_targets(rng)
+
+    stat_overrides = plan_stat_overrides(screen_targets)
+    move_overrides = plan_move_overrides(mode, rng, final_species, screen_targets)
+    return EnemyPlan(stat_overrides, substitutions, move_overrides, region_depths, region_targets,
+                     screen_targets if mode == STATS_FULL_RANDOM else {})
