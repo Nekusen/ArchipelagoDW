@@ -313,6 +313,7 @@ from .data.addresses import (
     FIELD_RECORD_MOVES,
     FIELD_RECORD_STAT_COUNT,
     FIELD_RECORD_TYPE,
+    TRN_GYM_BONUS_WORD_PATCHES,
     field_record_bin_offset,
     maphead_bin_offset,
 )
@@ -2581,6 +2582,15 @@ def _write_merit_shop_locations_tokens(
     )
 
 
+def _write_trn_gym_bonus_tokens(patch: DigimonWorldProcedurePatch) -> None:
+    """Green Gym bonus reads the AP recruit mirror bits (739 / 771) instead of
+    the vanilla 219 / 251 — two ``addiu`` immediates in TRN_REL.BIN. Always-on;
+    see :data:`TRN_GYM_BONUS_WORD_PATCHES`."""
+
+    for bin_offset, patched_word, _vanilla_word in TRN_GYM_BONUS_WORD_PATCHES:
+        patch.write_token(APTokenTypes.WRITE, bin_offset, struct.pack("<I", patched_word))
+
+
 def _write_field_record_words(
     patch: DigimonWorldProcedurePatch, record_bin_offset: int, first_word: int, values: tuple[int, ...],
 ) -> None:
@@ -2801,6 +2811,7 @@ def write_patch(world: DigimonWorldWorld, output_directory: str) -> None:
     _write_leomonstone_neuter_tokens(patch)  # always-on; 7 sites across 3 ROM copies + orphan
     _write_arena_cup_neuter_tokens(patch)  # always-on; 14 sites x N ROM copies (no-op until ROM_ARENA_SECTION_51_BASES is filled in)
     _write_merit_shop_wrapper_tokens(patch)  # always-on; engine-hook for Merit-Shop purchases
+    _write_trn_gym_bonus_tokens(patch)  # always-on; gym bonus follows AP recruits (TRN_REL immediates)
     # ITEM_PARA 256-slot relocation — always-on (heap claim + boot seed
     # hook + reader re-bases + seed zero-fill). Must run BEFORE the
     # recycle/merit writers so their ext-entry tokens overwrite the

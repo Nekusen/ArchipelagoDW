@@ -6648,9 +6648,10 @@ ROM_GETTOPCITY_TRIGGER_PATCHES: Final = (
 #
 #   * ``recalculatePPandArena``          prosperity        client-overridden
 #   * ``getFileCityTopMap`` (map.c:3095) city top map      PATCHED (12 sites = its 12 calls)
-#   * ``trn_reward.c:637/643`` (TRN_REL) triggers 219/251  UNPATCHED — Kabuterimon/
-#                                        = training x6/x5  Kuwagamon bonus follows vanilla bits
-#   * ``dget.c:308-357`` (DGET_REL)      cup entry count   UNPATCHED — counts vanilla bits 200..310
+#   * ``trn_reward.c:637/643`` (TRN_REL) triggers 219/251  PATCHED 2026-08-28 (-> 739/771,
+#                                        = training x6/x5  :data:`TRN_GYM_BONUS_WORD_PATCHES`)
+#   * ``dget.c:308-357`` (DGET_REL)      cup entry count   LEFT VANILLA by decision — cup tiers
+#                                                          follow the client's arena enforcer
 #   * ``dooa.c:1855`` / ``murd.c:755``   214/220 + pstat(1)>=50  message choice only
 #   * flight table entry 0               221               PATCHED (-> 878)
 #
@@ -10781,3 +10782,45 @@ def maphead_bin_offset(file_offset: int) -> int:
 # on the randomizer's 0x0A7EEA8C.
 assert field_record_bin_offset(0x0A7EEA76, FIELD_RECORD_HP) == 0x0A7EEA8C
 assert maphead_bin_offset(1158) == (MAPHEAD_SCN_LBA + 1158 // 2048) * 2352 + 24 + 1158 % 2048
+
+
+# =============================================================================
+# Green Gym training bonus follows AP-delivered recruits (TRN_REL.BIN)
+# =============================================================================
+#
+# ``TRN_calculateTrainingMultiplier`` (dw_decomp ``src/trn/trn_reward.c:637``
+# and ``:643``, byte-matching) grants the x6/5 training bonus when
+# ``isTriggerSet(219)`` (Kabuterimon's vanilla recruit bit; HP / Defense /
+# Speed machines) or ``isTriggerSet(251)`` (Kuwagamon's; MP / Offense /
+# Brains machines) is set. Under Plan A revised an AP-delivered recruit
+# sets the mirror bit 720 + X instead, so these two reads are redirected
+# to 739 / 771 like every city-visibility reader. Both sites are
+# ``addiu $a0, $zero, imm`` in the delay slot of ``jal isTriggerSet``
+# (0x0C04190F); the new immediates fit the signed 16-bit field.
+#
+# Lab-validated 2026-08-28 through the three PATCH_PROCESS nets (7 real
+# training sessions over ``training_gym.state`` + an 84/84 in-situ sweep
+# of all six modes, then two sessions on the overlay loaded from the
+# patched disc). Intended behaviour change: the vanilla bit alone no
+# longer grants the bonus. TRN_REL.BIN is loaded by the gym script
+# (``MAIN_func_800D9360`` -> ``loadDynamicLibrary(10)``), not by the map
+# loader, so the patch is a plain overlay-file write. Notes:
+# ``work/dw1_re/decomp/trn_gym_bonus/NOTES.md``.
+
+_OVERLAY_TRN_LBA: Final = 148248                 # /TRN_REL.BIN, 27604 B
+_TRN_GYM_BONUS_SITES: Final = (                  # (file_off, vanilla trigger, redirected trigger)
+    (0x18F8, 219, 739),  # Kabuterimon: HP / Defense / Speed machines
+    (0x1944, 251, 771),  # Kuwagamon: MP / Offense / Brains machines
+)
+TRN_GYM_BONUS_WORD_PATCHES: Final[tuple[tuple[int, int, int], ...]] = tuple(
+    (_overlay_file_to_bin(_OVERLAY_TRN_LBA, off), _mips_addiu(4, 0, new), _mips_addiu(4, 0, old))
+    for off, old, new in _TRN_GYM_BONUS_SITES
+)  # ((bin_offset, patched_word, vanilla_word), ...)
+assert TRN_GYM_BONUS_WORD_PATCHES == (
+    (0x14C88920, 0x240402E3, 0x240400DB),
+    (0x14C8896C, 0x24040303, 0x240400FB),
+), TRN_GYM_BONUS_WORD_PATCHES
+for _off, _old, _new in _TRN_GYM_BONUS_SITES:
+    assert _new == _old + 520, (_old, _new)   # BEATEN mirror band: trigger 200+X -> 720+X
+    assert _off % 4 == 0 and (_overlay_file_to_bin(_OVERLAY_TRN_LBA, _off) - 24) % 2352 + 4 <= 2048
+del _off, _old, _new

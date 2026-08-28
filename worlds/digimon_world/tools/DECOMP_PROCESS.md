@@ -206,6 +206,12 @@ Game-behavior facts for scripted play (user-confirmed 2026-08-20):
     (the edited-Goburimon fight just started), `enemy_poc_icemon_battle.state` (the Icemon fight
     just started). Load them with that .bin mounted; on the vanilla disc the field stats are still
     the RAM ones but a screen reload brings vanilla back.
+  - `trn_check.state` / `trn_check_loaded.state` (2026-08-28, TRN gym-bonus patch): Green Gym
+    screen 112 via the warp hub, before / after the gym script pulled TRN_REL.BIN from the
+    patched `work\dw1_re\trn_gym_bonus.bin`. **TRN_REL is loaded by the gym script, not by the
+    map loader** -- a fresh warp landing has no overlay resident until you talk to a machine.
+    God-mode caveat fixed the same day: current HP/MP are 0x1557F4/F6 (0x1557EC/EE are the
+    technique slots; the old `--god` recipe clobbered them).
 - **User-driven session rules** (three crashes on 2026-08-28): no per-frame Lua listeners
   (`dw1_redux_input.lua`) while the user plays, no REST data GETs (`peek` and the screenshot
   tool now pause/Lua-read), and wrap `createSaveState()` in `PCSX.pauseEmulator()`.

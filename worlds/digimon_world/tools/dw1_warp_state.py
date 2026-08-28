@@ -102,7 +102,10 @@ def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     ap.add_argument("--map", type=int, required=True, help="target screen id (0..255)")
     ap.add_argument("--out", required=True, help="state name to write (without .state)")
-    ap.add_argument("--god", action="store_true", help="apply god-mode stats/HP/MP/Bits before warping")
+    ap.add_argument("--god", action="store_true",
+                    help="apply god-mode stats/HP/MP/Bits before warping (partner off/def/spd/brn 999 at "
+                         "0x1557E0.., max and current HP/MP 9999 at 0x1557F0/F2/F4/F6 -- 0x1557EC/EE are "
+                         "the technique slots, never poke them -- and 9,999,999 Bits)")
     ap.add_argument("--set-trigger", type=int, action="append", default=[],
                     help="trigger id to set before warping (repeatable)")
     ap.add_argument("--wait", type=float, default=12.0, help="seconds to wait for the screen to match")
@@ -143,7 +146,7 @@ def main(argv: list[str]) -> int:
         pokes.append(
             "local function w16(a, v) m[a] = v % 256 m[a + 1] = math.floor(v / 256) % 256 end "
             "for _, a in ipairs({0x1557E0, 0x1557E2, 0x1557E4, 0x1557E6}) do w16(a, 999) end "
-            "for _, a in ipairs({0x1557F0, 0x1557F2, 0x1557EC, 0x1557EE}) do w16(a, 9999) end "
+            "for _, a in ipairs({0x1557F0, 0x1557F2, 0x1557F4, 0x1557F6}) do w16(a, 9999) end "
             "w16(0x134EB8, 9999999 % 65536) w16(0x134EBA, math.floor(9999999 / 65536))"
         )
     c.eval_lua("local m = PCSX.getMemPtr() " + " ".join(pokes) + " return 'poked'")
