@@ -1165,6 +1165,202 @@ class EnemyRandomizationTier(Choice):
     default = option_same_level
 
 
+class TechniqueData(Choice):
+    """Randomize the technique data table (``MOVE_DATA``): power, MP cost, accuracy,
+    status effect and status chance of every technique, as chosen by the five
+    ``technique_*`` toggles.
+
+    * ``vanilla`` — the table as on the disc.
+    * ``shuffle`` — the vanilla values are swapped around among the 58 techniques
+      the partner can learn (finishers and bubble attacks keep theirs).
+    * ``randomized`` — after the shuffle, every technique (enemy-only ones included)
+      gets new values: power 70-130 % of the vanilla one (cap 999), MP cost
+      10-140 % of the power, accuracy mostly between 50 and 100.
+
+    The table is global: the partner, wild Digimon and bosses all read the same
+    record for a technique. ``enemy_stats`` scales enemies by the powers this
+    option ships, so the two compose. Mirrors the standalone DW1 randomizer's
+    ``techs.Enabled`` + ``techs.RandomizationMode`` (``shuffle`` / ``random``).
+    """
+
+    display_name = "Technique Data"
+    option_vanilla = 0
+    option_shuffle = 1
+    option_randomized = 2
+    default = option_vanilla
+
+
+class TechniquePower(DefaultOnToggle):
+    """Include technique power in :class:`TechniqueData`. Buff techniques (power 0)
+    stay at 0. Mirrors the standalone's ``techs.Power``."""
+
+    display_name = "Technique Data: Power"
+
+
+class TechniqueMPCost(DefaultOnToggle):
+    """Include technique MP cost in :class:`TechniqueData`. Mirrors the standalone's
+    ``techs.Cost``."""
+
+    display_name = "Technique Data: MP Cost"
+
+
+class TechniqueAccuracy(DefaultOnToggle):
+    """Include technique accuracy in :class:`TechniqueData`. Mirrors the standalone's
+    ``techs.Accuracy``."""
+
+    display_name = "Technique Data: Accuracy"
+
+
+class TechniqueEffect(DefaultOnToggle):
+    """Re-roll the status effect of every partner-learnable technique in
+    :class:`TechniqueData`: about half of the damaging techniques inflict one of
+    poison, confusion, stun or flat; buffs never do. Not affected by the mode.
+    Mirrors the standalone's ``techs.Effect``."""
+
+    display_name = "Technique Data: Status Effect"
+
+
+class TechniqueEffectChance(DefaultOnToggle):
+    """Re-roll the status chance (1-70 %) of every partner-learnable technique that
+    has a status effect in :class:`TechniqueData`. Not affected by the mode. Mirrors
+    the standalone's ``techs.EffectChance``."""
+
+    display_name = "Technique Data: Status Chance"
+
+
+class TypeEffectiveness(Toggle):
+    """Randomize the 7x7 element affinity matrix (Fire / Battle / Air / Nature / Ice /
+    Mech / Filth): every cell becomes one of the vanilla values 2, 5, 10, 15 or 20.
+    The battle engine reads it to weight the partner's technique choice in
+    auto-battle (and its arena / versus twins do the same); whether it also enters
+    the damage formula is still being decompiled. Independent of
+    :class:`TechniqueData`. Mirrors the standalone's ``techs.TypeEffectiveness``.
+    """
+
+    display_name = "Type Effectiveness"
+
+
+class EnemyDropItems(Toggle):
+    """Randomize the item each Digimon species drops after a won battle. Replacements
+    are consumables that are neither quest nor digivolution items, drawn as
+    :class:`EnemyDropsMatchValue` and :class:`EnemyDropsValueCutoff` dictate.
+    Mirrors the standalone DW1 randomizer's ``digimon.DroppedItem``.
+    """
+
+    display_name = "Enemy Drop Items"
+
+
+class EnemyDropRates(Toggle):
+    """Randomize the chance each Digimon species drops its item. Rates move a step or
+    two along the vanilla ladder (1 / 5 / 10 / 20 / 25 / 30 / 40 / 50 %), species that
+    never dropped anything get a rate, and 100 % drops stay 100 %. Mirrors the
+    standalone's ``digimon.DropRate``.
+    """
+
+    display_name = "Enemy Drop Rates"
+
+
+class EnemyDropsMatchValue(DefaultOnToggle):
+    """Keep randomized drop items within the same value band as the vanilla drop:
+    cheap items replace cheap items, valuable items replace valuable ones, split at
+    :class:`EnemyDropsValueCutoff`. Mirrors the standalone's ``digimon.MatchValue``.
+    """
+
+    display_name = "Enemy Drops: Match Value Band"
+
+
+class EnemyDropsValueCutoff(Range):
+    """Price threshold separating "cheap" and "valuable" items for
+    :class:`EnemyDropsMatchValue`. Mirrors the standalone's
+    ``digimon.ValuableItemCutoff`` (default 1000).
+    """
+
+    display_name = "Enemy Drops: Value Cutoff"
+    range_start = 1
+    range_end = 50_000
+    default = 1000
+
+
+class TechGifts(Toggle):
+    """Randomize the techniques taught by NPCs: the Beetle Land Bug and Seadramon's
+    three teaches each hand out a random partner-learnable technique instead of
+    the vanilla one. Independent of ``technique_rewards`` (the AP technique items).
+    Mirrors the standalone DW1 randomizer's ``techGifts.Enabled``.
+    """
+
+    display_name = "Technique Gifts"
+
+
+class TokomonGifts(Toggle):
+    """Randomize the six items Tokomon gives at the start of the game: each becomes
+    1-3 copies of a random non-quest, non-digivolution item, cheaper items more
+    likely to come in larger quantities. Mirrors the standalone's ``tokomon.Enabled``.
+    """
+
+    display_name = "Tokomon Gifts"
+
+
+class TokomonGiftsConsumableOnly(Toggle):
+    """Restrict :class:`TokomonGifts` to consumable items (no Enemy Repel, Training
+    Manual and the like). Mirrors the standalone's ``tokomon.ConsumableOnly``.
+    """
+
+    display_name = "Tokomon Gifts: Consumable Only"
+
+
+class QuestItemsDroppable(Toggle):
+    """Let quest items (Mansion Key, Gear, Blue Flute, …) be dropped from the item
+    menu like any other item. Mirrors the standalone's ``patches.QuestItemsDroppable``.
+    """
+
+    display_name = "Quest Items Droppable"
+
+
+class IncreaseLearnChance(Toggle):
+    """Double every technique's learn chance, both from battle and from brain
+    training (brain cells that were 0 become 5 %). Mirrors the standalone's
+    ``patches.IncreaseLearnChance``.
+    """
+
+    display_name = "Increase Technique Learn Chance"
+
+
+class BrainTrainingTierOne(Toggle):
+    """Brain training can teach a tier-1 technique (30 % chance) when the partner does
+    not know it yet — vanilla never offers the first tier there. Mirrors the
+    standalone's ``patches.BrainTrainTierOne``.
+    """
+
+    display_name = "Brain Training Teaches Tier 1"
+
+
+class UnrigSlots(Toggle):
+    """Make the bonus-try training slots purely skill-based: vanilla rigs the reels
+    so most attempts lose regardless of timing. Mirrors the standalone's
+    ``patches.UnrigSlots``.
+    """
+
+    display_name = "Unrig Bonus Try Slots"
+
+
+class LearnMoveAndCommand(Toggle):
+    """Allow learning a technique and a command in the same brain-training session
+    (vanilla skips the technique roll once a command is learned). Mirrors the
+    standalone's ``patches.LearnMoveAndCommand``.
+    """
+
+    display_name = "Learn Move And Command Together"
+
+
+class FixDVChipText(DefaultOnToggle):
+    """Correct the three DV chip descriptions to say what the chips actually do
+    (DV Chip E boosts HP and MP, not Offense and Speed). Text only. Mirrors the
+    standalone's ``patches.FixDVChips``.
+    """
+
+    display_name = "Fix DV Chip Descriptions"
+
+
 @dataclass
 class DigimonWorldOptions(PerGameCommonOptions):
     goal: Goal
@@ -1216,6 +1412,26 @@ class DigimonWorldOptions(PerGameCommonOptions):
     enemy_stats_strength: EnemyStatsStrength
     enemy_randomization: EnemyRandomization
     enemy_randomization_tier: EnemyRandomizationTier
+    technique_data: TechniqueData
+    technique_power: TechniquePower
+    technique_mp_cost: TechniqueMPCost
+    technique_accuracy: TechniqueAccuracy
+    technique_effect: TechniqueEffect
+    technique_effect_chance: TechniqueEffectChance
+    type_effectiveness: TypeEffectiveness
+    enemy_drop_items: EnemyDropItems
+    enemy_drop_rates: EnemyDropRates
+    enemy_drops_match_value: EnemyDropsMatchValue
+    enemy_drops_value_cutoff: EnemyDropsValueCutoff
+    tech_gifts: TechGifts
+    tokomon_gifts: TokomonGifts
+    tokomon_gifts_consumable_only: TokomonGiftsConsumableOnly
+    quest_items_droppable: QuestItemsDroppable
+    increase_learn_chance: IncreaseLearnChance
+    brain_training_tier_one: BrainTrainingTierOne
+    unrig_slots: UnrigSlots
+    learn_move_and_command: LearnMoveAndCommand
+    fix_dv_chip_text: FixDVChipText
     god_mode: GodMode
 
 
@@ -1233,6 +1449,10 @@ option_groups: list[OptionGroup] = [
             StarterUseWeakestTech,
             EnemyStats, EnemyStatsStrength,
             EnemyRandomization, EnemyRandomizationTier,
+            TechniqueData, TechniquePower, TechniqueMPCost, TechniqueAccuracy,
+            TechniqueEffect, TechniqueEffectChance, TypeEffectiveness,
+            EnemyDropItems, EnemyDropRates, EnemyDropsMatchValue, EnemyDropsValueCutoff,
+            TechGifts, TokomonGifts, TokomonGiftsConsumableOnly,
         ],
     ),
     OptionGroup(
@@ -1251,6 +1471,8 @@ option_groups: list[OptionGroup] = [
             RegionLocking, RegionLockingList, StartingRegion,
             SpawnRateBoost, StatGainMultiplier, CombatStatMultiplier,
             CardTradeMultiplier,
+            QuestItemsDroppable, IncreaseLearnChance, BrainTrainingTierOne,
+            UnrigSlots, LearnMoveAndCommand, FixDVChipText,
         ],
     ),
     OptionGroup("Testing", [GodMode]),

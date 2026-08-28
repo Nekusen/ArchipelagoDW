@@ -69,12 +69,24 @@ class Move(NamedTuple):
     id: int
     name: str
     power: int          # damage base; 0 = buff / status-only technique
-    mp_cost: int
+    mp_cost: int        # stored byte; the game charges mp_cost * 3
     element: int        # 0..6, index into the affinity matrix
-    status: int
+    status: int         # 0 none, 1 poison, 2 confusion, 3 stun, 4 flat
+    accuracy: int
+    status_chance: int  # percent
+    range: int
+    iframes: int
+    distance: int
+    unk3: int
+    unk4: int
+    unk5: int
 
 
 MOVES_BY_ID: Final[dict[int, Move]] = {row[0]: Move(*row) for row in MOVES}
+
+#: ``technique id -> damage base`` as on the disc. The planners take a ``powers`` table so a seed
+#: that randomizes ``MOVE_DATA`` (:mod:`.techniques`) scales enemies by the powers it ships.
+VANILLA_POWERS: Final[dict[int, int]] = {move.id: move.power for move in MOVES_BY_ID.values()}
 
 
 class Species(NamedTuple):
@@ -83,6 +95,8 @@ class Species(NamedTuple):
     level: int
     moves: tuple[int, ...]      # 16 technique ids, 0xFF = empty slot
     heap: int                   # malloc3 footprint of the model, bytes (0 = no model file)
+    drop_item: int              # ITEM_PARA id dropped after a won battle ...
+    drop_chance: int            # ... with this percent chance
 
     @property
     def tech_slots(self) -> tuple[int, ...]:
@@ -91,11 +105,14 @@ class Species(NamedTuple):
 
     @property
     def damaging_slots(self) -> tuple[int, ...]:
-        """Slots whose technique deals damage (power > 0)."""
-        return tuple(k for k in self.tech_slots if self.slot_power(k) > 0)
+        """Slots whose technique deals damage (vanilla power > 0)."""
+        return self.damaging_slots_for(VANILLA_POWERS)
 
-    def slot_power(self, slot: int) -> int:
-        return MOVES_BY_ID[self.moves[slot]].power
+    def damaging_slots_for(self, powers: dict[int, int]) -> tuple[int, ...]:
+        return tuple(k for k in self.tech_slots if self.slot_power(k, powers) > 0)
+
+    def slot_power(self, slot: int, powers: dict[int, int] = VANILLA_POWERS) -> int:
+        return powers[self.moves[slot]]
 
     @property
     def fights(self) -> bool:
@@ -141,11 +158,12 @@ class FieldRecord(NamedTuple):
         """
         return len(self.tech_powers())
 
-    def tech_powers(self, species: Species | None = None) -> tuple[int, ...]:
+    def tech_powers(self, species: Species | None = None,
+                    powers: dict[int, int] = VANILLA_POWERS) -> tuple[int, ...]:
         """Power of each technique the record uses, in slot order."""
         species = species or SPECIES_BY_ID[self.type]
         return tuple(
-            species.slot_power(move - ANIM_MOVE_BASE) for move in self.moves
+            species.slot_power(move - ANIM_MOVE_BASE, powers) for move in self.moves
             if move != NO_MOVE and 0 <= move - ANIM_MOVE_BASE < 16 and species.moves[move - ANIM_MOVE_BASE] != 0xFF
         )
 
@@ -159,7 +177,7 @@ class MapheadSite(NamedTuple):
 
 
 SPECIES_BY_ID: Final[dict[int, Species]] = {
-    row[0]: Species(row[0], row[1], row[2], tuple(bytes.fromhex(row[3])), row[4]) for row in SPECIES
+    row[0]: Species(row[0], row[1], row[2], tuple(bytes.fromhex(row[3])), row[4], row[5], row[6]) for row in SPECIES
 }
 RECORDS: Final[tuple[FieldRecord, ...]] = tuple(
     FieldRecord(*row[:13], tuple(row[13:17]), tuple(row[17:21]), row[21]) for row in FIELD_RECORDS
@@ -334,11 +352,11 @@ class Targets(NamedTuple):
     tech_level: float | None      # power the techniques are re-picked around (None: keep)
 
 
-def _metrics(records: list[FieldRecord]) -> WildMetrics:
-    powers = [p for record in records for p in record.tech_powers() if p > 0]
+def _metrics(records: list[FieldRecord], powers: dict[int, int]) -> WildMetrics:
+    tech_powers = [p for record in records for p in record.tech_powers(powers=powers) if p > 0]
     return WildMetrics(
         sum(r.budget for r in records) / len(records),
-        sum(powers) / len(powers) if powers else None,
+        sum(tech_powers) / len(tech_powers) if tech_powers else None,
     )
 
 
@@ -347,22 +365,22 @@ def _wild_records() -> list[FieldRecord]:
             and screen_region(r.map) is not None]
 
 
-def region_wild_metrics() -> dict[str, WildMetrics]:
+def region_wild_metrics(powers: dict[int, int] = VANILLA_POWERS) -> dict[str, WildMetrics]:
     """Vanilla wild-record metrics per region (regions with at least one wild record)."""
 
     groups: dict[str, list[FieldRecord]] = {}
     for record in _wild_records():
         groups.setdefault(screen_region(record.map), []).append(record)   # type: ignore[arg-type]
-    return {region: _metrics(records) for region, records in groups.items()}
+    return {region: _metrics(records, powers) for region, records in groups.items()}
 
 
-def screen_wild_metrics() -> dict[int, WildMetrics]:
+def screen_wild_metrics(powers: dict[int, int] = VANILLA_POWERS) -> dict[int, WildMetrics]:
     """Vanilla wild-record metrics per screen (screens with at least one wild record)."""
 
     groups: dict[int, list[FieldRecord]] = {}
     for record in _wild_records():
         groups.setdefault(record.map, []).append(record)
-    return {map_id: _metrics(records) for map_id, records in groups.items()}
+    return {map_id: _metrics(records, powers) for map_id, records in groups.items()}
 
 
 def region_wild_budgets() -> dict[str, float]:
@@ -381,7 +399,9 @@ def _blend(vanilla: float, assigned: float, strength: int) -> float:
     return vanilla + (assigned - vanilla) * strength / 100.0
 
 
-def plan_region_targets(region_depths: dict[str, int], strength: int) -> dict[str, Targets]:
+def plan_region_targets(
+    region_depths: dict[str, int], strength: int, powers: dict[int, int] = VANILLA_POWERS,
+) -> dict[str, Targets]:
     """Progressive: vanilla difficulty distribution re-assigned by logical depth.
 
     Regions are ranked by depth (ties broken by vanilla budget so the vanilla order survives
@@ -390,7 +410,7 @@ def plan_region_targets(region_depths: dict[str, int], strength: int) -> dict[st
     ``strength`` (0..100) blends both towards vanilla.
     """
 
-    metrics = region_wild_metrics()
+    metrics = region_wild_metrics(powers)
     regions = [region for region in metrics if region in region_depths]
     if len(regions) < 2 or strength <= 0:
         return {}
@@ -410,10 +430,10 @@ def plan_region_targets(region_depths: dict[str, int], strength: int) -> dict[st
     return targets
 
 
-def plan_full_random_targets(rng: Random) -> dict[int, Targets]:
+def plan_full_random_targets(rng: Random, powers: dict[int, int] = VANILLA_POWERS) -> dict[int, Targets]:
     """Full random: every screen borrows the difficulty of a random vanilla screen."""
 
-    metrics = screen_wild_metrics()
+    metrics = screen_wild_metrics(powers)
     donors = sorted(metrics)
     targets: dict[int, Targets] = {}
     for map_id in sorted(metrics):
@@ -473,26 +493,30 @@ def _moves_from_slots(slots: list[int]) -> tuple[int, ...]:
     return tuple(ANIM_MOVE_BASE + k for k in slots) + (NO_MOVE,) * (4 - len(slots))
 
 
-def pick_moves_by_level(species: Species, count: int, target: float) -> tuple[int, ...]:
+def pick_moves_by_level(
+    species: Species, count: int, target: float, powers: dict[int, int] = VANILLA_POWERS,
+) -> tuple[int, ...]:
     """The ``count`` damaging techniques of ``species`` closest in power to ``target``
     (deterministic; buffs only fill in when the list runs out of damaging ones)."""
 
-    ranked = sorted(species.damaging_slots, key=lambda k: (abs(species.slot_power(k) - target), k))
+    ranked = sorted(species.damaging_slots_for(powers), key=lambda k: (abs(species.slot_power(k, powers) - target), k))
     chosen = ranked[:count]
     if len(chosen) < count:
         chosen += [k for k in species.tech_slots if k not in chosen][:count - len(chosen)]
     return _moves_from_slots(sorted(chosen))
 
 
-def pick_moves_equivalent(record: FieldRecord, original: Species, substitute: Species) -> tuple[int, ...]:
+def pick_moves_equivalent(
+    record: FieldRecord, original: Species, substitute: Species, powers: dict[int, int] = VANILLA_POWERS,
+) -> tuple[int, ...]:
     """For each technique the record used, the substitute's unused technique closest in power."""
 
     chosen: list[int] = []
-    for power in record.tech_powers(original):
+    for power in record.tech_powers(original, powers):
         candidates = [k for k in substitute.tech_slots if k not in chosen]
         if not candidates:
             break
-        chosen.append(min(candidates, key=lambda k: (abs(substitute.slot_power(k) - power), k)))
+        chosen.append(min(candidates, key=lambda k: (abs(substitute.slot_power(k, powers) - power), k)))
     if not chosen and substitute.tech_slots:
         chosen.append(substitute.tech_slots[0])
     return _moves_from_slots(sorted(chosen))
@@ -506,6 +530,7 @@ def pick_moves_random(rng: Random, species: Species, count: int) -> tuple[int, .
 
 def plan_move_overrides(
     mode: int, rng: Random, final_species: dict[tuple[int, int], int], screen_targets: dict[int, Targets],
+    powers: dict[int, int] = VANILLA_POWERS,
 ) -> dict[tuple[int, int], tuple[tuple[int, ...], tuple[int, ...]]]:
     """Movesets for every fighter record whose species or whose screen's technique level changed."""
 
@@ -527,9 +552,9 @@ def plan_move_overrides(
         if mode == STATS_FULL_RANDOM and target is not None:
             moves = pick_moves_random(rng, species, count)
         elif mode == STATS_PROGRESSIVE and level is not None:
-            moves = pick_moves_by_level(species, count, level)
+            moves = pick_moves_by_level(species, count, level, powers)
         elif swapped:
-            moves = pick_moves_equivalent(record, SPECIES_BY_ID[record.type], species)
+            moves = pick_moves_equivalent(record, SPECIES_BY_ID[record.type], species, powers)
         else:
             continue
         if swapped or moves != record.moves:
@@ -619,6 +644,8 @@ def build_enemy_plan(world: DigimonWorldWorld) -> EnemyPlan:
     if mode == STATS_VANILLA and not randomization:
         return EMPTY_PLAN
     rng = world.random
+    # a seed that randomizes MOVE_DATA scales enemies by the powers it ships, not the vanilla ones
+    powers = world.technique_plan.powers
 
     substitutions: dict[tuple[int, int], int] = {}
     final_species: dict[tuple[int, int], int] = {}
@@ -633,12 +660,12 @@ def build_enemy_plan(world: DigimonWorldWorld) -> EnemyPlan:
     screen_targets: dict[int, Targets] = {}
     if mode == STATS_PROGRESSIVE:
         region_depths = compute_region_depths(world)
-        region_targets = plan_region_targets(region_depths, int(options.enemy_stats_strength.value))
+        region_targets = plan_region_targets(region_depths, int(options.enemy_stats_strength.value), powers)
         screen_targets = screen_targets_from_regions(region_targets)
     elif mode == STATS_FULL_RANDOM:
-        screen_targets = plan_full_random_targets(rng)
+        screen_targets = plan_full_random_targets(rng, powers)
 
     stat_overrides = plan_stat_overrides(screen_targets)
-    move_overrides = plan_move_overrides(mode, rng, final_species, screen_targets)
+    move_overrides = plan_move_overrides(mode, rng, final_species, screen_targets, powers)
     return EnemyPlan(stat_overrides, substitutions, move_overrides, region_depths, region_targets,
                      screen_targets if mode == STATS_FULL_RANDOM else {})

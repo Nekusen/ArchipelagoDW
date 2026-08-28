@@ -23,11 +23,11 @@ locations are gone — prosperity is now a real AP item shipped in the
 pool, with the in-game prosperity counter enforced client-side from the
 count of delivered ``Prosperity Point`` items.
 
-Recruit AP locations cover all 50 Digimon. The shuffleable subset (38)
-gets a closed-shuffle trigger remap at patch time so the player sees a
-randomized recruit roster as they explore. The 12 non-shuffleable
-Digimon retain vanilla recruits. AP detection of "encounter completed"
-works the same way for both groups: poll the vanilla recruit-bit byte.
+Recruit AP locations cover all 50 Digimon. Recruit *identity* is not
+shuffled: the recruits themselves ship as AP items, and the patcher
+redirects every city-visibility reader from the vanilla bit 200+X to
+the AP mirror bit 720+X (``rom._write_recruit_trigger_redirect_tokens``).
+AP detection of "encounter completed" polls the vanilla recruit-bit byte.
 
 Each recruit AP location is named after the spawn-point Digimon. AP
 fires the location when that spawn's encounter is won, regardless of

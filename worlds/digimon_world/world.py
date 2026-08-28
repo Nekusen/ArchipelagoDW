@@ -28,12 +28,15 @@ from worlds.AutoWorld import World
 
 from . import (
     chest_assignments,
+    drops,
     enemies,
+    gifts,
     items,
     locations,
     regions,
     rom,
     rules,
+    techniques,
 )
 from .options import DigimonWorldOptions
 from .rom import DigimonWorldSettings
@@ -91,6 +94,12 @@ class DigimonWorldWorld(World):
 
         for name in items.get_bootstrap_items(self):
             self.multiworld.push_precollected(self.create_item(name))
+
+        # Static SLUS-table rewrites that need no placement: resolved here so
+        # post_fill's enemy scaling can read the technique powers this seed ships.
+        self.technique_plan = techniques.build_technique_plan(self)
+        self.drop_plan = drops.build_drop_plan(self)
+        self.gift_plan = gifts.build_gift_plan(self)
 
     def create_regions(self) -> None:
         regions.create_and_connect_regions(self)
@@ -169,15 +178,24 @@ class DigimonWorldWorld(World):
     #: :meth:`post_fill` (sphere walk needs the finished placement) and
     #: consumed by :func:`rom.write_patch`.
     enemy_plan: enemies.EnemyPlan = enemies.EMPTY_PLAN
+    #: Technique-data / element-matrix and enemy-drop rewrites, resolved in
+    #: :meth:`generate_early` (static SLUS tables) and consumed by
+    #: :func:`rom.write_patch`; the enemy planner reads the technique powers.
+    technique_plan: techniques.TechniquePlan = techniques.EMPTY_PLAN
+    drop_plan: drops.DropPlan = drops.EMPTY_PLAN
+    gift_plan: gifts.GiftPlan = gifts.EMPTY_PLAN
 
     def post_fill(self) -> None:
         self.enemy_plan = enemies.build_enemy_plan(self)
 
     def write_spoiler(self, spoiler_handle: TextIO) -> None:
+        name = self.multiworld.player_name[self.player]
+        self._write_technique_spoiler(spoiler_handle, name)
+        self._write_drop_spoiler(spoiler_handle, name)
+        self._write_gift_spoiler(spoiler_handle, name)
         plan = self.enemy_plan
         if plan.empty:
             return
-        name = self.multiworld.player_name[self.player]
 
         def describe(target: enemies.Targets) -> str:
             level = "vanilla" if target.tech_level is None else f"~{target.tech_level:.0f} power"
@@ -202,6 +220,51 @@ class DigimonWorldWorld(World):
                 spoiler_handle.write(
                     f"  {screen}: {enemies.SPECIES_BY_ID[species].name} -> {enemies.SPECIES_BY_ID[substitute].name}\n"
                 )
+
+    def _write_technique_spoiler(self, spoiler_handle: TextIO, name: str) -> None:
+        plan = self.technique_plan
+        if plan.moves:
+            spoiler_handle.write(f"\n\nTechnique data ({name}):\n")
+            for tech_id, values in sorted(plan.moves.items()):
+                spoiler_handle.write(
+                    f"  {techniques.MOVE_NAMES[tech_id]}: {techniques.describe_values(values)}"
+                    f"  (vanilla {techniques.describe_values(techniques.VANILLA_VALUES[tech_id])})\n"
+                )
+        if plan.matrix is not None:
+            spoiler_handle.write(f"\n\nType effectiveness ({name}), technique element x target specialty:\n")
+            spoiler_handle.write("  " + " " * 8 + "".join(f"{e:>8}" for e in techniques.ELEMENT_NAMES) + "\n")
+            for element, row in zip(techniques.ELEMENT_NAMES, plan.matrix, strict=True):
+                spoiler_handle.write(f"  {element:<8}" + "".join(f"{v:>8}" for v in row) + "\n")
+
+    def _write_gift_spoiler(self, spoiler_handle: TextIO, name: str) -> None:
+        plan = self.gift_plan
+        if plan.tech_gifts:
+            spoiler_handle.write(f"\n\nTechnique gifts ({name}):\n")
+            for site, tech in sorted(plan.tech_gifts.items()):
+                spoiler_handle.write(
+                    f"  {gifts.TECH_GIFT_SITE_NAMES[site]}: {techniques.MOVE_NAMES[tech]}"
+                    f"  (vanilla {techniques.MOVE_NAMES[gifts.TECH_GIFT_VANILLA[site]]})\n"
+                )
+        if plan.tokomon_gifts:
+            spoiler_handle.write(f"\n\nTokomon gifts ({name}):\n")
+            for site, (item, count) in sorted(plan.tokomon_gifts.items()):
+                vanilla_item, vanilla_count = gifts.TOKOMON_GIFT_VANILLA[site]
+                spoiler_handle.write(
+                    f"  gift {site + 1}: {count}x {drops.ITEM_NAMES[item]}"
+                    f"  (vanilla {vanilla_count}x {drops.ITEM_NAMES[vanilla_item]})\n"
+                )
+
+    def _write_drop_spoiler(self, spoiler_handle: TextIO, name: str) -> None:
+        plan = self.drop_plan
+        if plan.empty:
+            return
+        spoiler_handle.write(f"\n\nEnemy drops ({name}):\n")
+        for species_id, (item, chance) in sorted(plan.overrides.items()):
+            species = enemies.SPECIES_BY_ID[species_id]
+            spoiler_handle.write(
+                f"  {species.name}: {drops.ITEM_NAMES[item]} {chance}%"
+                f"  (vanilla {drops.ITEM_NAMES[species.drop_item]} {species.drop_chance}%)\n"
+            )
 
     def generate_output(self, output_directory: str) -> None:
         """Phase 3 entry point — emit the per-player ``.apdw1`` patch.

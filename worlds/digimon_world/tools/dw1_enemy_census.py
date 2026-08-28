@@ -101,18 +101,43 @@ MOVE_DATA = 0x8012623C        # Move[122] x 16 B: i32 distance, i16 power, u8 mp
 NUM_MOVE_DATA = 122           # special (element), status, accuracy, statusChance, 3 unknown
 
 
+ITEM_PARA = 0x801269DC        # ItemPara[128] x 32 B: char name[20], u32 price, u16 merit, u16 sort, s8 color,
+NUM_ITEMS = 128               # u8 dropable, 2 pad  (right after MOVE_DATA)
+ELEMENT_MATRIX = 0x80125F70   # u8[7][7]: BTL_calculateElementBonus(move.special, species.special[0])
+
+
 def load_move_data(slus: bytes) -> list[dict]:
-    """Every technique: id, name (MOVE_NAMES has 121 entries; the rest fall back to ``techNN``),
-    power, MP cost, element and status class."""
+    """Every technique: id, name (MOVE_NAMES has 121 entries; the rest fall back to ``techNN``) and
+    the full 16-byte ``Move`` record (``mp`` is the stored byte; the game charges ``mp * 3``)."""
     out = []
     for i in range(NUM_MOVE_DATA):
         ptr = struct.unpack_from("<I", slus_bytes(slus, MOVE_NAMES + i * 4, 4))[0]
         name = cstr(slus, ptr) if 0x80090800 <= ptr < 0x80200000 else f"tech{i:02X}"
         rec = slus_bytes(slus, MOVE_DATA + i * 16, 16)
-        _distance, power, mp_cost, _iframes, rng, element, status = struct.unpack_from("<ihBBBBB", rec, 0)
+        (distance, power, mp_cost, iframes, rng, element, status, accuracy, status_chance,
+         unk3, unk4, unk5) = struct.unpack_from("<ihBBBBBBBBBB", rec, 0)
         out.append({"id": i, "name": name, "power": power, "mp": mp_cost, "range": rng,
-                    "element": element, "status": status})
+                    "element": element, "status": status, "accuracy": accuracy,
+                    "status_chance": status_chance, "iframes": iframes, "distance": distance,
+                    "unk": (unk3, unk4, unk5)})
     return out
+
+
+def load_item_data(slus: bytes) -> list[dict]:
+    """Every ITEM_PARA entry: id, name, price, sort class and the dropable flag."""
+    out = []
+    for i in range(NUM_ITEMS):
+        rec = slus_bytes(slus, ITEM_PARA + i * 32, 32)
+        name = rec[:20].split(b"\0", 1)[0].decode("latin1")
+        price, merit, sort, _color, dropable = struct.unpack_from("<IHHbB", rec, 20)
+        out.append({"id": i, "name": name, "price": price, "merit": merit, "sort": sort,
+                    "dropable": dropable})
+    return out
+
+
+def load_element_matrix(slus: bytes) -> list[list[int]]:
+    """The 7x7 element affinity matrix, ``[move element][target species' first special]``."""
+    return [list(slus_bytes(slus, ELEMENT_MATRIX + row * 7, 7)) for row in range(7)]
 
 
 def read_disc_file(binf, lba: int, size: int) -> bytes:
@@ -262,19 +287,29 @@ def check_dump(sites: list[tuple[int, int, int, int, int]]) -> int:
 
 
 def emit_python(path: str, digimon: list[dict], models: dict[int, int], rows: list[dict],
-                sites: list[tuple[int, int, int, int, int]], moves: list[dict]) -> None:
+                sites: list[tuple[int, int, int, int, int]], moves: list[dict], items: list[dict],
+                matrix: list[list[int]]) -> None:
     lines = [
         '"""Field-Digimon data for Digimon World 1 (SLUS-01032) -- GENERATED, do not edit by hand.',
         "",
-        "Produced by ``tools/dw1_enemy_census.py --emit-python`` from the vanilla disc.  Four tables:",
+        "Produced by ``tools/dw1_enemy_census.py --emit-python`` from the vanilla disc.  Six tables:",
         "",
         "* :data:`MOVES` -- one row per ``MOVE_DATA`` technique (122): ``(id, name, power, mp_cost, element,",
-        "  status)``.  ``power`` is the damage base the battle uses (0 = buff / status-only move); ``element``",
-        "  indexes the 7x7 affinity matrix the enemy AI and the partner's battle-learn check consult.",
-        "* :data:`SPECIES` -- one row per ``DIGIMON_DATA`` entry (180): ``(id, name, level, moves16, heap)``.",
+        "  status, accuracy, status_chance, range, iframes, distance, unk3, unk4, unk5)`` -- the whole 16-byte",
+        "  record.  ``power`` is the damage base the battle uses (0 = buff / status-only move); ``mp_cost`` is",
+        "  the stored byte (the game charges three times that); ``element`` indexes the 7x7 affinity matrix",
+        "  the enemy AI and the partner's battle-learn check consult; ``status`` 0 = none, 1 = poison,",
+        "  2 = confusion, 3 = stun, 4 = flat, rolled at ``status_chance`` %.",
+        "* :data:`SPECIES` -- one row per ``DIGIMON_DATA`` entry (180): ``(id, name, level, moves16, heap,",
+        "  drop_item, drop_chance)``.",
         "  ``moves16`` is the species' 16-slot technique list as a 32-char hex string (``ff`` = empty slot);",
         "  a field record's move byte ``0x2E + k`` selects slot ``k``.  ``heap`` is the malloc3 footprint of",
         "  the species' ``.MMD`` model (file size rounded up to 2 KB) -- the budget a substitute must fit in.",
+        "  ``drop_item`` / ``drop_chance`` are the ITEM_PARA id and the percent chance the species drops",
+        "  after a won battle (``battleStatsGainsAndDrops``: ``random(100) < drop_chance``).",
+        "* :data:`ITEMS` -- one row per ``ITEM_PARA`` entry (128): ``(id, name, price, sort, dropable)``.",
+        "* :data:`ELEMENT_MATRIX` -- the 7x7 affinity table ``MAIN_D_80125F70[move element][species",
+        "  special]`` (values 2 / 5 / 10 / 15 / 20; ``BTL_calculateElementBonus`` maps them to 1 / 3 / 5 / 7 / 10).",
         "* :data:`FIELD_RECORDS` -- one row per Digimon record in a screen's ``.MAP`` file (989):",
         "  ``(map, slot, bin_off, type, hp, mp, cur_hp, cur_mp, off, def, spd, brn, bits, m0..m3, p0..p3, script)``.",
         "  ``bin_off`` is the flat Mode2/2352 .bin offset of the record's first byte; field offsets are",
@@ -290,18 +325,32 @@ def emit_python(path: str, digimon: list[dict], models: dict[int, int], rows: li
         "",
         "from typing import Final",
         "",
-        "MOVES: Final[tuple[tuple[int, str, int, int, int, int], ...]] = (",
+        "MOVES: Final[tuple[tuple[int, str, int, int, int, int, int, int, int, int, int, int, int, int], ...]] = (",
     ]
     lines.extend(
-        f"    ({m['id']}, {json.dumps(m['name'])}, {m['power']}, {m['mp']}, {m['element']}, {m['status']}),"
+        f"    ({m['id']}, {json.dumps(m['name'])}, {m['power']}, {m['mp']}, {m['element']}, {m['status']}, "
+        f"{m['accuracy']}, {m['status_chance']}, {m['range']}, {m['iframes']}, {m['distance']}, "
+        f"{m['unk'][0]}, {m['unk'][1]}, {m['unk'][2]}),"
         for m in moves
     )
     lines.append(")")
     lines.append("")
-    lines.append("SPECIES: Final[tuple[tuple[int, str, int, str, int], ...]] = (")
+    lines.append("SPECIES: Final[tuple[tuple[int, str, int, str, int, int, int], ...]] = (")
     for d in digimon:
         mv = bytes(d["moves"]).hex()
-        lines.append(f"    ({d['id']}, {json.dumps(d['name'])}, {d['level']}, \"{mv}\", {models.get(d['id'], 0)}),")
+        lines.append(f"    ({d['id']}, {json.dumps(d['name'])}, {d['level']}, \"{mv}\", {models.get(d['id'], 0)}, "
+                     f"{d['drop_item']}, {d['drop_chance']}),")
+    lines.append(")")
+    lines.append("")
+    lines.append("ITEMS: Final[tuple[tuple[int, str, int, int, bool], ...]] = (")
+    lines.extend(
+        f"    ({it['id']}, {json.dumps(it['name'])}, {it['price']}, {it['sort']}, {bool(it['dropable'])}),"
+        for it in items
+    )
+    lines.append(")")
+    lines.append("")
+    lines.append("ELEMENT_MATRIX: Final[tuple[tuple[int, ...], ...]] = (")
+    lines.extend(f"    ({', '.join(str(v) for v in row)})," for row in matrix)
     lines.append(")")
     lines.append("")
     lines.append("FIELD_RECORDS: Final[tuple[tuple[int, ...], ...]] = (")
@@ -408,7 +457,8 @@ def main() -> int:
                 code = cstr(slus, ptr)
                 entry = files.get(f"/CHDAT/MMD{d['id'] // 30}/{code}.MMD")
                 models[d["id"]] = ((entry[1] + 0x7FF) & ~0x7FF) if entry else 0
-            emit_python(args.emit_python, digimon, models, rows, sites, load_move_data(slus))
+            emit_python(args.emit_python, digimon, models, rows, sites, load_move_data(slus),
+                        load_item_data(slus), load_element_matrix(slus))
             print(f"wrote {args.emit_python}")
     if args.map is not None:
         for r in rows:

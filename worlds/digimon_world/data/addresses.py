@@ -1582,7 +1582,7 @@ ROM_CHEST_ITEM_OFFSETS: Final = (
     0x14081900,
 )
 
-# ----- Map item spawns (340 entries; <BB) ----------------------------------
+# ----- Map item spawns (463 entries; <BB) ----------------------------------
 
 ROM_MAP_ITEM_FORMAT: Final = "<BB"
 ROM_MAP_ITEM_OFFSETS: Final = (
@@ -10824,3 +10824,189 @@ for _off, _old, _new in _TRN_GYM_BONUS_SITES:
     assert _new == _old + 520, (_old, _new)   # BEATEN mirror band: trigger 200+X -> 720+X
     assert _off % 4 == 0 and (_overlay_file_to_bin(_OVERLAY_TRN_LBA, _off) - 24) % 2352 + 4 <= 2048
 del _off, _old, _new
+
+
+# =============================================================================
+# Technique data, element matrix and species drops (static SLUS tables)
+# =============================================================================
+#
+# Three tables the standalone randomizer has rewritten for years, all inside
+# the SLUS image (so a patch is a plain data write, no code hooks):
+#
+# * ``MOVE_DATA`` (dw_decomp ``include/dw/move.h``): 122 x 16 B ``Move``
+#   records -- ``i32 distance, i16 power, u8 mpCost, iframes, range,
+#   special, status, accuracy, statusChance, 3 unknown``. The battle
+#   charges ``mpCost * 3`` (``battle_main.c:2575``), rolls
+#   ``random(100) < accuracy`` variants (``:1997``) and applies ``status``
+#   when ``random(100) < statusChance`` (``:2039``). The first 121 are named
+#   (MOVE_NAMES); id 121 is a nameless internal entry, never rewritten.
+# * ``MAIN_D_80125F70``: the 7 x 7 element affinity matrix
+#   ``[move.special][species.special[0]]``, values 2 / 5 / 10 / 15 / 20 that
+#   ``BTL_calculateElementBonus`` (and its STD / VS twins) map to 1 / 3 / 5 /
+#   7 / 10. Read by the enemy AI weights and the partner's battle-learn filter.
+# * ``DIGIMON_DATA[type].dropItem / dropChance`` (bytes 33 / 34 of the 52-B
+#   ``DigimonPara``): ``battleStatsGainsAndDrops`` rolls
+#   ``random(100) < dropChance`` per beaten enemy (``battle_ui.c:178``).
+#
+# The offsets derive from the SLUS load base through
+# :func:`_slus_ram_to_bin_offset` and are asserted against the standalone's
+# independently measured constants (``data.py``: ``techDataBlockOffset``,
+# ``typeEffectivenessOffset``, ``digimonDataBlockOffset``).
+
+RAM_MOVE_DATA: Final = 0x0012623C
+MOVE_DATA_RECORD_SIZE: Final = 16
+MOVE_DATA_COUNT: Final = 122
+MOVE_DATA_FORMAT: Final = "<ihBBBBBBBBBB"
+MOVE_DATA_POWER_OFFSET: Final = 4          # i16
+MOVE_DATA_MP_COST_OFFSET: Final = 6        # u8, charged x3
+MOVE_DATA_STATUS_OFFSET: Final = 10        # u8: 0 none, 1 poison, 2 confusion, 3 stun, 4 flat
+MOVE_DATA_ACCURACY_OFFSET: Final = 11      # u8
+MOVE_DATA_STATUS_CHANCE_OFFSET: Final = 12  # u8, percent
+#: The contiguous span a technique rewrite touches: power .. statusChance (iframes, range and
+#: special in between are copied from vanilla).
+MOVE_DATA_PATCH_SPAN: Final = (MOVE_DATA_POWER_OFFSET, MOVE_DATA_STATUS_CHANCE_OFFSET + 1)
+ROM_MOVE_DATA_OFFSET: Final = _slus_ram_to_bin_offset(0x80000000 | RAM_MOVE_DATA)
+assert ROM_MOVE_DATA_OFFSET == ROM_TECHNIQUE_DATA.offset == 0x14D66DF4, hex(ROM_MOVE_DATA_OFFSET)
+assert struct.calcsize(MOVE_DATA_FORMAT) == MOVE_DATA_RECORD_SIZE
+
+RAM_ELEMENT_MATRIX: Final = 0x00125F70
+ELEMENT_MATRIX_DIM: Final = 7
+ELEMENT_MATRIX_VALUES: Final = (2, 5, 10, 15, 20)
+ROM_ELEMENT_MATRIX_OFFSET: Final = _slus_ram_to_bin_offset(0x80000000 | RAM_ELEMENT_MATRIX)
+assert ROM_ELEMENT_MATRIX_OFFSET == 0x14D669F8, hex(ROM_ELEMENT_MATRIX_OFFSET)
+
+DIGIMON_DATA_RECORD_SIZE: Final = 52
+DIGIMON_DATA_COUNT: Final = 180
+DIGIMON_DATA_DROP_ITEM_OFFSET: Final = 33   # u8 ITEM_PARA id
+DIGIMON_DATA_DROP_CHANCE_OFFSET: Final = 34  # u8 percent
+ROM_DIGIMON_DATA_OFFSET: Final = _slus_ram_to_bin_offset(0x80000000 | RAM_DIGIMON_DATA)
+assert ROM_DIGIMON_DATA_OFFSET == ROM_DIGIMON_DATA.offset == 0x14D6E9DC, hex(ROM_DIGIMON_DATA_OFFSET)
+assert struct.calcsize(ROM_DIGIMON_DATA.record_format) == DIGIMON_DATA_RECORD_SIZE
+
+
+def move_data_bin_offset(tech_id: int, field_offset: int = 0) -> int:
+    """Sector-aware .bin offset of byte ``field_offset`` of ``MOVE_DATA[tech_id]``."""
+
+    assert 0 <= tech_id < MOVE_DATA_COUNT and 0 <= field_offset < MOVE_DATA_RECORD_SIZE, (tech_id, field_offset)
+    return _flat_to_user_data(ROM_MOVE_DATA_OFFSET, tech_id * MOVE_DATA_RECORD_SIZE + field_offset)
+
+
+def element_matrix_bin_offset(row: int, col: int) -> int:
+    """Sector-aware .bin offset of ``MAIN_D_80125F70[row][col]``."""
+
+    assert 0 <= row < ELEMENT_MATRIX_DIM and 0 <= col < ELEMENT_MATRIX_DIM, (row, col)
+    return _flat_to_user_data(ROM_ELEMENT_MATRIX_OFFSET, row * ELEMENT_MATRIX_DIM + col)
+
+
+def digimon_data_bin_offset(species_id: int, field_offset: int = 0) -> int:
+    """Sector-aware .bin offset of byte ``field_offset`` of ``DIGIMON_DATA[species_id]``."""
+
+    assert 0 <= species_id < DIGIMON_DATA_COUNT and 0 <= field_offset < DIGIMON_DATA_RECORD_SIZE, (
+        species_id, field_offset)
+    return _flat_to_user_data(ROM_DIGIMON_DATA_OFFSET, species_id * DIGIMON_DATA_RECORD_SIZE + field_offset)
+
+
+def iter_user_data_chunks(base_bin_offset: int, table_offset: int, data: bytes):
+    """Yield ``(flat_bin_offset, chunk)`` pairs that write ``data`` at user-data byte
+    ``table_offset`` of the block at ``base_bin_offset`` without crossing a Mode2/2352
+    user-data boundary -- the shape a WRITE token needs."""
+
+    pos = 0
+    while pos < len(data):
+        flat = _flat_to_user_data(base_bin_offset, table_offset + pos)
+        sector_user_end = (flat // SECTOR_SIZE_BYTES) * SECTOR_SIZE_BYTES + SECTOR_SIZE_BYTES - SECTOR_EDC_ECC_BYTES
+        chunk = min(sector_user_end - flat, len(data) - pos)
+        yield flat, data[pos:pos + chunk]
+        pos += chunk
+
+
+# The standalone's per-block sector exclusions are exactly the records these
+# helpers split: the technique block hops one boundary (inside id 0x5C's
+# record) and the Digimon block five.
+assert move_data_bin_offset(0x5C, 0) < 0x14D673B8 < move_data_bin_offset(0x5C, 15), hex(move_data_bin_offset(0x5C))
+assert any(
+    digimon_data_bin_offset(i, 0) < 0x14D6EB28 < digimon_data_bin_offset(i, 51) for i in range(DIGIMON_DATA_COUNT)
+)
+
+
+# =============================================================================
+# NPC gifts (Tokomon items, Bug / Seadramon technique teaches) and the
+# standalone randomizer's remaining QoL patches
+# =============================================================================
+#
+# All sites below are the standalone's (``data.py``), re-read from the vanilla
+# disc on 2026-08-29; the vanilla bytes recorded here are what the disc holds
+# and what the disc-gated test in ``test/test_gifts.py`` re-checks.
+
+# ----- Tokomon's six ``giveItem`` opcodes (``28 00 item count``) -------------
+TOKOMON_GIFT_OPCODE: Final = 0x28
+TOKOMON_GIFT_VALUE_OFFSET: Final = 2                 # item byte, then count byte
+TOKOMON_GIFT_VANILLA: Final[tuple[tuple[int, int], ...]] = (
+    (0, 3),    # sm.recovery x3
+    (38, 3),   # Meat x3
+    (4, 3),    # sm.rec.floppy x3  (item 4)
+    (11, 1),   # item 11 x1
+    (13, 2),   # item 13 x2
+    (14, 1),   # item 14 x1
+)
+assert len(TOKOMON_GIFT_VANILLA) == len(ROM_TOKOMON_ITEM_OFFSETS)
+
+# ----- Bug (Beetle Land) and Seadramon technique teaches --------------------
+# ``learnMove tech`` (``2D tech``) at ROM_LEARN_MOVE_OFFSETS, guarded by a
+# ``22 00 tech 00`` "already known?" check whose operand sits at
+# ROM_CHECK_MOVE_OFFSETS. Both bytes carry the technique id.
+TECH_GIFT_LEARN_OPCODE: Final = 0x2D
+TECH_GIFT_VANILLA: Final = (33, 21, 18, 16)          # Bug, Seadramon 1 / 2 / 3
+assert len(TECH_GIFT_VANILLA) == len(ROM_LEARN_MOVE_OFFSETS) == len(ROM_CHECK_MOVE_OFFSETS)
+
+# ----- Quest items droppable (ITEM_PARA ``dropable`` byte) ------------------
+ROM_ITEM_DROPABLE_BYTE_OFFSET: Final = 29             # ItemPara +0x1D
+ROM_QUEST_ITEMS_NOT_DROPABLE: Final = (115, 116, 117, 118, 119, 120, 123, 124)
+
+# ----- Technique learn chances --------------------------------------------
+# ``MOVE_LEARN_CHANCES[58][3]`` (SLUS, ``ROM_TECH_LEARN_BATTLE``) and the
+# brain-training table (TRN_REL.BIN, ``ROM_TECH_LEARN_BRAIN``: 8 tiers x 3
+# specialty matches), both as the disc holds them.
+ROM_TECH_LEARN_BATTLE_VANILLA: Final = bytes.fromhex(
+    "19100b110a051e160f140c07160e091c130d0f08000e06000d0900160e0a20130f120d082415111a100d0f0b070c0800"
+    "110a050f0800140c071e0f08140a05160e090e06001e160f281e16100d00231b121c150d140e0a0f0c0019110b20180f"
+    "1a130e0c0800170f0c18100d120c091c16101b140f0e0a00120800130908160f0a1a130e18110c140b08150d09100700"
+    "18110c180e09170d080f0a050b0800150c07140b0619100a09070019100a"
+)
+ROM_TECH_LEARN_BRAIN_VANILLA: Final = bytes.fromhex("000f0a190d08160b071409051208020f07000c06000a0500")
+assert len(ROM_TECH_LEARN_BATTLE_VANILLA) == 58 * 3 and len(ROM_TECH_LEARN_BRAIN_VANILLA) == 8 * 3
+BRAIN_TIER_ONE_LEARN_CHANCE: Final = 30               # standalone ``learnTierOne``: row 0, byte 0 (vanilla 0)
+LEARN_CHANCE_MULTIPLIER: Final = 2                    # standalone ``upLearnChance`` ...
+BRAIN_LEARN_ZERO_REPLACEMENT: Final = 5               # ... and its floor for brain cells that were 0
+assert max(ROM_TECH_LEARN_BATTLE_VANILLA) * LEARN_CHANCE_MULTIPLIER <= 0xFF
+assert (ROM_TECH_LEARN_BRAIN.offset - 24) % 2352 + len(ROM_TECH_LEARN_BRAIN_VANILLA) <= 2048
+
+# ----- Unrigged bonus-try slots (TRN_REL.BIN / TRN_REL2.BIN) ----------------
+# ``(bin offset, patched word, vanilla word)``: one instruction per training
+# slots function short-circuits the rigging logic (standalone ``slots``).
+ROM_UNRIG_SLOTS_WORD_PATCHES: Final[tuple[tuple[int, int, int], ...]] = (
+    (ROM_UNRIG_SLOTS_OFFSET, 0x08023A1E, 0x108100BA),
+    (ROM_UNRIG_SLOTS_2_OFFSET, 0x08023494, 0x108100BA),
+)
+
+# ----- Learn a move and a command in one brain session (TRN_REL.BIN) --------
+ROM_LEARN_MOVE_AND_COMMAND_WORDS: Final = (0x10000065, 0x00001021)
+ROM_LEARN_MOVE_AND_COMMAND_VANILLA_WORDS: Final = (0x00001021, 0x2A410064)
+
+# ----- DV chip descriptions (28-byte NUL-padded strings) --------------------
+ROM_DV_CHIP_TEXT_LENGTH: Final = 28
+ROM_DV_CHIP_TEXT_PATCHES: Final[tuple[tuple[int, bytes, bytes], ...]] = (  # (offset, patched, vanilla)
+    (ROM_DV_CHIP_A_OFFSET, b"Boosts Off+Brains by 100", b"Boost Off. Pwr+Brains +100"),
+    (ROM_DV_CHIP_D_OFFSET, b"Boosts Def+Speed by 100", b"Boost Def. Pwr+Speed +100"),
+    (ROM_DV_CHIP_E_OFFSET, b"Boosts HP+MP by 1000", b"Boost Off. Pwr+Speed +1000"),
+)
+for _off, _new, _old in ROM_DV_CHIP_TEXT_PATCHES:
+    assert len(_new) <= 26 and len(_old) <= 26 and (_off - 24) % 2352 + ROM_DV_CHIP_TEXT_LENGTH <= 2048, hex(_off)
+for _off, _new, _old in ROM_UNRIG_SLOTS_WORD_PATCHES:
+    assert _off % 4 == 0 and (_off - 24) % 2352 + 4 <= 2048, hex(_off)
+assert (ROM_LEARN_MOVE_AND_COMMAND_OFFSET - 24) % 2352 + 8 <= 2048
+for _off in ROM_TOKOMON_ITEM_OFFSETS:
+    assert (_off - 24) % 2352 + 4 <= 2048, hex(_off)
+for _off in ROM_LEARN_MOVE_OFFSETS:
+    assert (_off - 24) % 2352 + 2 <= 2048, hex(_off)
+del _off, _new, _old

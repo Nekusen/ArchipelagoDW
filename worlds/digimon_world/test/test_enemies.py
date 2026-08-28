@@ -85,7 +85,10 @@ class TestEnemyRecordTable(unittest.TestCase):
         goburimon = enemies.SPECIES_BY_ID[80]
         self.assertIn(4, goburimon.tech_slots)                # War Cry, a buff ...
         self.assertNotIn(4, goburimon.damaging_slots)         # ... has power 0
-        self.assertEqual(enemies.MOVES_BY_ID[2], enemies.Move(2, "Spit Fire", 66, 10, 0, 0))
+        spit_fire = enemies.MOVES_BY_ID[2]
+        self.assertEqual(spit_fire[:6], (2, "Spit Fire", 66, 10, 0, 0))
+        self.assertEqual((spit_fire.accuracy, spit_fire.status_chance, spit_fire.range), (43, 0, 2))
+        self.assertEqual((goburimon.drop_item, goburimon.drop_chance), (38, 30))   # Meat, 30 %
         self.assertEqual(enemies.MOVES_BY_ID[0x2D].name, "Counter")
         self.assertEqual(enemies.RECORD_INDEX[(2, 0)].tech_powers(), (66, 279, 52))
         self.assertEqual(enemies.RECORD_INDEX[(49, 1)].move_count, 0)   # Monochromon's shop customer

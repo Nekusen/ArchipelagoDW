@@ -308,17 +308,48 @@ from .data.addresses import (
     read_technique_table_user_data,
 )
 from .data.addresses import (
+    BRAIN_LEARN_ZERO_REPLACEMENT,
+    BRAIN_TIER_ONE_LEARN_CHANCE,
+    DIGIMON_DATA_DROP_ITEM_OFFSET,
+    DIGIMON_DATA_RECORD_SIZE,
+    ELEMENT_MATRIX_DIM,
     FIELD_RECORD_FORMAT,
     FIELD_RECORD_HP,
     FIELD_RECORD_MOVES,
     FIELD_RECORD_STAT_COUNT,
     FIELD_RECORD_TYPE,
+    LEARN_CHANCE_MULTIPLIER,
+    MOVE_DATA_PATCH_SPAN,
+    MOVE_DATA_RECORD_SIZE,
+    ROM_CHECK_MOVE_OFFSETS,
+    ROM_DIGIMON_DATA_OFFSET,
+    ROM_DV_CHIP_TEXT_LENGTH,
+    ROM_DV_CHIP_TEXT_PATCHES,
+    ROM_ELEMENT_MATRIX_OFFSET,
+    ROM_ITEM_DROPABLE_BYTE_OFFSET,
+    ROM_ITEM_TABLE_BASE,
+    ROM_LEARN_MOVE_AND_COMMAND_OFFSET,
+    ROM_LEARN_MOVE_AND_COMMAND_WORDS,
+    ROM_LEARN_MOVE_OFFSETS,
+    ROM_MOVE_DATA_OFFSET,
+    ROM_QUEST_ITEMS_NOT_DROPABLE,
+    ROM_TECH_LEARN_BATTLE,
+    ROM_TECH_LEARN_BATTLE_VANILLA,
+    ROM_TECH_LEARN_BRAIN,
+    ROM_TECH_LEARN_BRAIN_VANILLA,
+    ROM_TOKOMON_ITEM_OFFSETS,
+    ROM_UNRIG_SLOTS_WORD_PATCHES,
+    TOKOMON_GIFT_VALUE_OFFSET,
     TRN_GYM_BONUS_WORD_PATCHES,
     field_record_bin_offset,
+    iter_user_data_chunks,
     maphead_bin_offset,
 )
-from .enemies import RECORD_INDEX, RECORDS_BY_MAP, SITES_BY_MAP, EnemyPlan
+from .drops import DropPlan
+from .enemies import MOVES_BY_ID, RECORD_INDEX, RECORDS_BY_MAP, SITES_BY_MAP, EnemyPlan
+from .gifts import GiftPlan
 from .ground_items import compute_ground_item_replacements
+from .techniques import TechniquePlan
 from .starters import (
     LEVEL_CHAMPION,
     LEVEL_FRESH,
@@ -331,7 +362,7 @@ from .starters import (
 )
 
 if TYPE_CHECKING:
-    from .options import ShopModes
+    from .options import DigimonWorldOptions, ShopModes
     from .world import DigimonWorldWorld
 
 
@@ -2642,6 +2673,112 @@ def _write_enemy_tokens(patch: DigimonWorldProcedurePatch, plan: EnemyPlan) -> N
                 )
 
 
+def _write_user_data_tokens(
+    patch: DigimonWorldProcedurePatch, base_bin_offset: int, table_offset: int, data: bytes,
+) -> None:
+    """WRITE tokens for ``data`` at user-data byte ``table_offset`` of the SLUS block that
+    starts at ``base_bin_offset``, split wherever a Mode2/2352 sector boundary falls."""
+
+    for flat, chunk in iter_user_data_chunks(base_bin_offset, table_offset, data):
+        patch.write_token(APTokenTypes.WRITE, flat, chunk)
+
+
+def _write_technique_tokens(patch: DigimonWorldProcedurePatch, plan: TechniquePlan) -> None:
+    """Technique data + element matrix randomization — pure data writes into the SLUS.
+
+    * Every changed ``MOVE_DATA`` record: the ``power .. statusChance`` span (bytes 4..12),
+      with the untouched ``iframes`` / ``range`` / ``special`` bytes in between copied from
+      vanilla.
+    * The whole 7 x 7 affinity matrix when it changed.
+    """
+
+    start, end = MOVE_DATA_PATCH_SPAN
+    for tech_id, values in sorted(plan.moves.items()):
+        vanilla = MOVES_BY_ID[tech_id]
+        span = struct.pack(
+            "<hBBBBBBB", values.power, values.mp_cost, vanilla.iframes, vanilla.range, vanilla.element,
+            values.status, values.accuracy, values.status_chance,
+        )
+        assert len(span) == end - start, len(span)
+        _write_user_data_tokens(patch, ROM_MOVE_DATA_OFFSET, tech_id * MOVE_DATA_RECORD_SIZE + start, span)
+    if plan.matrix is not None:
+        assert len(plan.matrix) == ELEMENT_MATRIX_DIM and all(len(row) == ELEMENT_MATRIX_DIM for row in plan.matrix)
+        _write_user_data_tokens(patch, ROM_ELEMENT_MATRIX_OFFSET, 0, bytes(v for row in plan.matrix for v in row))
+
+
+def _write_drop_tokens(patch: DigimonWorldProcedurePatch, plan: DropPlan) -> None:
+    """Enemy drop randomization — the ``dropItem`` / ``dropChance`` byte pair of every changed
+    ``DIGIMON_DATA`` record."""
+
+    for species_id, (item, chance) in sorted(plan.overrides.items()):
+        _write_user_data_tokens(
+            patch, ROM_DIGIMON_DATA_OFFSET, species_id * DIGIMON_DATA_RECORD_SIZE + DIGIMON_DATA_DROP_ITEM_OFFSET,
+            bytes((item, chance)),
+        )
+
+
+def _write_gift_tokens(patch: DigimonWorldProcedurePatch, plan: GiftPlan) -> None:
+    """NPC gift randomization — script-byte writes.
+
+    * Technique teaches: the ``learnMove`` operand and the "already known?" check
+      operand of each changed site both get the new technique id.
+    * Tokomon: the item and count bytes of each changed ``giveItem``.
+    """
+
+    for site, tech in sorted(plan.tech_gifts.items()):
+        patch.write_token(APTokenTypes.WRITE, ROM_LEARN_MOVE_OFFSETS[site] + 1, bytes([tech]))
+        patch.write_token(APTokenTypes.WRITE, ROM_CHECK_MOVE_OFFSETS[site], bytes([tech]))
+    for site, (item, count) in sorted(plan.tokomon_gifts.items()):
+        patch.write_token(
+            APTokenTypes.WRITE, ROM_TOKOMON_ITEM_OFFSETS[site] + TOKOMON_GIFT_VALUE_OFFSET, bytes((item, count)),
+        )
+
+
+def brain_learn_table(tier_one: bool, increase: bool) -> bytes:
+    """The brain-training learn-chance table (8 tiers x 3) after the two options that touch it,
+    applied in the standalone's order: tier-1 unlock first, then the doubling (0 -> 5)."""
+
+    table = bytearray(ROM_TECH_LEARN_BRAIN_VANILLA)
+    if tier_one:
+        table[0] = BRAIN_TIER_ONE_LEARN_CHANCE
+    if increase:
+        table = bytearray(
+            min(v * LEARN_CHANCE_MULTIPLIER, 0xFF) if v else BRAIN_LEARN_ZERO_REPLACEMENT for v in table
+        )
+    return bytes(table)
+
+
+def _write_standalone_patch_tokens(patch: DigimonWorldProcedurePatch, options: DigimonWorldOptions) -> None:
+    """The standalone randomizer's remaining QoL patches, each behind its own toggle.
+
+    Sources: ``references/digimon_world_randomizer/digimon/handler.py`` ``_applyPatchAllowDrop``
+    (2441), ``_applyPatchLearnTierOne`` (2464), ``_applyPatchLearnChance`` (2473),
+    ``_applyPatchUnrigSlots`` (2594), ``_applyPatchLearnMoveAndCommand`` (2756),
+    ``_applyPatchDVChipDescription`` (2769). All are data or single-word rewrites at the
+    standalone's offsets; the vanilla bytes are pinned in ``data/addresses.py``.
+    """
+
+    if options.quest_items_droppable:
+        for item_id in ROM_QUEST_ITEMS_NOT_DROPABLE:
+            table_offset = item_id * ROM_ITEM_TABLE_ENTRY_SIZE + ROM_ITEM_DROPABLE_BYTE_OFFSET
+            _write_user_data_tokens(patch, ROM_ITEM_TABLE_BASE, table_offset, b"\x01")
+    if options.increase_learn_chance:
+        doubled = bytes(min(v * LEARN_CHANCE_MULTIPLIER, 0xFF) for v in ROM_TECH_LEARN_BATTLE_VANILLA)
+        _write_user_data_tokens(patch, ROM_TECH_LEARN_BATTLE.offset, 0, doubled)
+    if options.brain_training_tier_one or options.increase_learn_chance:
+        table = brain_learn_table(bool(options.brain_training_tier_one), bool(options.increase_learn_chance))
+        _write_user_data_tokens(patch, ROM_TECH_LEARN_BRAIN.offset, 0, table)
+    if options.unrig_slots:
+        for offset, word, _vanilla in ROM_UNRIG_SLOTS_WORD_PATCHES:
+            patch.write_token(APTokenTypes.WRITE, offset, struct.pack("<I", word))
+    if options.learn_move_and_command:
+        words = struct.pack("<II", *ROM_LEARN_MOVE_AND_COMMAND_WORDS)
+        patch.write_token(APTokenTypes.WRITE, ROM_LEARN_MOVE_AND_COMMAND_OFFSET, words)
+    if options.fix_dv_chip_text:
+        for offset, text, _vanilla in ROM_DV_CHIP_TEXT_PATCHES:
+            patch.write_token(APTokenTypes.WRITE, offset, text.ljust(ROM_DV_CHIP_TEXT_LENGTH, b"\x00"))
+
+
 def _write_ground_item_params(
     patch: DigimonWorldProcedurePatch,
     world: DigimonWorldWorld,
@@ -2857,6 +2994,14 @@ def write_patch(world: DigimonWorldWorld, output_directory: str) -> None:
     # both options are off.
     if not world.enemy_plan.empty:
         _write_enemy_tokens(patch, world.enemy_plan)
+    # Technique data / element matrix and enemy drops — resolved in
+    # generate_early (static SLUS tables, no placement dependency).
+    if not world.technique_plan.empty:
+        _write_technique_tokens(patch, world.technique_plan)
+    if not world.drop_plan.empty:
+        _write_drop_tokens(patch, world.drop_plan)
+    if not world.gift_plan.empty:
+        _write_gift_tokens(patch, world.gift_plan)
 
     # Shopsanity (recycle / item / secret / merit, each off | coexist |
     # replace). The common infrastructure — extended boot hook, builder
@@ -2888,6 +3033,11 @@ def write_patch(world: DigimonWorldWorld, output_directory: str) -> None:
             _write_merit_shop_locations_tokens(
                 patch, world, replace=shop_modes.merit == SHOP_MODE_REPLACE,
             )
+
+    # The standalone's QoL patches — after every table writer above so the
+    # quest-item ``dropable`` bytes land on top of any full-entry ITEM_PARA
+    # token (token order = insertion order).
+    _write_standalone_patch_tokens(patch, options)
 
     do_shuffle_ground_items = bool(int(options.randomize_ground_items.value))
     do_shuffle_starters = bool(int(options.randomize_starter.value))

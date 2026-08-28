@@ -176,6 +176,19 @@ These come from [docs/style.md](docs/style.md) and the ruff config and override 
   the user's BizHawk validation session, Phase 5 setup docs, the
   region-locking option-integration pass, and deferred big features
   (enemy randomization, in-game notifications).
+- **2026-08-29**: standalone-randomizer parity batch — every remaining
+  randomization feature of `references/digimon_world_randomizer` reimplemented
+  clean-room with its own options: `technique_data` (+ five field toggles) and
+  `type_effectiveness` (`techniques.py`), enemy drops (`drops.py`), Bug/Seadramon
+  technique gifts + Tokomon gifts (`gifts.py`), and six QoL patch toggles
+  (quest items droppable, learn chance ×2, brain tier 1, unrig slots, learn
+  move+command, DV chip text). All data patches, validated by a real-disc
+  round trip (spoiler ↔ patched tables). Not ported: digivolution
+  randomization (open, STATUS §2.3), recruit-identity shuffle, intro hash,
+  happyVending, jukebox truncation, forced starter. Table audit corrected one
+  claim: the element matrix is read by the **partner's** auto-battle AI, not
+  the enemy AI. Remaining technique objective = `BTL_calculateDamage` decomp
+  + `.MMD` census + species-list shuffle.
 - **2026-08-28**: jype0's byte-matching `dw_decomp` adopted as the reading
   source for game code (see References); its symbols, structs and typed
   globals are in the Ghidra project. Audits against it found no model
