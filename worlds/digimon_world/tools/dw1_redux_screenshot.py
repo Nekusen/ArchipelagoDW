@@ -16,6 +16,7 @@ from __future__ import annotations
 import os
 import struct
 import sys
+import urllib.parse
 import urllib.request
 import zlib
 
@@ -24,7 +25,18 @@ VRAM_W = 1024
 
 def screenshot(out_path: str, x: int = 0, y: int = 0, w: int = 320, h: int = 240,
                host: str = "127.0.0.1", port: int = 8080) -> str:
-    raw = urllib.request.urlopen(f"http://{host}:{port}/api/v1/gpu/vram/raw", timeout=15).read()
+    # The VRAM GET races the running emulation and has segfaulted this nightly mid-session
+    # (2026-08-28, sentry dump). Pause through the Lua endpoint for the duration of the fetch.
+    base = f"http://{host}:{port}"
+
+    def lua(code: str) -> None:
+        urllib.request.urlopen(base + "/api/v1/lua/eval?code=" + urllib.parse.quote(code), timeout=15).read()
+
+    lua("PCSX.pauseEmulator()")
+    try:
+        raw = urllib.request.urlopen(base + "/api/v1/gpu/vram/raw", timeout=15).read()
+    finally:
+        lua("PCSX.resumeEmulator()")
     rows = []
     for yy in range(h):
         row = bytearray(b"\x00")
