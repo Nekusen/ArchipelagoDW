@@ -234,23 +234,30 @@ The full queue with capture instructions is
 [SAVESTATE_REQUESTS.md](worlds/digimon_world/tools/SAVESTATE_REQUESTS.md). Each row there is a
 5-minute job; this table is the *why*.
 
-| Savestate | Closes (decomp) | Advances (roadmap) | Priority |
+**Re-triaged 2026-08-28.** With dw_decomp every branch these states were requested for has been
+read in byte-matching C and agrees with our models, so **none is needed for understanding**. A
+state now buys either *patch validation* (exercising a shipped or planned patch in the real
+game) or *provenance* (upgrading a PARTIAL ledger row with natural vectors). Priorities reflect
+that.
+
+| Savestate | Buys | Advances (roadmap) | Priority |
 | --- | --- | --- | --- |
-| `post_battle_learn.state` | `learnMove` natural class | Regression evidence for the shipped companion-bit fix; enemy-stat scaling | **High** |
-| `digivolve_accepted.state` | `getNumMasteredMoves` → VERIFIED; `calculateRequirementScore` capture | Digivolution v2 | **High** |
-| `species_raised.state` | `hasDigimonRaised` → VERIFIED | Digivolution v2 (the veto flag) | **High** |
-| `fishing.state` | FISH_REL readers (after overlay import) | Fishing locations; ITEM_PARA residual check | **High** |
-| `training_gym.state` | Stat-gain routines | Enemy-stat scaling | **High** |
-| `dialog_columns.state` | `dialogRenderString` → VERIFIED | **In-game notifications** | Medium |
-| `script_vm_cold_start.state` | `callScriptSection` → VERIFIED (43 invisible stores; cache-miss path) | Every script-bytecode patch | Medium |
-| `mt_infinity.state`, `back_dimension.state` | — | Post-game heap-margin measurement | Medium |
+| `fishing.state` | Exercises the 6 relocated `FISH_REL` ITEM_PARA readers (never run live) | Fishing locations; ITEM_PARA residual check | **High** (validation) |
+| `training_gym.state` | Runtime evidence for the stat-gain routines (`src/trn/` is in C) | Enemy-stat scaling | **High** (validation) |
+| `post_battle_learn.state` | Natural evidence for the companion-bit fix; first state on the scaling path | Enemy-stat scaling | Medium (validation) |
+| `digivolve_accepted.state` | Validation of a future AP digivolution item; `getNumMasteredMoves` → VERIFIED | Digivolution v2 | Medium (validation) |
+| `dialog_columns.state` | Testing an injected notification string that uses the column codes | **In-game notifications** | Medium (validation) |
+| `mt_infinity.state`, `back_dimension.state` | Post-game heap-margin measurement | Heap safety of the ITEM_PARA claim | Medium |
 | `machinedramon.state` | Ending path, trigger 50 | Goal robustness | Medium |
-| `card_trade.state` | Card-value path | Card multiplier (shipped on static analysis + one live check) | Medium |
-| `long_text.state` | `renderCharacter` 0xF4 clamps | — | Low |
-| `numeric_ui.state` | `convertAsciiToGameChar` punctuation runs | — | Low |
+| `card_trade.state` | Card-value path live | Card multiplier (shipped on static analysis + one live check) | Medium |
+| `species_raised.state` | `hasDigimonRaised` → VERIFIED | — (the flag's semantics are C-confirmed) | Low (provenance) |
+| `script_vm_cold_start.state` | `callScriptSection` → VERIFIED | — (all 43 stores C-confirmed) | Low (provenance) |
+| `long_text.state`, `numeric_ui.state` | `renderCharacter` / `convertAsciiToJis` corners | — (C-confirmed) | Low (provenance) |
 | `rebirth.state`, `piximon_shop.state` | Mastery survival across rebirth; Piximon check | QoL confidence | Low |
 
 **One sitting covers all of it.** Rule of thumb from the lab: stop one input short of the event.
+If time is short, the two **High** rows are the ones that matter: they are the only states that
+exercise code our patches touch and nothing has ever run.
 
 Not savestate problems (do not capture for these): battle internals (overlay import), the arena
 exit hang (PCSX-Redux only), Gekomon / Whamon / Ogremon (need text).

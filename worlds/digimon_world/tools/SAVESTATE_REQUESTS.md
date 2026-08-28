@@ -26,21 +26,27 @@ harness can then drive the event itself.
 
 ## Open requests
 
-These rows are **live**: each one is a decomp that captured vectors but could not reach a branch
-or an input class, so the unit ships PARTIAL until the state exists. Raised by the 2026-08-22
-batch (callScriptSection / renderString / hasDigimonRaised / scriptIdToEntityId / isKeyDown /
-dailyPStatTrigger).
+**Re-triaged 2026-08-28 after adopting dw_decomp.** Every branch these rows were opened for has
+since been read in dw_decomp's byte-matching C and found to agree with our models (cross-check
+recorded in each unit's NOTES.md and the ledger). So **no row below is needed for
+understanding any more**. What a state still buys is one of two things, named in the last
+column:
+
+- **patch validation** — exercising a shipped or planned patch in the real game (the reason
+  that survives; these keep their priority);
+- **provenance** — turning a PARTIAL ledger row into VERIFIED with natural vectors instead of
+  a synthetic sweep or a C cross-check (nice to have; priority lowered).
 
 | Priority | Filename | Position it at | Unblocks |
 | --- | --- | --- | --- |
-| High | `species_raised.state` | Any save where at least one Digimon species has already been **raised** — a partner that reached Champion and later died or was reborn, so the "ever raised" flag is set. The collection/graveyard list must show at least one entry. | `hasDigimonRaised` @ 0x800FF824. All 2866 captured vectors return 0, even on the all-50-recruits `shop_secret` save, because **trigger 512+X is an "ever raised" flag, not a recruit bit**. The `v0 == 1` branch has never been observed; without it the unit can only be PARTIAL. |
-| Low | `numeric_ui.state` | A screen whose text contains bracket/backtick punctuation (`[ \ ] ^ _ ` `` ` `` `{ | } ~`) — a credits roll or similar. **Digits are already covered — do not capture for those.** | `convertAsciiToGameChar` @ 0x800F18C8. The 2026-08-23 widened capture closed the digit gap (54 calls on 0x30-0x39, all replayed green). Still uncovered: the 0x5B-0x60 (bias 0x25) and 0x7B-0x7E (bias 0x3F) punctuation runs and the out-of-range `return 0` — 3 of 30 mutants survive on exactly those. |
-| Low | *(no state needed — a capture-config change)* | Re-run the `renderString` unit's capture with the `0x801BE958` window at **0xE10** instead of 0x8A0, plus a `pre` region for the staging array on `renderCharacter`. The same savestates regenerate it; no new gameplay. | `renderString` @ 0x8010CF24: 446 of 780 replayable vectors are window-limited skips purely because staging slots 30..49 were never dumped, and 1226 `renderCharacter` vectors are store-target-only for want of a pre snapshot. |
-| Low | `long_text.state` | A dialog or menu line long enough to push a string past x = 0xF4 — a wide item/technique description, or the credits. The maximum `xPos`/`yPos` ever observed is **0xF0**, so the line need only run about four pixels further. | `renderCharacter` @ 0x8010CC28. 2034 vectors, none with `xPos >= 0xF4` or `yPos >= 0xF4`, so both clamp branches are unreplayed. |
-| High | `post_battle_learn.state` | Mid-battle, one input before the finishing blow, with the partner **not yet** having mastered the technique it is about to learn — ideally a Rookie/Champion whose next mastery is Dynamite Kick (slot 44) or Horizontal Kick (slot 55). | `learnMove` @ 0x800E5F14. Its 6 natural vectors are all `learnMove(2)` from partner spawn onto an already-set bit, so the natural class catches only 2 of 6 mutants. The companion-pair behaviour, the word index and the negative path are proven by a synthetic sweep only. |
-| High | `digivolve_accepted.state` | Holding a digivolution item, **one input before** the digivolution is evaluated, on a partner whose stats sit near a requirement boundary so the "techniques mastered" requirement is actually consulted. | `getNumMasteredMoves` @ 0x800E3510 — **zero** natural vectors; ships PARTIAL despite 232 synthetic ones with excellent coverage. Also the only route to natural vectors for its sole caller `calculateRequirementScore` @ 0x800E26B8 and the digivolution requirement table at 0x8012ABEC. |
-| Medium | `script_vm_cold_start.state` | **Before** the first script of a screen runs — a screen transition, or a cold boot into the intro — rather than mid-dialog. Ideally save several, on different screens, so more than 20 distinct `(scriptId, sectionId, value)` triples become reachable. | `callScriptSection` @ 0x80105B14. 43 of its 58 stores are *invisible* to any comparator because every existing capture is mid-dialog: the target already holds the value being written (0x80134E30 already 1, pstat 0 always 0, 0x80134C9C never >= 0x80, slot +0x14 already 1, tag entries already 0xFF). The lab can poke those to non-default values between reloads, but only if capture starts before a script does. Also the only way to reach a `getScript` cache-MISS inside this function — currently 0 of 183. |
-| Medium | `dialog_columns.state` | A dialog whose text uses the *tab* and *skip* control codes rather than the shop-list column setters — most likely a multi-column stat/status readout (technique list, digimon status page, arena results board) or a screen with inline icon/wait markers. Dialog already open, one input before the page that lays out in columns. | `dialogRenderString` @ 0x80100948. Its 2609 vectors execute only 0x01/0x0F/0x16/0x18/0x19/0x1A; the seven remaining opcodes — 0x02/0x03 (2- and 4-byte skips), 0x0C/0x0E (tab to the next 8-/11-cell boundary) and 0x17/0x1B/0x1C (column setters) — are asm-derived only, and 7 of 40 mutants survive on exactly those. They are also the codes an injected notification string would want. Secondary: no capture has `0x80134F98 != 0`, and no call ever passes `x != 0`. |
+| Low (provenance) | `species_raised.state` | Any save where at least one Digimon species has already been **raised** — a partner that reached Champion and later died or was reborn, so the "ever raised" flag is set. | `hasDigimonRaised` @ 0x800FF824 PARTIAL → VERIFIED. dw_decomp confirms `isTriggerSet(id + 0x200)` and that the flag is set only by `setDigimonRaised` at reincarnation (family 512..574). Nothing shipped depends on the `v0 == 1` path. |
+| Low (provenance) | `numeric_ui.state` | A screen whose text contains bracket/backtick punctuation. **Digits are already covered.** | `convertAsciiToJis` punctuation runs — C-confirmed (`main.c:929-938`). |
+| Low (config change) | *(no state needed)* | Re-run the `renderString` capture with the `0x801BE958` window at **0xE10** plus a `pre` region on `renderCharacter`. | Converts 446 window-limited skips; no new gameplay. |
+| Low (provenance) | `long_text.state` | A line long enough to push a string past x = 0xF4 (max observed 0xF0). | `renderCharacter` 0xF4 clamps — C-confirmed (`script_draw.c:789-795`). |
+| Medium (patch validation) | `post_battle_learn.state` | Mid-battle, one input before the finishing blow, partner not yet knowing the technique it is about to learn — ideally Dynamite Kick (slot 44) or Horizontal Kick (slot 55). | Natural evidence for the shipped companion-bit fix (`d8048b33`) and the first state on the **enemy-stat scaling** validation path (`battleStatsGainsAndDrops`). The `learnMove` model itself is C-confirmed. |
+| Medium (patch validation) | `digivolve_accepted.state` | Holding a digivolution item, one input before the requirement evaluation, partner near a requirement boundary. | Validation of any future AP digivolution item against `calculateRequirementScore` (in C: `evolution.c`; the "ever raised" veto and the OR-ed bonus conditions are now known). `getNumMasteredMoves` PARTIAL → VERIFIED as a by-product. |
+| Low (provenance) | `script_vm_cold_start.state` | Before the first script of a screen runs. | `callScriptSection`'s 43 replay-invisible stores are all C-confirmed with exact widths (`script_engine.c:95-120`). Only needed for provenance, or to test a script-start hook if one is ever designed. |
+| Medium (patch validation) | `dialog_columns.state` | A dialog using the tab/skip control codes (multi-column stat readout, arena board). | The seven control codes are C-confirmed (`script_common.c:2601-2701`). The state is now for **testing an injected notification string** that uses them — the in-game notifications feature. |
 
 ## Anticipated gaps
 
@@ -62,9 +68,11 @@ session can cover them in one pass rather than one interruption at a time.
 
 These look like savestate problems but are not — do **not** add states for them:
 
-- **Battle internals.** `battle_pending.state` already reaches a real battle. The blocker is that
-  `BTL_REL` (and the other 15 overlays) are **not imported into the Ghidra project** — see the
-  T4 tier note in DECOMP_PROCESS.md. That is tooling work, not capture work.
+- **Battle internals.** `battle_pending.state` already reaches a real battle, and since
+  2026-08-28 the battle overlay is readable as C in `references/dw_decomp/src/btl/` (94 % of it).
+  What is left there is design work, not capture work. (Before dw_decomp the blocker was that
+  no overlay was imported into Ghidra; that import is now only needed to vector-capture an
+  overlay function that is ASM-only upstream.)
 - **Arena post-fight exit.** Hangs deterministically in PCSX-Redux only (BIOS busy-wait at
   0x800C8F98); fine on BizHawk/DuckStation. `arena_hang_repro.state` preserves it. Nothing a new
   state can fix.
