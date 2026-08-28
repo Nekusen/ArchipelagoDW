@@ -140,6 +140,20 @@ def load_element_matrix(slus: bytes) -> list[list[int]]:
     return [list(slus_bytes(slus, ELEMENT_MATRIX + row * 7, 7)) for row in range(7)]
 
 
+EVO_PATHS_DATA = 0x8012B66C   # EvolutionPath[62]: i8 from[5], i8 to[6]; row = species id - 1
+EVO_REQ_DATA = 0x8012ABEC     # EvoRequirements[63]: 13 x i16 (digimon, hp, mp, off, def, spd, brain, care,
+EVO_GAINS_DATA = 0x8012B2D0   # weight, discipline, happiness, battles, techs), i8 flags, pad; row = species id
+NUM_EVO_PATHS, NUM_EVO_REQS, NUM_EVO_GAINS = 62, 63, 66   # EvoStatsGains[66]: 6 x i16 gains + i16 target
+
+
+def load_evo_tables(slus: bytes) -> tuple[list[tuple[int, ...]], list[tuple[int, ...]], list[tuple[int, ...]]]:
+    """The three digivolution tables as raw rows."""
+    paths = [struct.unpack("<11b", slus_bytes(slus, EVO_PATHS_DATA + i * 11, 11)) for i in range(NUM_EVO_PATHS)]
+    reqs = [struct.unpack("<13hb", slus_bytes(slus, EVO_REQ_DATA + i * 28, 27)) for i in range(NUM_EVO_REQS)]
+    gains = [struct.unpack("<7h", slus_bytes(slus, EVO_GAINS_DATA + i * 14, 14)) for i in range(NUM_EVO_GAINS)]
+    return paths, reqs, gains
+
+
 def read_disc_file(binf, lba: int, size: int) -> bytes:
     chunks = []
     for s in range((size + USER - 1) // USER):
@@ -288,11 +302,12 @@ def check_dump(sites: list[tuple[int, int, int, int, int]]) -> int:
 
 def emit_python(path: str, digimon: list[dict], models: dict[int, int], rows: list[dict],
                 sites: list[tuple[int, int, int, int, int]], moves: list[dict], items: list[dict],
-                matrix: list[list[int]]) -> None:
+                matrix: list[list[int]],
+                evo: tuple[list[tuple[int, ...]], list[tuple[int, ...]], list[tuple[int, ...]]]) -> None:
     lines = [
         '"""Field-Digimon data for Digimon World 1 (SLUS-01032) -- GENERATED, do not edit by hand.',
         "",
-        "Produced by ``tools/dw1_enemy_census.py --emit-python`` from the vanilla disc.  Six tables:",
+        "Produced by ``tools/dw1_enemy_census.py --emit-python`` from the vanilla disc.  Nine tables:",
         "",
         "* :data:`MOVES` -- one row per ``MOVE_DATA`` technique (122): ``(id, name, power, mp_cost, element,",
         "  status, accuracy, status_chance, range, iframes, distance, unk3, unk4, unk5)`` -- the whole 16-byte",
@@ -310,6 +325,14 @@ def emit_python(path: str, digimon: list[dict], models: dict[int, int], rows: li
         "* :data:`ITEMS` -- one row per ``ITEM_PARA`` entry (128): ``(id, name, price, sort, dropable)``.",
         "* :data:`ELEMENT_MATRIX` -- the 7x7 affinity table ``MAIN_D_80125F70[move element][species",
         "  special]`` (values 2 / 5 / 10 / 15 / 20; ``BTL_calculateElementBonus`` maps them to 1 / 3 / 5 / 7 / 10).",
+        "* :data:`EVO_PATHS` -- ``EVO_PATHS_DATA[62]``: row ``species id - 1`` = ``(from x5, to x6)`` species ids,",
+        "  -1 = empty slot.  The natural digivolution tree (``getInTraining/Rookie/ChampionEvolutionTarget``).",
+        "* :data:`EVO_REQUIREMENTS` -- ``EVO_REQ_DATA[63]``: row ``species id`` = ``(digimon, hp, mp, off, def,",
+        "  spd, brain, care, weight, discipline, happiness, battles, techs, flags)``; -1 = no requirement, hp / mp",
+        "  in tens, flags bit 0 = battles is a maximum, bit 4 = care mistakes is a maximum",
+        "  (``calculateRequirementScore``).",
+        "* :data:`EVO_GAINS` -- ``EVO_GAINS_DATA[66]``: row ``species id`` = ``(hp, mp, off, def, spd, brain,",
+        "  target)`` stat gains on digivolving into the species (``target`` == the row's id).",
         "* :data:`FIELD_RECORDS` -- one row per Digimon record in a screen's ``.MAP`` file (989):",
         "  ``(map, slot, bin_off, type, hp, mp, cur_hp, cur_mp, off, def, spd, brn, bits, m0..m3, p0..p3, script)``.",
         "  ``bin_off`` is the flat Mode2/2352 .bin offset of the record's first byte; field offsets are",
@@ -353,6 +376,11 @@ def emit_python(path: str, digimon: list[dict], models: dict[int, int], rows: li
     lines.extend(f"    ({', '.join(str(v) for v in row)})," for row in matrix)
     lines.append(")")
     lines.append("")
+    for name, table in zip(("EVO_PATHS", "EVO_REQUIREMENTS", "EVO_GAINS"), evo, strict=True):
+        lines.append(f"{name}: Final[tuple[tuple[int, ...], ...]] = (")
+        lines.extend(f"    ({', '.join(str(v) for v in row)})," for row in table)
+        lines.append(")")
+        lines.append("")
     lines.append("FIELD_RECORDS: Final[tuple[tuple[int, ...], ...]] = (")
     for r in rows:
         stats = ", ".join(str(r[k]) for k in STAT_NAMES)
@@ -458,7 +486,7 @@ def main() -> int:
                 entry = files.get(f"/CHDAT/MMD{d['id'] // 30}/{code}.MMD")
                 models[d["id"]] = ((entry[1] + 0x7FF) & ~0x7FF) if entry else 0
             emit_python(args.emit_python, digimon, models, rows, sites, load_move_data(slus),
-                        load_item_data(slus), load_element_matrix(slus))
+                        load_item_data(slus), load_element_matrix(slus), load_evo_tables(slus))
             print(f"wrote {args.emit_python}")
     if args.map is not None:
         for r in rows:

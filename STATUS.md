@@ -21,8 +21,8 @@ project moved out of "build the world" and into **feature expansion + polish + v
 | --- | --- |
 | World version | 0.6.0 (`minimum_ap_version` 0.6.7) |
 | Locations / items | 279 / 217 |
-| YAML options | 71, in 5 option groups |
-| World test suite | **1050 passed**, 4 skipped, 9671 subtests, ~18 s with `-n auto` (one class is disc-gated: it re-checks vanilla bytes when `Digimon World (USA).bin` sits at the repo root) |
+| YAML options | 74, in 5 option groups |
+| World test suite | **1077 passed**, 4 skipped, 10040 subtests, ~18 s with `-n auto` (one class is disc-gated: it re-checks vanilla bytes when `Digimon World (USA).bin` sits at the repo root) |
 | Lint | `ruff` at a 311-finding baseline (303 pre-existing + the census tool's CLI prints, T201, like the other lab tools) |
 | Commits ahead of `main` | 100 |
 | Decomp coverage | **31 / 1120** SLUS game functions verified — 2.8 % by count, **14.5 % of static call sites** |
@@ -123,9 +123,22 @@ from the patched tables (121 techniques, 49 matrix cells, 180 drops, 10 gift sit
 sites). `tools/dw1_enemy_census.py --emit-python` now also emits the full `MOVE_DATA` rows,
 `ITEMS` and `ELEMENT_MATRIX`. Not ported (by design): recruit-identity shuffle (recruits are AP
 items), the intro hash, the "Woah!" joke, `happyVending` (conflicts with `vending_locations`),
-the Giromon jukebox truncation (the client blacklists Giromon instead), the forced starter
-(`starter.Digimon`) and **digivolution randomization** (tree / requirements / special evos —
-the one standalone block still open; see §2.4).
+the Giromon jukebox truncation (the client blacklists Giromon instead) and the forced starter
+(`starter.Digimon`).
+
+**Same day, second commit — digivolution randomization** (the last standalone block):
+`digivolution_randomization` (the natural tree: In-Training 2 Rookies, Rookie 4-6 Champions,
+Champion 1-2 Ultimates; Fresh pairs are hard-coded in `getFreshEvolutionTarget` and stay),
+`digivolution_obtain_all`, `digivolution_requirements` (rolled *after* the tree so a "from X"
+bonus names a real predecessor; Devimon joins the tree and gets real stat gains) and
+`special_digivolutions` (the 15 `ROM_SPECIAL_EVO` sites; Toy Town follows the suit's new
+result). Module `evolutions.py`, tables `EVO_PATHS` / `EVO_REQUIREMENTS` / `EVO_GAINS` in
+`enemy_records.py`. The option carries a **warning**: Greylord's Mansion (Virus), Ice Sanctuary
+(Vaccine) and Toy Town (Monzaemon) are partner-gated, so a random tree can make those checks
+slow or lucky unless `type_lock_unlocks` (default on) removes the gates — the player's call.
+Interplay handled: the Toy Town gate byte (0x140479ED) is one of the Monzaemon special-evo
+sites *and* sits inside the unlock's 4-byte write; the writer skips it when the unlock is on and
+runs before the unlock tokens. Round trip green with all four options on.
 
 **Technique objective, remaining (set 2026-08-28):** the *data* half shipped above; still open
 are the two RE questions in §2.3 / §3.5 — does the element matrix enter `BTL_calculateDamage`,
@@ -178,7 +191,7 @@ savestates are now for.
 | **In-game check notifications** | Dialog page/box driver `MAIN_func_800FF0FC` and renderer `drawString2` in `src/main/script_common.c` — **in C, nothing left to decompile**. | `dialog_columns.state` — now for *testing* an injected string that uses the tab/column codes, not for understanding them | **MEDIUM → LOW-MEDIUM**: design + one patch. Low-risk route is a line-buffer substitution at `0x801BE174 + row*0x40`, not a renderer hook. |
 | ~~**Enemy-stat scaling by sphere**~~ **SHIPPED 2026-08-28** as `enemy_stats: progressive` | Turned out to be data: every field Digimon is a `.MAP` record (`loadMapDigimon`, Ghidra export) that the battle copies verbatim (`BTL_initializeCombat`); no code hook. | Validated: `enemy_poc_map2.state`, `enemy_poc_battle.state` (edited record fought) | Done in the lab (3 nets). **Open**: the user's BizHawk pass, and whether the default policy (vanilla region budgets re-assigned by sphere depth, one factor per region so bosses stay proportionally tougher) is the balance they want. |
 | **Species technique lists** (the open half of the technique objective; ~~technique data~~ **SHIPPED 2026-08-29** as `technique_data` / `type_effectiveness`) | `DIGIMON_DATA.moves[16]` (0x8012CEB4 + 35 per species; a record's move byte `0x2E+k` selects slot `k`) is static SLUS data. Swapping techniques *inside populated slots* is safe by construction; whether a species can **gain** slots depends on its `.MMD` animation table (`loadMMD`: header u32[1] = anim table; anim ids `0x2E+k`). The 7×7 element matrix `MAIN_D_80125F70` is consulted only by the **partner's** auto-battle technique choice (`BTL_selectPartnerMove`, `battle_main.c:3294/3380`, plus the STD / VS twins) — the enemy AI never reads it, and the battle-learn filter (`battle_ui.c:224`) compares elements directly; whether **damage** uses it sits in `BTL_calculateDamage` (BTL overlay 0x8005BEB8, **ASM-only upstream**). Partner-side pool = technique ids < 58 (mastery bitmap, `technique_rewards`); 58+ are enemy-only. | Damage vectors: `enemy_poc_battle.state`, `enemy_poc_icemon_battle.state`, `battle_pending.state` (all exist). Nothing to request from the user. | MEDIUM. Order: (1) import BTL_REL.BIN into the Ghidra project at its `config/btl.yaml` address — the lab's **first overlay import** — and decomp `BTL_calculateDamage` to VERIFIED with those battle states (decides how much `type_effectiveness` really changes); (2) static census of the 178 `.MMD` animation tables (no emulator); (3) species-list shuffle option on the `enemy_stats` pattern (partner lists must stay < 58). |
-| **Digivolution randomization** (the last standalone block without an equivalent) | Tree `EVO_PATHS_DATA[62]` (`EvolutionPath{from[5], to[6]}`, 0x8012B66C, walked by `evolution.c:60-230`), requirements `EVO_REQ_DATA[63]` (`evl.h:47-62`, scored by `calculateRequirementScore` `evolution.c:303-411`), gains `EVO_GAINS_DATA[66]` (applied in `EVL_applyEvolution` 0x80063350, ASM-only) — all in `addresses.py` as `ROM_EVO_*` blocks; special evolutions are SLUS immediates in `handleSpecialEvolutions` (`evolution.c:231-300`) plus script bytes (`ROM_SPECIAL_EVO`). The standalone randomizes all three (`randomizeEvolutions` / `randomizeEvolutionRequirements` / `randomizeSpecialEvolutions`, incl. Toy Town following the suit's new target). | None (data). | MEDIUM-HIGH: the data rewrite is easy; the cost is AP logic (Toy Town access via the suit evolution, Jijimon's Champion-partner gate, `digivolution` is still v2 scope). |
+| ~~**Digivolution randomization**~~ **SHIPPED 2026-08-29** (`digivolution_randomization` + obtain-all / requirements / special) | Tree `EVO_PATHS_DATA[62]` (`EvolutionPath{from[5], to[6]}`, 0x8012B66C, walked by `evolution.c:60-230`; Fresh -> In-Training hard-coded in `getFreshEvolutionTarget`), requirements `EVO_REQ_DATA[63]` (`evl.h:47-62`, scored by `calculateRequirementScore` `evolution.c:303-411`), gains `EVO_GAINS_DATA[66]` (applied in `EVL_applyEvolution` 0x80063350, ASM-only — only Devimon's row is rewritten), special evolutions = SLUS immediates in `handleSpecialEvolutions` (`evolution.c:231-300`) + script bytes (`ROM_SPECIAL_EVO`). Pure data; no AP-logic change — the option warns that the three partner-gated areas become luck without `type_lock_unlocks`. | None. Runtime validation pending in the user's BizHawk pass (a natural digivolution under random requirements, a death digivolution, the suit). | Open follow-up only: `EVL_applyEvolution` decomp if the gains table is ever randomized beyond Devimon. |
 | ~~**Wild-digimon randomization**~~ **SHIPPED 2026-08-28** as `enemy_randomization` | Species = record type + MAPHEAD.SCN `loadDigimon`/`setDigimon` operands (`scriptSetDigimon` guard); models are malloc3'd whole (`loadMMD`), so swaps are heap-budgeted. | Validated: `enemy_poc_map0.state`, `enemy_poc_icemon_battle.state` (Icemon swap fought to the end) | Done for `wild`; `wild_and_story` ships **untested in a story cutscene** (a substitute may lack a scripted animation). Heap slack beyond size-neutral swaps unmeasured. |
 | **Fishing locations (expansion)** | `src/fish/` (95 % in C). The 6 `FISH_REL` ITEM_PARA readers our relocation patched can now be read in C. | `fishing.state` — **still needed**: the relocation's FISH_REL readers have never been *exercised*; the lab has no fishing state | MEDIUM |
 | **Digivolution (v2 scope)** | `calculateRequirementScore`, `getNumMasteredMoves`, `hasDigimonRaised` in `src/main/evolution.c` / `script_common.c`; requirement table `EVO_REQ_DATA` @ 0x8012ABEC | `digivolve_accepted.state`, `species_raised.state` — for validating an AP digivolution item, not for RE | MEDIUM. The "ever raised" flag (trigger 512+form) can **veto** a digivolution whose stat requirements are met — an AP digivolution item must account for it. |

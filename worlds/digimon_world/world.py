@@ -30,6 +30,7 @@ from . import (
     chest_assignments,
     drops,
     enemies,
+    evolutions,
     gifts,
     items,
     locations,
@@ -100,6 +101,7 @@ class DigimonWorldWorld(World):
         self.technique_plan = techniques.build_technique_plan(self)
         self.drop_plan = drops.build_drop_plan(self)
         self.gift_plan = gifts.build_gift_plan(self)
+        self.evolution_plan = evolutions.build_evolution_plan(self)
 
     def create_regions(self) -> None:
         regions.create_and_connect_regions(self)
@@ -184,6 +186,7 @@ class DigimonWorldWorld(World):
     technique_plan: techniques.TechniquePlan = techniques.EMPTY_PLAN
     drop_plan: drops.DropPlan = drops.EMPTY_PLAN
     gift_plan: gifts.GiftPlan = gifts.EMPTY_PLAN
+    evolution_plan: evolutions.EvolutionPlan = evolutions.EMPTY_PLAN
 
     def post_fill(self) -> None:
         self.enemy_plan = enemies.build_enemy_plan(self)
@@ -193,6 +196,7 @@ class DigimonWorldWorld(World):
         self._write_technique_spoiler(spoiler_handle, name)
         self._write_drop_spoiler(spoiler_handle, name)
         self._write_gift_spoiler(spoiler_handle, name)
+        self._write_evolution_spoiler(spoiler_handle, name)
         plan = self.enemy_plan
         if plan.empty:
             return
@@ -252,6 +256,29 @@ class DigimonWorldWorld(World):
                 spoiler_handle.write(
                     f"  gift {site + 1}: {count}x {drops.ITEM_NAMES[item]}"
                     f"  (vanilla {vanilla_count}x {drops.ITEM_NAMES[vanilla_item]})\n"
+                )
+
+    def _write_evolution_spoiler(self, spoiler_handle: TextIO, name: str) -> None:
+        plan = self.evolution_plan
+        if plan.empty:
+            return
+        if plan.paths:
+            spoiler_handle.write(f"\n\nDigivolution tree ({name}):\n")
+            for species, path in sorted(plan.paths.items()):
+                if path.targets or evolutions.VANILLA_PATHS[species].targets:
+                    spoiler_handle.write(f"  {evolutions.describe_path(species, path)}\n")
+        if plan.requirements:
+            spoiler_handle.write(f"\n\nDigivolution requirements ({name}):\n")
+            for species, reqs in sorted(plan.requirements.items()):
+                if reqs != evolutions.NO_REQUIREMENTS:
+                    spoiler_handle.write(
+                        f"  {evolutions.SPECIES_NAME[species]}: {evolutions.describe_requirements(reqs)}\n"
+                    )
+        if plan.special:
+            spoiler_handle.write(f"\n\nSpecial digivolutions ({name}):\n")
+            for index, target in sorted(plan.special.items()):
+                spoiler_handle.write(
+                    f"  {evolutions.SPECIAL_EVOLUTION_NAMES[index]} -> {evolutions.SPECIES_NAME[target]}\n"
                 )
 
     def _write_drop_spoiler(self, spoiler_handle: TextIO, name: str) -> None:

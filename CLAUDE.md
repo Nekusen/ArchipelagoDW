@@ -183,12 +183,15 @@ These come from [docs/style.md](docs/style.md) and the ruff config and override 
   technique gifts + Tokomon gifts (`gifts.py`), and six QoL patch toggles
   (quest items droppable, learn chance ×2, brain tier 1, unrig slots, learn
   move+command, DV chip text). All data patches, validated by a real-disc
-  round trip (spoiler ↔ patched tables). Not ported: digivolution
-  randomization (open, STATUS §2.3), recruit-identity shuffle, intro hash,
-  happyVending, jukebox truncation, forced starter. Table audit corrected one
-  claim: the element matrix is read by the **partner's** auto-battle AI, not
-  the enemy AI. Remaining technique objective = `BTL_calculateDamage` decomp
-  + `.MMD` census + species-list shuffle.
+  round trip (spoiler ↔ patched tables). Second commit the same day:
+  **digivolution randomization** (`evolutions.py`: tree / obtain-all /
+  requirements / special digivolutions, with a warning about the three
+  partner-gated areas vs `type_lock_unlocks`). Not ported: recruit-identity
+  shuffle, intro hash, happyVending, jukebox truncation, forced starter.
+  Table audit corrected one claim: the element matrix is read by the
+  **partner's** auto-battle AI, not the enemy AI. Remaining technique
+  objective = `BTL_calculateDamage` decomp + `.MMD` census + species-list
+  shuffle.
 - **2026-08-28**: jype0's byte-matching `dw_decomp` adopted as the reading
   source for game code (see References); its symbols, structs and typed
   globals are in the Ghidra project. Audits against it found no model

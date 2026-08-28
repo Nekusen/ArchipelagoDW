@@ -313,6 +313,12 @@ from .data.addresses import (
     DIGIMON_DATA_DROP_ITEM_OFFSET,
     DIGIMON_DATA_RECORD_SIZE,
     ELEMENT_MATRIX_DIM,
+    EVO_GAIN_FORMAT,
+    EVO_GAIN_ROW_SIZE,
+    EVO_PATH_FORMAT,
+    EVO_PATH_ROW_SIZE,
+    EVO_REQ_FORMAT,
+    EVO_REQ_ROW_SIZE,
     FIELD_RECORD_FORMAT,
     FIELD_RECORD_HP,
     FIELD_RECORD_MOVES,
@@ -326,6 +332,9 @@ from .data.addresses import (
     ROM_DV_CHIP_TEXT_LENGTH,
     ROM_DV_CHIP_TEXT_PATCHES,
     ROM_ELEMENT_MATRIX_OFFSET,
+    ROM_EVO_REQUIREMENTS,
+    ROM_EVO_STAT_GAINS,
+    ROM_EVO_TO_FROM,
     ROM_ITEM_DROPABLE_BYTE_OFFSET,
     ROM_ITEM_TABLE_BASE,
     ROM_LEARN_MOVE_AND_COMMAND_OFFSET,
@@ -333,6 +342,8 @@ from .data.addresses import (
     ROM_LEARN_MOVE_OFFSETS,
     ROM_MOVE_DATA_OFFSET,
     ROM_QUEST_ITEMS_NOT_DROPABLE,
+    ROM_SPECIAL_EVO,
+    ROM_SPECIAL_EVO_TOY_TOWN_GATE_OFFSET,
     ROM_TECH_LEARN_BATTLE,
     ROM_TECH_LEARN_BATTLE_VANILLA,
     ROM_TECH_LEARN_BRAIN,
@@ -347,6 +358,7 @@ from .data.addresses import (
 )
 from .drops import DropPlan
 from .enemies import MOVES_BY_ID, RECORD_INDEX, RECORDS_BY_MAP, SITES_BY_MAP, EnemyPlan
+from .evolutions import EvolutionPlan
 from .gifts import GiftPlan
 from .ground_items import compute_ground_item_replacements
 from .techniques import TechniquePlan
@@ -2734,6 +2746,36 @@ def _write_gift_tokens(patch: DigimonWorldProcedurePatch, plan: GiftPlan) -> Non
         )
 
 
+def _write_evolution_tokens(patch: DigimonWorldProcedurePatch, plan: EvolutionPlan, type_lock_unlocks: bool) -> None:
+    """Digivolution randomization — data writes into the three SLUS tables plus the
+    special-evolution bytes.
+
+    * ``EVO_PATHS_DATA`` rows (11 bytes, species 1..62) for every changed tree row.
+    * ``EVO_REQ_DATA`` rows (the 27 meaningful bytes; the pad stays) for every changed
+      requirements row.
+    * ``EVO_GAINS_DATA`` gains (the six words; the target word stays) for every changed row.
+    * One byte per special-evolution site. The Toy Town gate's Monzaemon byte is left alone
+      when ``type_lock_unlocks`` is on: that option's 4-byte write covers it and removes the
+      gate altogether (the standalone's ``toyTownWorkaround``).
+    """
+
+    for species, path in sorted(plan.paths.items()):
+        row = struct.pack(EVO_PATH_FORMAT, *path.frm, *path.to)
+        _write_user_data_tokens(patch, ROM_EVO_TO_FROM.offset, (species - 1) * EVO_PATH_ROW_SIZE, row)
+    for species, reqs in sorted(plan.requirements.items()):
+        row = struct.pack(EVO_REQ_FORMAT, *reqs)
+        _write_user_data_tokens(patch, ROM_EVO_REQUIREMENTS.offset, species * EVO_REQ_ROW_SIZE, row)
+    for species, gains in sorted(plan.gains.items()):
+        row = struct.pack(EVO_GAIN_FORMAT, *gains)
+        _write_user_data_tokens(patch, ROM_EVO_STAT_GAINS.offset, species * EVO_GAIN_ROW_SIZE, row)
+    for index, target in sorted(plan.special.items()):
+        offsets, _vanilla, _source = ROM_SPECIAL_EVO[index]
+        for offset in offsets:
+            if offset == ROM_SPECIAL_EVO_TOY_TOWN_GATE_OFFSET and type_lock_unlocks:
+                continue
+            patch.write_token(APTokenTypes.WRITE, offset, bytes([target]))
+
+
 def brain_learn_table(tier_one: bool, increase: bool) -> bytes:
     """The brain-training learn-chance table (8 tiers x 3) after the two options that touch it,
     applied in the standalone's order: tier-1 unlock first, then the doubling (0 -> 5)."""
@@ -2968,6 +3010,12 @@ def write_patch(world: DigimonWorldWorld, output_directory: str) -> None:
     )
 
     options = world.options
+    # Digivolution randomization — resolved in generate_early. Must run
+    # BEFORE _write_type_lock_unlock_tokens: the Toy Town unlock's 4-byte
+    # write covers the Monzaemon special-evolution gate byte (the writer
+    # also skips that site when the unlock is on).
+    if not world.evolution_plan.empty:
+        _write_evolution_tokens(patch, world.evolution_plan, bool(options.type_lock_unlocks))
     if options.skip_intro:
         _write_skip_intro_tokens(patch)
     if options.item_stat_gain:

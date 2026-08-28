@@ -1352,6 +1352,66 @@ class LearnMoveAndCommand(Toggle):
     display_name = "Learn Move And Command Together"
 
 
+class DigivolutionRandomization(Toggle):
+    """Randomize the natural digivolution tree: which Rookies each In-Training can
+    become, which Champions each Rookie, which Ultimates each Champion. Every
+    In-Training gets 2 Rookie targets, every Rookie 4-6 Champions, every Champion
+    1-2 Ultimates (Fresh -> In-Training is hard-coded in the game and stays).
+    Kunemon, Numemon, Sukamon, Nanimon, Vademon, Panjyamon, Gigadramon and
+    MetalEtemon stay special-only; Devimon joins the natural tree when
+    ``digivolution_requirements`` is on. The in-game digivolution chart follows.
+
+    **Warning — read before enabling.** A few checks sit behind partner-specific
+    gates: Greylord's Mansion wants a Virus partner, Ice Sanctuary a Vaccine one,
+    and Toy Town opens for Monzaemon (the Numemon suit). With a random tree,
+    reaching the right species or type can take much longer or plain luck, and
+    the AP logic cannot account for it. Keep ``type_lock_unlocks`` on (its
+    default) to remove those three gates, or accept that risk knowingly.
+
+    Mirrors the standalone DW1 randomizer's ``evolution.Enabled``.
+    """
+
+    display_name = "Digivolution Randomization"
+
+
+class DigivolutionObtainAll(Toggle):
+    """With :class:`DigivolutionRandomization`, guarantee that every natural-tree
+    species keeps at least one predecessor, so every Rookie, Champion and Ultimate
+    that can be reached by digivolving in vanilla still can. Off, some species may
+    only be reachable through special digivolutions or not at all. Mirrors the
+    standalone's ``evolution.ObtainAllMode``.
+    """
+
+    display_name = "Digivolution: Obtain All"
+
+
+class DigivolutionRequirements(Toggle):
+    """With :class:`DigivolutionRandomization`, also randomize the requirements to
+    digivolve into each species. Rookies: three stats flagged (the partner's best
+    stat must be one of them), weight 15, no care-mistake limit. Champions: 1-4
+    stats at 100 (HP / MP 1000), a care-mistake minimum or maximum, a weight, a
+    techniques count and one or two bonus conditions (discipline, battles, coming
+    from a given species). Ultimates: 4-6 stats at 200-500 (sometimes 300-700) and
+    stricter bonuses. Devimon becomes a natural target with proper stat gains.
+    Mirrors the standalone's ``evolution.Requirements``.
+    """
+
+    display_name = "Digivolution: Requirements"
+
+
+class SpecialDigivolutions(Toggle):
+    """With :class:`DigivolutionRandomization`, randomize the result of the special
+    digivolutions: the death digivolutions (Bakemon, Devimon, SkullGreymon,
+    Phoenixmon), the MetalMamemon / Giromon upgrades, the Numemon suit (Toy Town
+    then opens for the suit's new result), and Airdramon, Ninjamon, Monochromon,
+    Kunemon, Coelamon, Nanimon, Vademon and Sukamon. Each becomes a random
+    partner species of the same level. Mirrors the standalone's
+    ``evolution.SpecialEvolutions``.
+    """
+
+    display_name = "Digivolution: Special Digivolutions"
+
+
 class FixDVChipText(DefaultOnToggle):
     """Correct the three DV chip descriptions to say what the chips actually do
     (DV Chip E boosts HP and MP, not Offense and Speed). Text only. Mirrors the
@@ -1426,6 +1486,10 @@ class DigimonWorldOptions(PerGameCommonOptions):
     tech_gifts: TechGifts
     tokomon_gifts: TokomonGifts
     tokomon_gifts_consumable_only: TokomonGiftsConsumableOnly
+    digivolution_randomization: DigivolutionRandomization
+    digivolution_obtain_all: DigivolutionObtainAll
+    digivolution_requirements: DigivolutionRequirements
+    special_digivolutions: SpecialDigivolutions
     quest_items_droppable: QuestItemsDroppable
     increase_learn_chance: IncreaseLearnChance
     brain_training_tier_one: BrainTrainingTierOne
@@ -1453,6 +1517,8 @@ option_groups: list[OptionGroup] = [
             TechniqueEffect, TechniqueEffectChance, TypeEffectiveness,
             EnemyDropItems, EnemyDropRates, EnemyDropsMatchValue, EnemyDropsValueCutoff,
             TechGifts, TokomonGifts, TokomonGiftsConsumableOnly,
+            DigivolutionRandomization, DigivolutionObtainAll, DigivolutionRequirements,
+            SpecialDigivolutions,
         ],
     ),
     OptionGroup(

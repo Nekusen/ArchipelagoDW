@@ -11010,3 +11010,52 @@ for _off in ROM_TOKOMON_ITEM_OFFSETS:
 for _off in ROM_LEARN_MOVE_OFFSETS:
     assert (_off - 24) % 2352 + 2 <= 2048, hex(_off)
 del _off, _new, _old
+
+
+# =============================================================================
+# Digivolution tables (static SLUS data) and the special-evolution sites
+# =============================================================================
+#
+# ``EVO_PATHS_DATA[62]`` (``EvolutionPath{i8 from[5]; i8 to[6]}``, row = species
+# id - 1) is the natural tree walked by ``getInTraining/Rookie/Champion-
+# EvolutionTarget`` (dw_decomp ``src/main/evolution.c:60-230``); the Fresh ->
+# In-Training pairs are hard-coded in ``getFreshEvolutionTarget``, not read
+# from the table. ``EVO_REQ_DATA[63]`` (``EvoRequirements``, 28 B, row = species
+# id) is scored by ``calculateRequirementScore`` (``evolution.c:303-411``: care,
+# weight +-5, stats, one bonus of digimon / discipline / happiness / battles /
+# techs; >= 3 of 4 needed). ``EVO_GAINS_DATA[66]`` (6 x i16 gains + i16 target)
+# is applied by ``EVL_applyEvolution`` (EVL overlay, ASM-only upstream).
+# The special evolutions are SLUS immediates in ``handleSpecialEvolutions``
+# (``evolution.c:231-300``) plus script bytes; ``ROM_SPECIAL_EVO`` lists them.
+# All three table offsets reproduce the standalone's constants from the RAM
+# symbols through :func:`_slus_ram_to_bin_offset`.
+
+RAM_EVO_PATHS_DATA: Final = 0x0012B66C
+RAM_EVO_REQ_DATA: Final = 0x0012ABEC
+RAM_EVO_GAINS_DATA: Final = 0x0012B2D0
+EVO_PATH_ROW_SIZE: Final = 11
+EVO_REQ_ROW_SIZE: Final = 28
+EVO_GAIN_ROW_SIZE: Final = 14
+EVO_PATH_ROW_COUNT: Final = 62      # species 1..62
+EVO_REQ_ROW_COUNT: Final = 63       # species 0..62
+EVO_GAIN_ROW_COUNT: Final = 66      # species 0..65
+EVO_PATH_FORMAT: Final = "<11b"
+EVO_REQ_FORMAT: Final = "<13hb"     # the trailing pad byte is never written
+EVO_GAIN_FORMAT: Final = "<6h"      # the trailing target word is never written
+assert _slus_ram_to_bin_offset(0x80000000 | RAM_EVO_PATHS_DATA) == ROM_EVO_TO_FROM.offset == 0x14D6CE04
+assert _slus_ram_to_bin_offset(0x80000000 | RAM_EVO_REQ_DATA) == ROM_EVO_REQUIREMENTS.offset == 0x14D6C254
+assert _slus_ram_to_bin_offset(0x80000000 | RAM_EVO_GAINS_DATA) == ROM_EVO_STAT_GAINS.offset == 0x14D6CA68
+assert struct.calcsize(ROM_EVO_TO_FROM.record_format) == EVO_PATH_ROW_SIZE == struct.calcsize(EVO_PATH_FORMAT)
+assert struct.calcsize(ROM_EVO_REQUIREMENTS.record_format) == EVO_REQ_ROW_SIZE == struct.calcsize(EVO_REQ_FORMAT) + 1
+assert struct.calcsize(ROM_EVO_STAT_GAINS.record_format) == EVO_GAIN_ROW_SIZE == struct.calcsize(EVO_GAIN_FORMAT) + 2
+assert (ROM_EVO_TO_FROM.count, ROM_EVO_REQUIREMENTS.count, ROM_EVO_STAT_GAINS.count) == (
+    EVO_PATH_ROW_COUNT, EVO_REQ_ROW_COUNT, EVO_GAIN_ROW_COUNT)
+
+#: The Toy Town gate's Monzaemon comparison byte. It is one of the five Monzaemon
+#: special-evolution sites AND lies inside the 4-byte ``type_lock_unlocks`` Toy
+#: Town write (``ROM_UNLOCK_TOY_TOWN_OFFSETS[0]`` .. +3): when the unlock is on the
+#: gate is gone and the site must be left to the unlock (the standalone's
+#: ``toyTownWorkaround``).
+ROM_SPECIAL_EVO_TOY_TOWN_GATE_OFFSET: Final = 0x140479ED
+assert ROM_SPECIAL_EVO_TOY_TOWN_GATE_OFFSET in ROM_SPECIAL_EVO[0][0]
+assert ROM_UNLOCK_TOY_TOWN_OFFSETS[0] <= ROM_SPECIAL_EVO_TOY_TOWN_GATE_OFFSET < ROM_UNLOCK_TOY_TOWN_OFFSETS[0] + 4
