@@ -187,8 +187,13 @@ These come from [docs/style.md](docs/style.md) and the ruff config and override 
   **digivolution randomization** (`evolutions.py`: tree / obtain-all /
   requirements / special digivolutions, with a warning about the three
   partner-gated areas vs `type_lock_unlocks`; every Fresh line is guaranteed
-  a Vaccine and a Virus path so the seed stays possible) and
-  `enemy_technique_weights` (AI weights). Not ported: recruit-identity
+  a Vaccine and a Virus path so the seed stays possible),
+  `enemy_technique_weights` (AI weights) and `digivolution_stat_gains`
+  (additive gains rows only — `EVL_applyEvolution` read from the overlay
+  ASM: Devimon/Numemon/Sukamon/Nanimon/Fresh/In-Training rows are a scale
+  path where `brains` is an int8 multiplier, never touch them). Same ASM
+  reading settled that the element matrix **is a damage multiplier**
+  (Σ of the three defender-specialty cells / 30). Not ported: recruit-identity
   shuffle, intro hash, happyVending, jukebox truncation, forced starter.
   Table audit corrected one claim: the element matrix is read by the
   **partner's** auto-battle AI, not the enemy AI. Remaining technique

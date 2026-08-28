@@ -21,8 +21,8 @@ project moved out of "build the world" and into **feature expansion + polish + v
 | --- | --- |
 | World version | 0.6.0 (`minimum_ap_version` 0.6.7) |
 | Locations / items | 279 / 217 |
-| YAML options | 75, in 5 option groups |
-| World test suite | **1085 passed**, 4 skipped, 10163 subtests, ~18 s with `-n auto` (one class is disc-gated: it re-checks vanilla bytes when `Digimon World (USA).bin` sits at the repo root) |
+| YAML options | 76, in 5 option groups |
+| World test suite | **1090 passed**, 4 skipped, 10286 subtests, ~18 s with `-n auto` (one class is disc-gated: it re-checks vanilla bytes when `Digimon World (USA).bin` sits at the repo root) |
 | Lint | `ruff` at a 311-finding baseline (303 pre-existing + the census tool's CLI prints, T201, like the other lab tools) |
 | Commits ahead of `main` | 100 |
 | Decomp coverage | **31 / 1120** SLUS game functions verified — 2.8 % by count, **14.5 % of static call sites** |
@@ -147,6 +147,19 @@ Rookie's fallback digivolution, `getRookieEvolutionTarget`). Same commit: **`ene
 (the AI-weight candidate from the table — a random split of 100 over each fighter record's
 carried techniques; `enemies.random_weights`).
 
+**Same day, from the assembly (agent, `work/dw1_re/decomp/damage_formula/NOTES.md`):**
+`BTL_calculateDamage` **does** read the element matrix — every hit is scaled by
+`Σ MATRIX[move.special][defender.special[i]] / 30` over the defender's three specialties
+(`STD_calculateDamage` is byte-identical), so `type_effectiveness` is a real damage option, not
+just AI weighting (docstring corrected; cells must stay in {2, 5, 10, 15, 20} because
+`BTL_calculateElementBonus` has no default case — they do). `EVL_applyEvolution` applies a gains
+row as `new = (cur + gain) / 2` below the gain, `cur + gain / 10` above, **except** the scale
+path (targets Devimon / Numemon / Sukamon / Nanimon / Fresh / In-Training, or out of Sukamon)
+where the `brains` column is an `int8` multiplier ×10 — so the standalone's Devimon gains row
+(…, 200) wraps negative there; our Devimon override was removed (Devimon keeps the partner's
+stats, ×1.0). New option **`digivolution_stat_gains`** randomizes the additive rows inside the
+vanilla envelope of each level (never the scale rows, never `targetDigimon`).
+
 **Technique objective, remaining (set 2026-08-28):** the *data* half shipped above; still open
 are the two RE questions in §2.3 / §3.5 — does the element matrix enter `BTL_calculateDamage`,
 and can species technique lists gain slots (`.MMD` animation census) — and the species-list
@@ -197,7 +210,7 @@ savestates are now for.
 | --- | --- | --- | --- |
 | **In-game check notifications** | Dialog page/box driver `MAIN_func_800FF0FC` and renderer `drawString2` in `src/main/script_common.c` — **in C, nothing left to decompile**. | `dialog_columns.state` — now for *testing* an injected string that uses the tab/column codes, not for understanding them | **MEDIUM → LOW-MEDIUM**: design + one patch. Low-risk route is a line-buffer substitution at `0x801BE174 + row*0x40`, not a renderer hook. |
 | ~~**Enemy-stat scaling by sphere**~~ **SHIPPED 2026-08-28** as `enemy_stats: progressive` | Turned out to be data: every field Digimon is a `.MAP` record (`loadMapDigimon`, Ghidra export) that the battle copies verbatim (`BTL_initializeCombat`); no code hook. | Validated: `enemy_poc_map2.state`, `enemy_poc_battle.state` (edited record fought) | Done in the lab (3 nets). **Open**: the user's BizHawk pass, and whether the default policy (vanilla region budgets re-assigned by sphere depth, one factor per region so bosses stay proportionally tougher) is the balance they want. |
-| **Species technique lists** (the open half of the technique objective; ~~technique data~~ **SHIPPED 2026-08-29** as `technique_data` / `type_effectiveness`) | `DIGIMON_DATA.moves[16]` (0x8012CEB4 + 35 per species; a record's move byte `0x2E+k` selects slot `k`) is static SLUS data. Swapping techniques *inside populated slots* is safe by construction; whether a species can **gain** slots depends on its `.MMD` animation table (`loadMMD`: header u32[1] = anim table; anim ids `0x2E+k`). The 7×7 element matrix `MAIN_D_80125F70` is consulted only by the **partner's** auto-battle technique choice (`BTL_selectPartnerMove`, `battle_main.c:3294/3380`, plus the STD / VS twins) — the enemy AI never reads it, and the battle-learn filter (`battle_ui.c:224`) compares elements directly; whether **damage** uses it sits in `BTL_calculateDamage` (BTL overlay 0x8005BEB8, **ASM-only upstream**). Partner-side pool = technique ids < 58 (mastery bitmap, `technique_rewards`); 58+ are enemy-only. | Damage vectors: `enemy_poc_battle.state`, `enemy_poc_icemon_battle.state`, `battle_pending.state` (all exist). Nothing to request from the user. | MEDIUM. Order: (1) import BTL_REL.BIN into the Ghidra project at its `config/btl.yaml` address — the lab's **first overlay import** — and decomp `BTL_calculateDamage` to VERIFIED with those battle states (decides how much `type_effectiveness` really changes); (2) static census of the 178 `.MMD` animation tables (no emulator); (3) species-list shuffle option on the `enemy_stats` pattern (partner lists must stay < 58). |
+| **Species technique lists** (the open half of the technique objective; ~~technique data~~ **SHIPPED 2026-08-29** as `technique_data` / `type_effectiveness`) | `DIGIMON_DATA.moves[16]` (0x8012CEB4 + 35 per species; a record's move byte `0x2E+k` selects slot `k`) is static SLUS data. Swapping techniques *inside populated slots* is safe by construction; whether a species can **gain** slots depends on its `.MMD` animation table (`loadMMD`: header u32[1] = anim table; anim ids `0x2E+k`). The 7×7 element matrix `MAIN_D_80125F70` is consulted only by the **partner's** auto-battle technique choice (`BTL_selectPartnerMove`, `battle_main.c:3294/3380`, plus the STD / VS twins) — the enemy AI never reads it, and the battle-learn filter (`battle_ui.c:224`) compares elements directly; **damage uses it** (`BTL_calculateDamage`, read from the assembly 2026-08-29: Σ of the three defender-specialty cells / 30). Partner-side pool = technique ids < 58 (mastery bitmap, `technique_rewards`); 58+ are enemy-only. | Damage vectors: `enemy_poc_battle.state`, `enemy_poc_icemon_battle.state`, `battle_pending.state` (all exist). Nothing to request from the user. | MEDIUM. Order: (1) import BTL_REL.BIN into the Ghidra project at its `config/btl.yaml` address — the lab's **first overlay import** — and decomp `BTL_calculateDamage` to VERIFIED with those battle states (decides how much `type_effectiveness` really changes); (2) static census of the 178 `.MMD` animation tables (no emulator); (3) species-list shuffle option on the `enemy_stats` pattern (partner lists must stay < 58 and, for the partner to learn them in battle, match one of the species' three specialties). |
 | ~~**Digivolution randomization**~~ **SHIPPED 2026-08-29** (`digivolution_randomization` + obtain-all / requirements / special) | Tree `EVO_PATHS_DATA[62]` (`EvolutionPath{from[5], to[6]}`, 0x8012B66C, walked by `evolution.c:60-230`; Fresh -> In-Training hard-coded in `getFreshEvolutionTarget`), requirements `EVO_REQ_DATA[63]` (`evl.h:47-62`, scored by `calculateRequirementScore` `evolution.c:303-411`), gains `EVO_GAINS_DATA[66]` (applied in `EVL_applyEvolution` 0x80063350, ASM-only — only Devimon's row is rewritten), special evolutions = SLUS immediates in `handleSpecialEvolutions` (`evolution.c:231-300`) + script bytes (`ROM_SPECIAL_EVO`). Pure data; no AP-logic change — the option warns that the three partner-gated areas become luck without `type_lock_unlocks`. | None. Runtime validation pending in the user's BizHawk pass (a natural digivolution under random requirements, a death digivolution, the suit). | Open follow-up only: `EVL_applyEvolution` decomp if the gains table is ever randomized beyond Devimon. |
 | ~~**Wild-digimon randomization**~~ **SHIPPED 2026-08-28** as `enemy_randomization` | Species = record type + MAPHEAD.SCN `loadDigimon`/`setDigimon` operands (`scriptSetDigimon` guard); models are malloc3'd whole (`loadMMD`), so swaps are heap-budgeted. | Validated: `enemy_poc_map0.state`, `enemy_poc_icemon_battle.state` (Icemon swap fought to the end) | Done for `wild`; `wild_and_story` ships **untested in a story cutscene** (a substitute may lack a scripted animation). Heap slack beyond size-neutral swaps unmeasured. |
 | **Fishing locations (expansion)** | `src/fish/` (95 % in C). The 6 `FISH_REL` ITEM_PARA readers our relocation patched can now be read in C. | `fishing.state` — **still needed**: the relocation's FISH_REL readers have never been *exercised*; the lab has no fishing state | MEDIUM |
@@ -322,9 +335,11 @@ overlay function that is ASM-only upstream — a rare case, and no longer on any
    objective (§2.3).** ASM-only upstream, so it needs the pipeline: import `BTL_REL.BIN`
    (disc LBA 147703) into the Ghidra project at the address in dw_decomp `config/btl.yaml`
    (the lab's first overlay import), export, capture vectors from the three battle states,
-   replay. The answer wanted: does the 7×7 element matrix (or `DigimonPara.special`) enter
-   the damage formula, or only the partner's auto-battle weighting? (Decides how much the
-   shipped `type_effectiveness` option really changes.)
+   replay. **Answered 2026-08-29 by reading the overlay assembly** (rabbitizer over
+   `BTL_REL.BIN`, `work/dw1_re/decomp/damage_formula/NOTES.md`): the matrix is a damage
+   multiplier (Σ of the three defender-specialty cells / 30), `STD_calculateDamage` is
+   byte-identical. What remains is only provenance: a VERIFIED replay of the pseudocode
+   against the three battle states.
 2. **`.MMD` animation-table census** (static, no emulator): per species, how many animation
    entries the model carries versus how many technique slots its list populates — decides
    whether species lists may gain slots or only swap inside populated ones. `startAnimation`

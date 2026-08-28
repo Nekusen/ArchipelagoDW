@@ -200,7 +200,7 @@ class TestTokens(unittest.TestCase):
             paths={3: evo.EvoPath((-1, -1, 2, -1, -1), (-1, -1, 5, 9, -1, -1)),
                    37: evo.EvoPath((-1, -1, 3, -1, -1), (-1, -1, 12, -1, -1, -1))},
             requirements={5: evo.EvoRequirements(3, 100, -1, 100, -1, -1, -1, 3, 25, -1, -1, -1, 20, 0x10)},
-            gains={evo.DEVIMON: evo.DEVIMON_GAINS},
+            gains={5: (1200, 1100, 150, 120, 110, 100)},
             special={0: 27, 3: 24},
         )
         patch = _TokenCollector()
@@ -215,7 +215,8 @@ class TestTokens(unittest.TestCase):
                          struct.pack("<11b", -1, -1, 3, -1, -1, -1, -1, 12, -1, -1, -1))
         self.assertEqual(tokens[ROM_EVO_REQUIREMENTS.offset + 5 * 28],
                          struct.pack("<13hb", 3, 100, -1, 100, -1, -1, -1, 3, 25, -1, -1, -1, 20, 0x10))
-        self.assertEqual(tokens[ROM_EVO_STAT_GAINS.offset + 6 * 14], struct.pack("<6h", *evo.DEVIMON_GAINS))
+        self.assertEqual(tokens[ROM_EVO_STAT_GAINS.offset + 5 * 14], struct.pack("<6h", 1200, 1100, 150, 120, 110, 100))
+        self.assertNotIn(ROM_EVO_STAT_GAINS.offset + 5 * 14 + 12, tokens)          # targetDigimon is never written
         for offset in ROM_SPECIAL_EVO[0][0]:
             self.assertEqual(tokens[offset], bytes([27]))
         self.assertEqual(tokens[ROM_SPECIAL_EVO[3][0][0]], bytes([24]))
@@ -234,18 +235,48 @@ class TestTokens(unittest.TestCase):
         self.assertEqual(patch.tokens, [])
 
 
+class TestStatGains(unittest.TestCase):
+    def test_additive_rows_and_envelope(self) -> None:
+        additive = evo.additive_gain_species()
+        for species in additive:
+            self.assertGreaterEqual(evo.SPECIES_LEVEL[species], evo.LEVEL_ROOKIE)
+            self.assertNotIn(species, evo.SCALE_PATH_SPECIES)
+        for scale in (evo.DEVIMON, 11, 39, 53, 1, 2, 15, 62):
+            self.assertNotIn(scale, additive)
+        rookie = evo.gain_envelope(evo.LEVEL_ROOKIE)
+        self.assertTrue(rookie[0][0] >= 100 and rookie[0][1] <= 1500, rookie)
+        gains = evo.randomize_gains(Random(6))
+        self.assertTrue(gains)
+        for species, row in gains.items():
+            envelope = evo.gain_envelope(evo.SPECIES_LEVEL[species])
+            self.assertIn(species, additive)
+            for value, (low, high) in zip(row, envelope, strict=True):
+                self.assertTrue(low <= value <= high, (species, row, envelope))
+        self.assertEqual(gains, evo.randomize_gains(Random(6)))
+
+
 class TestDigivolutionOptions(DigimonWorldTestBase):
     options: ClassVar[dict[str, Any]] = {
         "digivolution_randomization": True,
         "digivolution_obtain_all": True,
         "digivolution_requirements": True,
         "special_digivolutions": True,
+        "digivolution_stat_gains": True,
     }
 
     def test_plan(self) -> None:
         plan = self.world.evolution_plan
-        self.assertTrue(plan.paths and plan.requirements and plan.special)
-        self.assertEqual(plan.gains, {evo.DEVIMON: evo.DEVIMON_GAINS})
+        self.assertTrue(plan.paths and plan.requirements and plan.special and plan.gains)
+        self.assertNotIn(evo.DEVIMON, plan.gains)
+
+
+class TestStatGainsOnly(DigimonWorldTestBase):
+    options: ClassVar[dict[str, Any]] = {"digivolution_stat_gains": True}
+
+    def test_plan(self) -> None:
+        plan = self.world.evolution_plan
+        self.assertTrue(plan.gains)
+        self.assertFalse(plan.paths or plan.requirements or plan.special)
 
 
 class TestDigivolutionTreeOnly(DigimonWorldTestBase):

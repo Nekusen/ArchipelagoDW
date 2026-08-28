@@ -78,8 +78,17 @@ TARGET_COUNTS: Final = {LEVEL_IN_TRAINING: (2, 2), LEVEL_ROOKIE: (4, 6), LEVEL_C
 
 FLAG_MAX_BATTLES: Final = 0x01
 FLAG_MAX_CARE: Final = 0x10
-#: Devimon's stat gains once it can be reached naturally (vanilla gives 0/0/0/0/0/10).
-DEVIMON_GAINS: Final = (1500, 2000, 250, 100, 150, 200)
+
+#: ``EVL_applyEvolution`` (EVL overlay, read from its assembly 2026-08-29) applies a gains row in
+#: one of two ways. *Additive* rows (Rookie / Champion / Ultimate targets): per stat,
+#: ``new = (cur + gain) / 2`` when the stat is below the gain, else ``cur + gain / 10``, then the
+#: 9999 / 999 clamp. *Scale* rows -- targets Devimon, Numemon, Sukamon, Nanimon, every Fresh /
+#: In-Training target, and any evolution out of Sukamon -- ignore the five stat columns and use
+#: the ``brains`` column as an ``int8`` multiplier x10 (10 = keep the stats). So Devimon's row
+#: must never get "real" gains (the standalone's 1500/2000/.../200 row wraps to a negative
+#: multiplier there), and only additive rows are ever randomized.
+SCALE_PATH_SPECIES: Final = frozenset({DEVIMON, 11, 39, 53})
+GAIN_COLUMNS: Final = ("HP", "MP", "Off", "Def", "Spd", "Brn")
 
 
 class EvoPath(NamedTuple):
@@ -364,12 +373,45 @@ def randomize_special_evolutions(rng: Random) -> dict[int, int]:
     return out
 
 
+def additive_gain_species() -> list[int]:
+    """Species whose gains row takes the additive path (Rookie+ targets outside the scale set)."""
+
+    return [species for species in VANILLA_GAINS
+            if SPECIES_LEVEL[species] >= LEVEL_ROOKIE and species not in SCALE_PATH_SPECIES]
+
+
+def gain_envelope(level: int) -> tuple[tuple[int, int], ...]:
+    """Per column, the vanilla ``(min, max)`` over the additive rows of that level."""
+
+    rows = [VANILLA_GAINS[s] for s in additive_gain_species() if SPECIES_LEVEL[s] == level]
+    return tuple((min(row[c] for row in rows), max(row[c] for row in rows)) for c in range(6))
+
+
+def randomize_gains(rng: Random) -> dict[int, tuple[int, ...]]:
+    """New six-column gains for every additive row, uniform inside the vanilla envelope of the
+    target's level (HP / MP to the nearest 10, the rest to the nearest 5). Scale-path rows and
+    the ``targetDigimon`` word are never touched."""
+
+    out: dict[int, tuple[int, ...]] = {}
+    envelopes = {level: gain_envelope(level) for level in (LEVEL_ROOKIE, LEVEL_CHAMPION, LEVEL_ULTIMATE)}
+    for species in additive_gain_species():
+        envelope = envelopes[SPECIES_LEVEL[species]]
+        row = []
+        for column, (low, high) in enumerate(envelope):
+            step = 10 if column < 2 else 5
+            value = rng.randint(low, high)
+            row.append(max(low, min(high, round(value / step) * step)))
+        if tuple(row) != VANILLA_GAINS[species]:
+            out[species] = tuple(row)
+    return out
+
+
 class EvolutionPlan(NamedTuple):
     #: species -> new tree row (species 1..62)
     paths: dict[int, EvoPath]
     #: species -> new requirements row (species 0..62)
     requirements: dict[int, EvoRequirements]
-    #: species -> six stat gains
+    #: species -> six stat gains (additive rows only)
     gains: dict[int, tuple[int, ...]]
     #: ``ROM_SPECIAL_EVO`` index -> new result species
     special: dict[int, int]
@@ -386,17 +428,23 @@ def build_evolution_plan(world: DigimonWorldWorld) -> EvolutionPlan:
     """Resolve the digivolution options into concrete table rewrites (call from ``generate_early``)."""
 
     options = world.options
-    if not options.digivolution_randomization:
-        return EMPTY_PLAN
     rng = world.random
-    requirements_on = bool(options.digivolution_requirements.value)
-    special_on = bool(options.special_digivolutions.value)
-    paths = randomize_tree(rng, bool(options.digivolution_obtain_all.value), requirements_on)
-    final_paths = {**VANILLA_PATHS, **paths}
-    requirements = randomize_requirements(rng, final_paths) if requirements_on else {}
-    special = randomize_special_evolutions(rng) if special_on else {}
-    gains = {DEVIMON: DEVIMON_GAINS} if (requirements_on or special_on) else {}
+    paths: dict[int, EvoPath] = {}
+    requirements: dict[int, EvoRequirements] = {}
+    special: dict[int, int] = {}
+    if options.digivolution_randomization:
+        requirements_on = bool(options.digivolution_requirements.value)
+        paths = randomize_tree(rng, bool(options.digivolution_obtain_all.value), requirements_on)
+        if requirements_on:
+            requirements = randomize_requirements(rng, {**VANILLA_PATHS, **paths})
+        if options.special_digivolutions:
+            special = randomize_special_evolutions(rng)
+    gains = randomize_gains(rng) if options.digivolution_stat_gains else {}
     return EvolutionPlan(paths, requirements, gains, special)
+
+
+def describe_gains(gains: tuple[int, ...]) -> str:
+    return " / ".join(f"{label} +{value}" for label, value in zip(GAIN_COLUMNS, gains, strict=True))
 
 
 def describe_path(species: int, path: EvoPath) -> str:

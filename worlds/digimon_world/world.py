@@ -280,6 +280,13 @@ class DigimonWorldWorld(World):
                 spoiler_handle.write(
                     f"  {evolutions.SPECIAL_EVOLUTION_NAMES[index]} -> {evolutions.SPECIES_NAME[target]}\n"
                 )
+        if plan.gains:
+            spoiler_handle.write(f"\n\nDigivolution stat gains ({name}):\n")
+            for species, gains in sorted(plan.gains.items()):
+                spoiler_handle.write(
+                    f"  {evolutions.SPECIES_NAME[species]}: {evolutions.describe_gains(gains)}"
+                    f"  (vanilla {evolutions.describe_gains(evolutions.VANILLA_GAINS[species])})\n"
+                )
 
     def _write_drop_spoiler(self, spoiler_handle: TextIO, name: str) -> None:
         plan = self.drop_plan

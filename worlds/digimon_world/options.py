@@ -1242,9 +1242,11 @@ class TechniqueEffectChance(DefaultOnToggle):
 class TypeEffectiveness(Toggle):
     """Randomize the 7x7 element affinity matrix (Fire / Battle / Air / Nature / Ice /
     Mech / Filth): every cell becomes one of the vanilla values 2, 5, 10, 15 or 20.
-    The battle engine reads it to weight the partner's technique choice in
-    auto-battle (and its arena / versus twins do the same); whether it also enters
-    the damage formula is still being decompiled. Independent of
+    The matrix is a damage multiplier: every hit is scaled by the sum of the
+    cells for the technique's element against the defender's three specialties,
+    over 30 (so a 20/20/20 defender takes double damage, a 2/2/2 one a fifth), for
+    the partner and enemies alike, in the field, the arena and versus mode. The
+    partner's auto-battle AI also ranks techniques by it. Independent of
     :class:`TechniqueData`. Mirrors the standalone's ``techs.TypeEffectiveness``.
     """
 
@@ -1406,11 +1408,26 @@ class DigivolutionRequirements(Toggle):
     stats at 100 (HP / MP 1000), a care-mistake minimum or maximum, a weight, a
     techniques count and one or two bonus conditions (discipline, battles, coming
     from a given species). Ultimates: 4-6 stats at 200-500 (sometimes 300-700) and
-    stricter bonuses. Devimon becomes a natural target with proper stat gains.
+    stricter bonuses. Devimon becomes a natural target (its stats are kept on that
+    digivolution — the game scales rather than adds for Devimon).
     Mirrors the standalone's ``evolution.Requirements``.
     """
 
     display_name = "Digivolution: Requirements"
+
+
+class DigivolutionStatGains(Toggle):
+    """Randomize the stat gains of digivolving into each Rookie, Champion and
+    Ultimate, uniformly inside the vanilla range of that level (Rookies roughly
+    +500-1000 HP / MP and +50-100 elsewhere, Champions +1000-2500 / +100-250,
+    Ultimates +3000-9000 / +300-900). The game applies a gain as it always did: a
+    stat below the gain jumps halfway to it, a stat above it adds a tenth.
+    Devimon, Numemon, Sukamon, Nanimon and the Fresh / In-Training targets keep
+    their vanilla rows (the game scales instead of adding for those). Independent
+    of :class:`DigivolutionRandomization`.
+    """
+
+    display_name = "Digivolution: Stat Gains"
 
 
 class SpecialDigivolutions(Toggle):
@@ -1505,6 +1522,7 @@ class DigimonWorldOptions(PerGameCommonOptions):
     digivolution_obtain_all: DigivolutionObtainAll
     digivolution_requirements: DigivolutionRequirements
     special_digivolutions: SpecialDigivolutions
+    digivolution_stat_gains: DigivolutionStatGains
     quest_items_droppable: QuestItemsDroppable
     increase_learn_chance: IncreaseLearnChance
     brain_training_tier_one: BrainTrainingTierOne
@@ -1533,7 +1551,7 @@ option_groups: list[OptionGroup] = [
             EnemyDropItems, EnemyDropRates, EnemyDropsMatchValue, EnemyDropsValueCutoff,
             TechGifts, TokomonGifts, TokomonGiftsConsumableOnly,
             DigivolutionRandomization, DigivolutionObtainAll, DigivolutionRequirements,
-            SpecialDigivolutions,
+            SpecialDigivolutions, DigivolutionStatGains,
         ],
     ),
     OptionGroup(
