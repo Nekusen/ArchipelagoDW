@@ -21,8 +21,8 @@ project moved out of "build the world" and into **feature expansion + polish + v
 | --- | --- |
 | World version | 0.6.0 (`minimum_ap_version` 0.6.7) |
 | Locations / items | 279 / 217 |
-| YAML options | 74, in 5 option groups |
-| World test suite | **1077 passed**, 4 skipped, 10040 subtests, ~18 s with `-n auto` (one class is disc-gated: it re-checks vanilla bytes when `Digimon World (USA).bin` sits at the repo root) |
+| YAML options | 75, in 5 option groups |
+| World test suite | **1085 passed**, 4 skipped, 10163 subtests, ~18 s with `-n auto` (one class is disc-gated: it re-checks vanilla bytes when `Digimon World (USA).bin` sits at the repo root) |
 | Lint | `ruff` at a 311-finding baseline (303 pre-existing + the census tool's CLI prints, T201, like the other lab tools) |
 | Commits ahead of `main` | 100 |
 | Decomp coverage | **31 / 1120** SLUS game functions verified — 2.8 % by count, **14.5 % of static call sites** |
@@ -138,7 +138,14 @@ result). Module `evolutions.py`, tables `EVO_PATHS` / `EVO_REQUIREMENTS` / `EVO_
 slow or lucky unless `type_lock_unlocks` (default on) removes the gates — the player's call.
 Interplay handled: the Toy Town gate byte (0x140479ED) is one of the Monzaemon special-evo
 sites *and* sits inside the unlock's 4-byte write; the writer skips it when the unlock is on and
-runs before the unlock tokens. Round trip green with all four options on.
+runs before the unlock tokens. Round trip green with all four options on. **User decision
+(2026-08-29):** playing without `type_lock_unlocks` is the player's problem, but the seed must
+stay *possible* — so every Fresh line of a randomized tree is guaranteed a natural path to at
+least one Vaccine and one Virus species (`evolutions._guarantee_types`, a Champion of the
+missing type added to one of the line's Rookies), and Numemon needs no guarantee (it is every
+Rookie's fallback digivolution, `getRookieEvolutionTarget`). Same commit: **`enemy_technique_weights`**
+(the AI-weight candidate from the table — a random split of 100 over each fighter record's
+carried techniques; `enemies.random_weights`).
 
 **Technique objective, remaining (set 2026-08-28):** the *data* half shipped above; still open
 are the two RE questions in §2.3 / §3.5 — does the element matrix enter `BTL_calculateDamage`,

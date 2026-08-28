@@ -316,7 +316,7 @@ def emit_python(path: str, digimon: list[dict], models: dict[int, int], rows: li
         "  the enemy AI and the partner's battle-learn check consult; ``status`` 0 = none, 1 = poison,",
         "  2 = confusion, 3 = stun, 4 = flat, rolled at ``status_chance`` %.",
         "* :data:`SPECIES` -- one row per ``DIGIMON_DATA`` entry (180): ``(id, name, level, moves16, heap,",
-        "  drop_item, drop_chance)``.",
+        "  drop_item, drop_chance, type)`` with ``type`` 1 = Data, 2 = Vaccine, 3 = Virus.",
         "  ``moves16`` is the species' 16-slot technique list as a 32-char hex string (``ff`` = empty slot);",
         "  a field record's move byte ``0x2E + k`` selects slot ``k``.  ``heap`` is the malloc3 footprint of",
         "  the species' ``.MMD`` model (file size rounded up to 2 KB) -- the budget a substitute must fit in.",
@@ -358,11 +358,11 @@ def emit_python(path: str, digimon: list[dict], models: dict[int, int], rows: li
     )
     lines.append(")")
     lines.append("")
-    lines.append("SPECIES: Final[tuple[tuple[int, str, int, str, int, int, int], ...]] = (")
+    lines.append("SPECIES: Final[tuple[tuple[int, str, int, str, int, int, int, int], ...]] = (")
     for d in digimon:
         mv = bytes(d["moves"]).hex()
         lines.append(f"    ({d['id']}, {json.dumps(d['name'])}, {d['level']}, \"{mv}\", {models.get(d['id'], 0)}, "
-                     f"{d['drop_item']}, {d['drop_chance']}),")
+                     f"{d['drop_item']}, {d['drop_chance']}, {d['type']}),")
     lines.append(")")
     lines.append("")
     lines.append("ITEMS: Final[tuple[tuple[int, str, int, int, bool], ...]] = (")

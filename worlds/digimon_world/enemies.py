@@ -44,11 +44,14 @@ never touched.
   scaled to that screen's budget, so nothing leaves the vanilla range) and its Digimon draw
   random techniques from their lists.
 
-AI weights (priorities) are never changed; a record keeps as many techniques as it had.
+A record keeps as many techniques as it had. AI weights (priorities) change only under the
+separate **``enemy_technique_weights``** toggle: a random split of 100 over the carried
+techniques of every fighter record.
 """
 
 from __future__ import annotations
 
+from itertools import pairwise
 from random import Random
 from typing import TYPE_CHECKING, Final, NamedTuple
 
@@ -97,6 +100,7 @@ class Species(NamedTuple):
     heap: int                   # malloc3 footprint of the model, bytes (0 = no model file)
     drop_item: int              # ITEM_PARA id dropped after a won battle ...
     drop_chance: int            # ... with this percent chance
+    type: int                   # 1 Data, 2 Vaccine, 3 Virus
 
     @property
     def tech_slots(self) -> tuple[int, ...]:
@@ -177,7 +181,8 @@ class MapheadSite(NamedTuple):
 
 
 SPECIES_BY_ID: Final[dict[int, Species]] = {
-    row[0]: Species(row[0], row[1], row[2], tuple(bytes.fromhex(row[3])), row[4], row[5], row[6]) for row in SPECIES
+    row[0]: Species(row[0], row[1], row[2], tuple(bytes.fromhex(row[3])), row[4], row[5], row[6], row[7])
+    for row in SPECIES
 }
 RECORDS: Final[tuple[FieldRecord, ...]] = tuple(
     FieldRecord(*row[:13], tuple(row[13:17]), tuple(row[17:21]), row[21]) for row in FIELD_RECORDS
@@ -528,6 +533,39 @@ def pick_moves_random(rng: Random, species: Species, count: int) -> tuple[int, .
     return _moves_from_slots(sorted(rng.sample(slots, count)))
 
 
+WEIGHT_TOTAL: Final = 100
+
+
+def random_weights(rng: Random, moves: tuple[int, ...]) -> tuple[int, ...]:
+    """A random split of :data:`WEIGHT_TOTAL` over the carried techniques (every carried
+    technique keeps at least 1); empty slots weigh 0."""
+
+    used = [k for k, move in enumerate(moves) if move != NO_MOVE]
+    weights = [0] * len(moves)
+    if used:
+        cuts = sorted(rng.sample(range(1, WEIGHT_TOTAL), len(used) - 1)) if len(used) > 1 else []
+        bounds = [0, *cuts, WEIGHT_TOTAL]
+        for k, (low, high) in zip(used, pairwise(bounds), strict=True):
+            weights[k] = high - low
+    return tuple(weights)
+
+
+def plan_weight_overrides(
+    rng: Random, move_overrides: dict[tuple[int, int], tuple[tuple[int, ...], tuple[int, ...]]],
+) -> dict[tuple[int, int], tuple[tuple[int, ...], tuple[int, ...]]]:
+    """Re-roll the AI weights of every touchable fighter record, on top of the movesets
+    ``move_overrides`` already decided (vanilla movesets otherwise)."""
+
+    out = dict(move_overrides)
+    for record in RECORDS:
+        if not _touchable(record):
+            continue
+        key = (record.map, record.slot)
+        moves = out[key][0] if key in out else record.moves
+        out[key] = (moves, random_weights(rng, moves))
+    return out
+
+
 def plan_move_overrides(
     mode: int, rng: Random, final_species: dict[tuple[int, int], int], screen_targets: dict[int, Targets],
     powers: dict[int, int] = VANILLA_POWERS,
@@ -641,7 +679,8 @@ def build_enemy_plan(world: DigimonWorldWorld) -> EnemyPlan:
     options = world.options
     mode = int(options.enemy_stats.value)
     randomization = int(options.enemy_randomization.value)
-    if mode == STATS_VANILLA and not randomization:
+    weights = bool(options.enemy_technique_weights.value)
+    if mode == STATS_VANILLA and not randomization and not weights:
         return EMPTY_PLAN
     rng = world.random
     # a seed that randomizes MOVE_DATA scales enemies by the powers it ships, not the vanilla ones
@@ -667,5 +706,7 @@ def build_enemy_plan(world: DigimonWorldWorld) -> EnemyPlan:
 
     stat_overrides = plan_stat_overrides(screen_targets)
     move_overrides = plan_move_overrides(mode, rng, final_species, screen_targets, powers)
+    if weights:
+        move_overrides = plan_weight_overrides(rng, move_overrides)
     return EnemyPlan(stat_overrides, substitutions, move_overrides, region_depths, region_targets,
                      screen_targets if mode == STATS_FULL_RANDOM else {})

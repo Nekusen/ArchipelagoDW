@@ -113,6 +113,36 @@ class TestTree(unittest.TestCase):
     def test_deterministic(self) -> None:
         self.assertEqual(evo.randomize_tree(Random(4), True, True), evo.randomize_tree(Random(4), True, True))
 
+    def test_every_fresh_line_reaches_a_vaccine_and_a_virus(self) -> None:
+        for seed in range(40):
+            for obtain_all in (False, True):
+                paths = _final_paths(evo.randomize_tree(Random(seed), obtain_all, requirements_randomized=obtain_all))
+                for fresh in evo.species_of_level(evo.LEVEL_FRESH):
+                    types = {evo.SPECIES_TYPE[s] for s in evo.reachable_from(paths, fresh)}
+                    self.assertTrue(set(evo.GUARANTEED_TYPES) <= types, (seed, obtain_all, fresh, types))
+
+    def test_guarantee_repairs_a_line_without_the_type(self) -> None:
+        rng = Random(3)
+        tree = evo._Tree()
+        for fresh in evo.species_of_level(evo.LEVEL_FRESH):
+            tree.add(fresh, evo.VANILLA_PATHS[fresh].targets[0])
+        vaccine_rookies = [r for r in evo.species_of_level(evo.LEVEL_ROOKIE) if evo.SPECIES_TYPE[r] == evo.TYPE_VACCINE]
+        vaccine_champions = [c for c in evo.natural_targets(evo.LEVEL_ROOKIE, False)
+                             if evo.SPECIES_TYPE[c] == evo.TYPE_VACCINE]
+        for in_training in evo.species_of_level(evo.LEVEL_IN_TRAINING):
+            for rookie in vaccine_rookies[:2]:
+                tree.add(in_training, rookie)
+        for rookie in vaccine_rookies[:2]:                      # six Vaccine targets: full rows, no Virus
+            for champion in vaccine_champions[:6]:
+                tree.add(rookie, champion)
+        evo._guarantee_types(rng, tree, requirements_randomized=False)
+        paths = tree.paths()
+        for fresh in evo.species_of_level(evo.LEVEL_FRESH):
+            types = {evo.SPECIES_TYPE[s] for s in evo.reachable_from(paths, fresh)}
+            self.assertIn(evo.TYPE_VIRUS, types, fresh)
+        for rookie in vaccine_rookies[:2]:
+            self.assertLessEqual(tree.count(rookie), 6)
+
 
 class TestRequirements(unittest.TestCase):
     def test_rows(self) -> None:

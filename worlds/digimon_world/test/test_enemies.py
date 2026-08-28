@@ -438,3 +438,38 @@ class TestEnemyOptionsOff(DigimonWorldTestBase):
     def test_default_plan_is_empty(self) -> None:
         self.world.post_fill()
         self.assertTrue(self.world.enemy_plan.empty)
+
+
+class TestTechniqueWeights(unittest.TestCase):
+    def test_random_weights(self) -> None:
+        rng = Random(1)
+        for moves in ((0x2E, 0x2F, 0x30, 0xFF), (0x2E, 0xFF, 0xFF, 0xFF), (0x2E, 0x2F, 0x30, 0x31), (0xFF,) * 4):
+            weights = enemies.random_weights(rng, moves)
+            used = [k for k, m in enumerate(moves) if m != enemies.NO_MOVE]
+            self.assertEqual(sum(weights), enemies.WEIGHT_TOTAL if used else 0, moves)
+            self.assertTrue(all(weights[k] >= 1 for k in used))
+            self.assertTrue(all(weights[k] == 0 for k in range(4) if k not in used))
+
+    def test_overrides_cover_every_touchable_record_and_keep_movesets(self) -> None:
+        prior = {(2, 0): ((0x2E, 0x2F, 0xFF, 0xFF), (50, 50, 0, 0))}
+        out = enemies.plan_weight_overrides(Random(2), prior)
+        self.assertEqual(out[(2, 0)][0], (0x2E, 0x2F, 0xFF, 0xFF))
+        self.assertEqual(sum(out[(2, 0)][1]), enemies.WEIGHT_TOTAL)
+        touchable = [r for r in enemies.RECORDS if enemies._touchable(r)]
+        self.assertEqual(set(out), {(r.map, r.slot) for r in touchable} | set(prior))
+        for record in touchable:
+            moves, prio = out[(record.map, record.slot)]
+            if (record.map, record.slot) not in prior:
+                self.assertEqual(moves, record.moves)
+            self.assertEqual(sum(prio), enemies.WEIGHT_TOTAL)
+
+
+class TestTechniqueWeightsOption(DigimonWorldTestBase):
+    options: ClassVar[dict[str, Any]] = {"enemy_technique_weights": True}
+
+    def test_plan(self) -> None:
+        self.world.post_fill()
+        plan = self.world.enemy_plan
+        self.assertFalse(plan.empty)
+        self.assertFalse(plan.stat_overrides or plan.substitutions)
+        self.assertGreater(len(plan.move_overrides), 400)

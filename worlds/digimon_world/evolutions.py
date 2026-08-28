@@ -48,6 +48,16 @@ GAIN_ROW_COUNT: Final = 66          # species 0..65
 
 SPECIES_NAME: Final[dict[int, str]] = {row[0]: row[1] for row in SPECIES}
 SPECIES_LEVEL: Final[dict[int, int]] = {row[0]: row[2] for row in SPECIES}
+SPECIES_TYPE: Final[dict[int, int]] = {row[0]: row[7] for row in SPECIES}
+
+TYPE_DATA: Final = 1
+TYPE_VACCINE: Final = 2
+TYPE_VIRUS: Final = 3
+#: Types the partner must have to enter a type-locked area (Ice Sanctuary: Vaccine, Greylord's
+#: Mansion: Virus). Every Fresh line of a randomized tree is guaranteed to reach one of each, so a
+#: seed played without ``type_lock_unlocks`` stays possible (Toy Town's Numemon needs no
+#: guarantee: it is the Rookie fallback digivolution, reachable from any Rookie by design).
+GUARANTEED_TYPES: Final = (TYPE_VACCINE, TYPE_VIRUS)
 
 #: The partner-capable species (the standalone's ``playableDigimon``): 62 (WereGarurumon, level 0
 #: in DIGIMON_DATA) is not one of them.
@@ -158,6 +168,47 @@ class _Tree:
         return {species: EvoPath(tuple(self.frm[species]), tuple(self.to[species])) for species in self.to}
 
 
+def reachable_from(paths: dict[int, EvoPath], species: int) -> set[int]:
+    """Every species a partner starting as ``species`` can become by natural digivolution."""
+
+    seen: set[int] = set()
+    stack = [species]
+    while stack:
+        current = stack.pop()
+        for target in (paths[current].targets if current in paths else ()):
+            if target not in seen:
+                seen.add(target)
+                stack.append(target)
+    return seen
+
+
+def _guarantee_types(rng: Random, tree: _Tree, requirements_randomized: bool) -> None:
+    """Make every Fresh line reach at least one species of each :data:`GUARANTEED_TYPES` by
+    adding a Champion of the missing type to one of the line's Rookies (freeing that Rookie's
+    last-filled slot if it is full, preferring a target that keeps another source)."""
+
+    for fresh in species_of_level(LEVEL_FRESH):
+        for wanted in GUARANTEED_TYPES:
+            paths = tree.paths()
+            reachable = reachable_from(paths, fresh)
+            if any(SPECIES_TYPE[species] == wanted for species in reachable):
+                continue
+            rookies = sorted(species for species in reachable if SPECIES_LEVEL[species] == LEVEL_ROOKIE)
+            candidates = [c for c in natural_targets(LEVEL_ROOKIE, requirements_randomized)
+                          if SPECIES_TYPE[c] == wanted]
+            if not rookies or not candidates:
+                continue
+            fewest = min(tree.count(r) for r in rookies)
+            rookie = rng.choice([r for r in rookies if tree.count(r) == fewest])
+            if tree.count(rookie) >= 6:
+                sources = {t: [s for s in tree.to if t in tree.to[s]] for t in tree.to[rookie] if t != NONE}
+                spare = [slot for slot in reversed(TO_FILL_ORDER)
+                         if tree.to[rookie][slot] != NONE and len(sources[tree.to[rookie][slot]]) > 1]
+                slot = spare[0] if spare else next(s for s in reversed(TO_FILL_ORDER) if tree.to[rookie][s] != NONE)
+                tree.to[rookie][slot] = NONE
+            tree.add(rookie, rng.choice(candidates))
+
+
 def _assign_each_target_once(rng: Random, tree: _Tree, sources: list[int], pool: list[int]) -> None:
     """Obtain-all: give every target in ``pool`` at least one random source."""
 
@@ -199,6 +250,7 @@ def randomize_tree(rng: Random, obtain_all: bool, requirements_randomized: bool)
         tree.update_from(species)
         while tree.count(species) < wanted:
             tree.add(species, rng.choice(pool))
+    _guarantee_types(rng, tree, requirements_randomized)
 
     champions = species_of_level(LEVEL_CHAMPION, exclude_special=True)
     if obtain_all:
@@ -211,6 +263,8 @@ def randomize_tree(rng: Random, obtain_all: bool, requirements_randomized: bool)
             tree.add(species, rng.choice(pool))
 
     for species in species_of_level(LEVEL_ULTIMATE, exclude_special=True):
+        tree.update_from(species)
+    for species in rookies:                       # a guarantee pass may have re-targeted a Rookie
         tree.update_from(species)
 
     return {species: path for species, path in tree.paths().items() if path != VANILLA_PATHS[species]}

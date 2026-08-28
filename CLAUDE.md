@@ -186,7 +186,9 @@ These come from [docs/style.md](docs/style.md) and the ruff config and override 
   round trip (spoiler ↔ patched tables). Second commit the same day:
   **digivolution randomization** (`evolutions.py`: tree / obtain-all /
   requirements / special digivolutions, with a warning about the three
-  partner-gated areas vs `type_lock_unlocks`). Not ported: recruit-identity
+  partner-gated areas vs `type_lock_unlocks`; every Fresh line is guaranteed
+  a Vaccine and a Virus path so the seed stays possible) and
+  `enemy_technique_weights` (AI weights). Not ported: recruit-identity
   shuffle, intro hash, happyVending, jukebox truncation, forced starter.
   Table audit corrected one claim: the element matrix is read by the
   **partner's** auto-battle AI, not the enemy AI. Remaining technique

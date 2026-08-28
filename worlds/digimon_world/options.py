@@ -1165,6 +1165,17 @@ class EnemyRandomizationTier(Choice):
     default = option_same_level
 
 
+class EnemyTechniqueWeights(Toggle):
+    """Randomize how often each field Digimon uses each of its techniques: the AI
+    weights of every fighter record are re-rolled (one random split of 100 over
+    the techniques it carries). Independent of ``enemy_stats``, which never
+    changes the weights on its own. Pure data rewrite of the per-screen enemy
+    records.
+    """
+
+    display_name = "Enemy Technique Weights"
+
+
 class TechniqueData(Choice):
     """Randomize the technique data table (``MOVE_DATA``): power, MP cost, accuracy,
     status effect and status chance of every technique, as chosen by the five
@@ -1366,7 +1377,10 @@ class DigivolutionRandomization(Toggle):
     and Toy Town opens for Monzaemon (the Numemon suit). With a random tree,
     reaching the right species or type can take much longer or plain luck, and
     the AP logic cannot account for it. Keep ``type_lock_unlocks`` on (its
-    default) to remove those three gates, or accept that risk knowingly.
+    default) to remove those three gates, or accept that risk knowingly. The
+    seed is never impossible: every starting line is guaranteed a natural path
+    to at least one Vaccine and one Virus species, and Numemon (the Toy Town
+    suit) stays the fallback digivolution of every Rookie.
 
     Mirrors the standalone DW1 randomizer's ``evolution.Enabled``.
     """
@@ -1472,6 +1486,7 @@ class DigimonWorldOptions(PerGameCommonOptions):
     enemy_stats_strength: EnemyStatsStrength
     enemy_randomization: EnemyRandomization
     enemy_randomization_tier: EnemyRandomizationTier
+    enemy_technique_weights: EnemyTechniqueWeights
     technique_data: TechniqueData
     technique_power: TechniquePower
     technique_mp_cost: TechniqueMPCost
@@ -1512,7 +1527,7 @@ option_groups: list[OptionGroup] = [
             StarterAllowChampion, StarterAllowUltimate,
             StarterUseWeakestTech,
             EnemyStats, EnemyStatsStrength,
-            EnemyRandomization, EnemyRandomizationTier,
+            EnemyRandomization, EnemyRandomizationTier, EnemyTechniqueWeights,
             TechniqueData, TechniquePower, TechniqueMPCost, TechniqueAccuracy,
             TechniqueEffect, TechniqueEffectChance, TypeEffectiveness,
             EnemyDropItems, EnemyDropRates, EnemyDropsMatchValue, EnemyDropsValueCutoff,
