@@ -1,6 +1,6 @@
 # Digimon World 1 (PS1) APWorld — Project Status and Roadmap
 
-**Snapshot date: 2026-08-23.** Branch `digimon-world-ps1`, HEAD `b774d899`, `world_version 0.6.0`.
+**Snapshot date: 2026-08-28.** Branch `digimon-world-ps1`, `world_version 0.6.0`.
 
 This is the live status document. [PLAN.md](PLAN.md) is the historical exploration record and
 [CLAUDE.md](CLAUDE.md) carries the working conventions; neither is updated for day-to-day state —
@@ -82,7 +82,7 @@ Grouped by **what blocks each item**, because that is what decides the order.
 | Item | What is needed | Why it matters |
 | --- | --- | --- |
 | **BizHawk validation session** | One play session on the real client against the checklist (region gates, four shops, ITEM_PARA residuals, card ×8, Piximon; late-game heap margin as a separate save) | Closes the August batch. May generate corrective work. |
-| **Savestate batch** | The states in [SAVESTATE_REQUESTS.md](worlds/digimon_world/tools/SAVESTATE_REQUESTS.md) — see §4 | Converts every PARTIAL decomp unit to VERIFIED and unlocks whole subsystems (fishing, training) the lab cannot reach today |
+| **Savestate batch** | The states in [SAVESTATE_REQUESTS.md](worlds/digimon_world/tools/SAVESTATE_REQUESTS.md) — see §4. **First sitting done 2026-08-28** (6 states incl. the `debug_warp` teleport hub); Medium rows remain | Patch validation in the real game (fishing, training, post-game heap margin) |
 | **Gekomon recruit** | The vanilla recruit method, as text | New recruit; needs bit/visibility RE afterwards |
 | **Whamon / Ogremon quest softlocks** | Reproduction recipes, as text | Script state-machine RE + guard patches |
 | **Logic review** | The user's own pass over `rules.py` | — |
@@ -252,22 +252,23 @@ that.
 
 | Savestate | Buys | Advances (roadmap) | Priority |
 | --- | --- | --- | --- |
-| `fishing.state` | Exercises the 6 relocated `FISH_REL` ITEM_PARA readers (never run live) | Fishing locations; ITEM_PARA residual check | **High** (validation) |
-| `training_gym.state` | Runtime evidence for the stat-gain routines (`src/trn/` is in C) | Enemy-stat scaling | **High** (validation) |
+| ✅ `fishing.state` (captured 2026-08-28) | Exercises the 6 relocated `FISH_REL` ITEM_PARA readers (never run live) | Fishing locations; ITEM_PARA residual check | **High** (validation) |
+| ✅ `training_gym.state` (captured 2026-08-28) | Runtime evidence for the stat-gain routines (`src/trn/` is in C) | Enemy-stat scaling | **High** (validation) |
 | `post_battle_learn.state` | Natural evidence for the companion-bit fix; first state on the scaling path | Enemy-stat scaling | Medium (validation) |
 | `digivolve_accepted.state` | Validation of a future AP digivolution item; `getNumMasteredMoves` → VERIFIED | Digivolution v2 | Medium (validation) |
 | `dialog_columns.state` | Testing an injected notification string that uses the column codes | **In-game notifications** | Medium (validation) |
-| `mt_infinity.state`, `back_dimension.state` | Post-game heap-margin measurement | Heap safety of the ITEM_PARA claim | Medium |
-| `machinedramon.state` | Ending path, trigger 50 | Goal robustness | Medium |
+| ✅ `mt_infinity.state`, `back_dimension.state` (captured 2026-08-28) | Post-game heap-margin measurement | Heap safety of the ITEM_PARA claim | Medium |
+| ✅ `machinedramon.state` (captured 2026-08-28) | Ending path, trigger 50 | Goal robustness | Medium |
 | `card_trade.state` | Card-value path live | Card multiplier (shipped on static analysis + one live check) | Medium |
 | `species_raised.state` | `hasDigimonRaised` → VERIFIED | — (the flag's semantics are C-confirmed) | Low (provenance) |
 | `script_vm_cold_start.state` | `callScriptSection` → VERIFIED | — (all 43 stores C-confirmed) | Low (provenance) |
 | `long_text.state`, `numeric_ui.state` | `renderCharacter` / `convertAsciiToJis` corners | — (C-confirmed) | Low (provenance) |
 | `rebirth.state`, `piximon_shop.state` | Mastery survival across rebirth; Piximon check | QoL confidence | Low |
 
-**One sitting covers all of it.** Rule of thumb from the lab: stop one input short of the event.
-If time is short, the two **High** rows are the ones that matter: they are the only states that
-exercise code our patches touch and nothing has ever run.
+**2026-08-28 session: both High rows and the three post-game rows are captured**, plus a
+`debug_warp.state` teleport hub (debug map, Mr. Warp open; poke the resident script's warp byte to
+reach any map). Remaining: `post_battle_learn`, `digivolve_accepted`, `dialog_columns`,
+`card_trade` (Medium) and the provenance-only rows.
 
 Not savestate problems (do not capture for these): battle internals (overlay import), the arena
 exit hang (PCSX-Redux only), Gekomon / Whamon / Ogremon (need text).

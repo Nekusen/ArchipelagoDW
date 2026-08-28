@@ -24,6 +24,22 @@ Positioning rule of thumb: **stop one input short of the event**. The most usefu
 lab are the ones sitting on an open dialog or one step from a transition, because the capture
 harness can then drive the event itself.
 
+## Captured 2026-08-28 (user session, vanilla ISO, PCSX-Redux)
+
+| State | Position | Facts |
+| --- | --- | --- |
+| `training_gym.state` | Green Gym, HP machine, menu open, cursor on **Begin** | Fresh Agumon 80/60/70/70, HP 800 / MP 600, 0 Bits -- **no god mode**, gains are real |
+| `fishing.state` | At a fishing spot, rod equipped, one input before casting | Triggers 45+46 (old + Amazing rod), bait Meat/Giant Meat/Sirloin x5 in slots 0-2 |
+| `debug_warp.state` | **Debug map** (Jijimon's house area), Mr. Warp dialog open | Debug triggers 54/55 clear. **Teleport hub**: the resident script 164 sits at 0x1B9ED8; poke byte +1941 (map id of "Near -> peak of Mt. Panorama", vanilla 0x12) to any map id and that menu entry warps there. Used for the three below. |
+| `machinedramon.state` | Mt. Infinity L13 (map 225 MGEN99), walking UP starts the final boss | God mode; trigger 50 NOT set |
+| `mt_infinity.state` | Mid Mt. Infinity (map 219 MGEN05) | God mode |
+| `back_dimension.state` | Back Dimension (map 226 MGEN11) | God mode; trigger 50 (game beaten) SET |
+
+Session rules learned the hard way (three emulator crashes): during a user-driven session use
+**no per-frame Lua listeners** (`dw1_redux_input.lua`), **no REST data GETs** (`peek`/screenshot
+-- both now pause the emulator or read via Lua), and save with `PCSX.pauseEmulator()` around
+`createSaveState()`. Full log: `work/dw1_re/session_2026-08-28_savestates.md`.
+
 ## Open requests
 
 **Re-triaged 2026-08-28 after adopting dw_decomp.** Every branch these rows were opened for has
@@ -55,11 +71,6 @@ session can cover them in one pass rather than one interruption at a time.
 
 | Priority | Filename | Position it at | Unblocks |
 | --- | --- | --- | --- |
-| High | `fishing.state` | Standing at a fishing spot with a rod equipped, **one input before** casting; ideally with several bait items in the bag | The whole fishing subsystem. The lab has **no** fishing state at all, and 6 of the 31 ITEM_PARA reader sites live in `FISH_REL` — they have only ever been checked statically, never replayed. |
-| High | `training_gym.state` | In front of a training machine, dialog open, one input before starting a session | Stat-gain routines — the prerequisite for the deferred **enemy-stat scaling** feature, which needs to know how the game's own stat maths works. |
-| Medium | `mt_infinity.state` | Anywhere inside Mt. Infinity, mid-run | Late-game scripts and the **heap-margin** question flagged in the BizHawk checklist (the 8 KB ITEM_PARA claim vs late-game allocations is unmeasured post-game). |
-| Medium | `machinedramon.state` | At the final fight, one input before it starts | The ending sequence and `trigger 50` (game-beaten) path. |
-| Medium | `back_dimension.state` | Inside Back Dimension | Post-game region scripts; same heap question as Mt. Infinity. |
 | Medium | `card_trade.state` | ShogunGekomon, **"Show a Digimon card"** submenu open, holding a high count of many card types | The card-value path. `shop_merit.state` stops at the dialog root; the trade submenu is the part that was patched for the card multiplier and it has never been vector-captured. |
 | Low | `rebirth.state` | Partner about to die / one input before rebirth | The rebirth + technique-mastery reconciliation path (mastery bitmap survives rebirth — asserted, never replayed). |
 | Low | `piximon_shop.state` | Inside the item-shop building **with Piximon present** (2-in-10 roll per entry — re-enter until he shows) | The Piximon Training Manual check, currently shipped on static analysis plus one live confirmation. |

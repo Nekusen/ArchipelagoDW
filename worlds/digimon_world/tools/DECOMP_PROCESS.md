@@ -182,6 +182,23 @@ Game-behavior facts for scripted play (user-confirmed 2026-08-20):
       the spot (two care-path cases).
     - `cutscene_pending.state` — close menu + walk RIGHT triggers Coelamon's cutscene
       (time-of-day-gated — the screen polls the hour; bonus: the cutscene warps regions).
+- **2026-08-28 user session** (all god-mode except `training_gym`; recipes in
+  `work\dw1_re\session_2026-08-28_savestates.md`):
+  - `training_gym.state` -- Green Gym HP machine, menu open on **Begin**; fresh Agumon, real
+    stats (the one state deliberately WITHOUT god mode).
+  - `fishing.state` -- fishing spot, rod equipped, one input before casting; rods = triggers
+    45/46, bait = any `sortingValue == 2` item (Meat/Giant Meat/Sirloin x5 staged).
+  - `debug_warp.state` -- the **debug map** with Mr. Warp's dialog open (triggers 54/55 clear;
+    works on vanilla). Teleport hub: script 164 is resident at 0x1B9ED8 and in-slot offsets
+    match the dump, so poking byte +1941 (map id of "Near -> The peak of Mt. Panorama",
+    vanilla 0x12) makes that entry warp anywhere. Mr. Warp itself has no Mt. Infinity / Back
+    Dimension entries; "Last Battle" lives in Jijimon's Section_54 but did not trigger for us
+    (the house interior stayed vanilla).
+  - `machinedramon.state` (map 225, L13 -- walk UP for the boss), `mt_infinity.state` (map 219),
+    `back_dimension.state` (map 226, trigger 50 set) -- all reached through that repoint.
+- **User-driven session rules** (three crashes on 2026-08-28): no per-frame Lua listeners
+  (`dw1_redux_input.lua`) while the user plays, no REST data GETs (`peek` and the screenshot
+  tool now pause/Lua-read), and wrap `createSaveState()` in `PCSX.pauseEmulator()`.
 - **The lab runs the VANILLA ISO — no AP ROM patches.** AP RAM state that "works 100% in the
   randomizer" often depends on the patcher rewriting the ROM; those values won't apply here. Use
   vanilla values. Confirmed case: Birdramon flight destinations. The AP delivers flight unlocks
