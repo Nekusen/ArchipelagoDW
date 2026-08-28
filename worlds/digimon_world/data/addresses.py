@@ -246,6 +246,11 @@ FISHING_SCREEN_IDS: Final[frozenset[int]] = frozenset({6, 8})
 
 # ----- Recruit / town progress ---------------------------------------------
 
+# = pstat(1) = save block + 0x15A. Vanilla recomputes it in
+# ``recalculatePPandArena`` (sum of ``level - 2`` per recruited Digimon,
+# Numemon/Sukamon/Nanimon = 1); the client re-asserts the AP value every
+# tick. DOOA_REL/MURD_REL also compare it ``>= 50`` hard-coded, but only
+# to pick a message. (dw_decomp audit 2026-08-28.)
 RAM_PROSPERITY_POINTS: Final = 0x001BE032      # primary recruit-progress metric
 RAM_CARD_LIST_BASE: Final = 0x001BDFAC         # collected business-card base
 RAM_CHART_BASE: Final = 0x001BE00D             # ?-chart base (recruit-related)
@@ -865,13 +870,23 @@ KEYITEM_DELIVERY_RAM_BITS: Final[dict[str, tuple[int, int]]] = {
 
 # ----- Birdramon flight destination gates -----------------------------------
 #
-# Birdramon-Messenger reads a 6-entry destination table (`<u16 trigger,
-# u32 price, u16 label_id>`) embedded in the binary at .bin offsets
-# 0x14B8B698 and 0x14D725CE (two identical copies). Each destination
-# only appears in his menu when its trigger bit is set in the trigger
-# array. Vanilla mapping: G Canyon Top=trig 221 (Birdramon recruit),
-# Gear Savanna=190, Ancient Dino=188, Freezeland=351, Misty Trees=147,
-# Beetle Land=210.
+# Birdramon-Messenger reads a 6-entry destination table embedded in the
+# binary. Each destination only appears in his menu when its trigger bit
+# is set in the trigger array. Vanilla mapping: G Canyon Top=trig 221
+# (Birdramon recruit), Gear Savanna=190, Ancient Dino=188, Freezeland=351,
+# Misty Trees=147, Beetle Land=210.
+#
+# LAYOUT CORRECTED 2026-08-28 (dw_decomp audit). The entry is
+# ``{u8 mapId, u8 exitIdx, u16 trigger, u32 cost}`` x 6, at RAM 0x8013024C
+# (= .bin 0x14D725C4). The bases recorded below (0x14D725C6 / 0x14B8B698)
+# are the TRUE BASE + 2, so ``base + 8*n`` lands on entry n's trigger and
+# ``base + 8*n + 2`` on its cost -- which is why every shipped write was
+# right while the documented ``<u16 trigger, u32 price, u16 label>`` layout
+# was not: the "label" was the NEXT entry's mapId/exitIdx. Vanilla costs
+# 1000/1000/1500/2000/2500/2500; destinations GCAN03/GIAS01/KODA00/FRZL06/
+# MIST05/BETL01 (exit 9 except BETL01 = 0); a selection writes pstat 247/248.
+# Copy 1 (0x14B8B698) is DOOA_REL.BIN's private copy (LBA 147800), not a
+# second SLUS copy -- patch both regardless.
 #
 # We redirect the 5 non-recruit entries' trigger IDs in the table to
 # fresh AP-controlled trigger IDs (880-884) at byte 0x001BE03B bits 0-4.
@@ -923,6 +938,13 @@ ROM_BIRDRA_FLIGHT_TABLE_PATCHES: Final = (
 # 66 cards span 33 bytes (0x001BDFAC..0x001BDFCC inclusive). The byte
 # immediately after, ``0x001BDFCD``, is :data:`AP_TRIGGER_ARRAY_BASE` — no
 # overlap with the trigger array.
+#
+# Struct view (dw_decomp ``ScriptState``, 2026-08-28): this is
+# ``cards[33]`` at save + 0xD4. Two neighbours worth knowing: save + 0x00..
+# + 0x05 are the card shop's six daily offers (0xFF = empty), and save
+# + 0x06..+ 0x53 (0x001BDEDE..0x001BDF2B) are the **recycle-shop stock
+# counts**, capped at 99 — the bytes the old Cheat-Engine table mislabelled
+# as key-item flags.
 #
 # Layout cross-referenced with DWAP's
 # ``references/DWAP/source/DWAP/Resources/DigimonCards.json``. AP IDs
@@ -1233,7 +1255,10 @@ RAM_RECRUITMENT_FUNCTION_PLACEHOLDER: Final = 0x00000000
 
 # Per-recruit completion bits. Keyed by recruit *location* name (the bare
 # Digimon name; matches :data:`worlds.digimon_world.locations.RECRUIT_NAMES`).
-# Source: DWAP Locations.json.
+# Source: DWAP Locations.json. Digimon id = trigger - 200; vanilla
+# prosperity contribution = ``level - 2`` (Rookie 1 / Champion 2 /
+# Ultimate 3) except ids 11/39/53 (Numemon/Sukamon/Nanimon) = 1
+# (``recalculatePPandArena``, dw_decomp 2026-08-28).
 RECRUIT_RAM_BITS: Final[dict[str, tuple[int, int]]] = {
     "Agumon":       (0x001BDFE6, 3),
     "Betamon":      (0x001BDFE6, 4),
@@ -2123,6 +2148,14 @@ ROM_TECHNIQUE_DATA = StructBlock(
 )
 
 # ----- Technique battle-learn chance (0x3A entries; <BBB) ------------------
+#
+# = ``MOVE_LEARN_CHANCES[58][3]`` @ RAM 0x80125FA4 (dw_decomp 2026-08-28),
+# indexed ``[techId][matched-specialty index 0..2]`` and rolled
+# ``random(100) < chance`` in ``battleMoveLearning`` — only for techs whose
+# ``special`` byte (MOVE_DATA + 9) matches one of the partner's three
+# specialties and that appear in the partner's 16-entry move list. (An
+# older note placed the chance at 0x80126245 + id*0x10; that is
+# ``MOVE_DATA[id].special``, not the chance.)
 
 ROM_TECH_LEARN_BATTLE = StructBlock(
     offset=0x14D66A2C,
@@ -2994,22 +3027,25 @@ SHUFFLE_INCLUDED_RECRUITS: Final[frozenset[str]] = SHUFFLEABLE_RECRUITS
 
 
 # =============================================================================
-# PP-calc patch (Phase 4 v4)
+# PP-calc patch (Phase 4 v4) — RETIRED 2026-08-28
 # =============================================================================
 #
-# Vanilla DW1 derives a Digimon's max PP for each technique slot from a
-# table whose layout is incompatible with arbitrary-recruit assignment:
-# remapping a Digimon to a different evolution slot can produce 0-PP
-# techniques. The standalone DW1 randomizer rewrites the PP-lookup
-# function to use a flat addressing scheme that's stable under
-# remapping. Source: ``references/digimon_world_randomizer/digimon/data.py:709-713``.
+# **No longer written by the patcher.** The constants stay for the record.
 #
-# The 11 32-bit MIPS instructions below replace the vanilla function at
-# ``ROM_PP_CALC_PATCH_OFFSET``. The values are stored ">I" (big-endian)
-# in the standalone — DW1's instructions live in ROM in MIPS forward
-# byte order, which on a little-endian PSX means each instruction word
-# in ROM is the big-endian render of the encoded instruction. We follow
-# the standalone's format exactly.
+# What this actually was (dw_decomp audit, 2026-08-28): ``0x14D2848C`` is
+# RAM 0x800EFA44 = ``recalculatePPandArena`` + 0x2C — the loop that computes
+# **prosperity points** (``pstat(1)``), not technique PP. Vanilla
+# (``src/main/main.c:406-434``) sums ``DIGIMON_DATA[i].level - 2`` over every
+# recruited Digimon (trigger 200+i), with Numemon/Sukamon/Nanimon (ids
+# 11/39/53) counting 1. The standalone randomizer's 11-instruction rewrite
+# makes the loop read ``DIGIMON_DATA[i].height & 3`` instead — a field the
+# standalone SEEDS with a per-Digimon PP value (``handler.py:48-60``). We
+# never seeded it, so the patched loop computed garbage; nobody noticed
+# because the client's ``_enforce_prosperity`` re-asserts the AP-delivered
+# value every tick. The earlier rationale here ("max PP for each technique
+# slot") was a misreading of the name. Removing the patch leaves the
+# vanilla formula as the fallback the client overrides — strictly better.
+# Source of the original bytes: ``references/digimon_world_randomizer/digimon/data.py:709-713``.
 
 ROM_PP_CALC_PATCH_OFFSET: Final = 0x14D2848C
 ROM_PP_CALC_PATCH_FORMAT: Final = ">IIIIIIIIIII"  # 11 big-endian u32 instructions
@@ -6607,6 +6643,24 @@ ROM_GETTOPCITY_TRIGGER_PATCHES: Final = (
 # at city boundaries, NPC visibility checks, ``recalculatePPandArena``
 # (prosperity), etc.
 #
+# ENGINE (non-script) readers of 200+X, enumerated from dw_decomp
+# 2026-08-28 — this is the complete list, and their patched status:
+#
+#   * ``recalculatePPandArena``          prosperity        client-overridden
+#   * ``getFileCityTopMap`` (map.c:3095) city top map      PATCHED (12 sites = its 12 calls)
+#   * ``trn_reward.c:637/643`` (TRN_REL) triggers 219/251  UNPATCHED — Kabuterimon/
+#                                        = training x6/x5  Kuwagamon bonus follows vanilla bits
+#   * ``dget.c:308-357`` (DGET_REL)      cup entry count   UNPATCHED — counts vanilla bits 200..310
+#   * ``dooa.c:1855`` / ``murd.c:755``   214/220 + pstat(1)>=50  message choice only
+#   * flight table entry 0               221               PATCHED (-> 878)
+#
+# Consequence of the two UNPATCHED readers: an AP-delivered Kabuterimon
+# or Kuwagamon shows the gym NPC but does not grant the training bonus
+# (and vice versa), and tournament entry requirements follow the vanilla
+# recruit count. Fix path = immediate-field patches in TRN_REL.BIN like
+# the top-map ones; tracked in STATUS.md. The head-wrapper described
+# below is defined but never emitted (no call site in rom.py).
+#
 # We *want* every vanilla "is X recruited?" query to see the AP-authorized
 # answer (= AP_BITS_MIRROR), regardless of whatever the recruit-block
 # currently holds. The recruit-block is dual-purposed by the changeMap
@@ -6722,31 +6776,27 @@ assert ROM_ISTRIGGERSET_PATCH_VALUE[0] == 0x0802562C, hex(
 # option rewrites this byte at generation time so the in-game gate and
 # the AP rules in :mod:`worlds.digimon_world.rules` stay in sync.
 #
-# Slot layout — verified against the live BIN 2026-05-10. IF primitives
-# are 4 bytes each, but ``trigger(N) == X`` and ``pstat(N) <op> V`` use
-# DIFFERENT encodings:
+# Encoding — CORRECTED 2026-08-28 from dw_decomp (the IF evaluator
+# ``MAIN_func_801050C0``, ``src/main/script_anim.c:79-165``). Script IF
+# primitives are ``[op][pad][args]``, not the ``ID | opcode`` shapes an
+# earlier comment guessed. The vanilla block starting at 0x1409E4CA
+# decodes as:
 #
-#   trigger(N) == true    -> ID(u16-LE) | 0x008A  (4 bytes)
-#   trigger(N) == false   -> ID(u16-LE) | 0x0018  (4 bytes)
-#   pstat(N) < V          -> ID(u8) | V(u8) | 0x0080  (4 bytes; ``<`` opcode)
+#   19 00            IF
+#   01 00 62 01      trigger(354) == false
+#   8A 00 01 32      AND pstat(1) >= 50     <- comparand byte at 0x1409E4D3
+#   80 00 CD 00      AND trigger(205) == true
+#   18 00 B8 03      jump-if-false -> line 952
+#   19 00            (next primitive)
 #
-# Concretely for line 162 (vanilla bytes ``62 01 8A 00 01 32 80 00 CD
-# 00 18 00 B8 03``):
-#
-#   0x1409E4CE..D1: trigger(354) == true  -> 62 01 8A 00
-#   0x1409E4D2:     pstat ID byte         = 0x01 (pstat 1 = prosperity)
-#   0x1409E4D3:     comparand byte        = 0x32 (= 50 vanilla)  ← patch target
-#   0x1409E4D4..D5: ``<`` operator opcode = 80 00
-#   0x1409E4D6..D9: trigger(205) == false -> CD 00 18 00
-#   0x1409E4DA..DB: jump target           = B8 03 (= line 952)
-#
-# **Earlier inferred encoding was wrong**: the 2026-05-10 v1 patch
-# wrote 2 LE bytes at 0x1409E4D4, which corrupted the operator opcode
-# instead of moving the threshold. With ``<`` clobbered the gate did
-# not gate prosperity at all and Jijimon armed Airdramon unconditionally.
-# Verified against vanilla bytes by isolating the unique 14-byte
-# IF-block sequence and confirming the comparand byte sits at
-# offset +5 from the IF block start.
+# i.e. the gate is ``pstat(1) >= threshold`` (the script dumper printed
+# the De Morgan form, which is where the ``<`` reading came from). The
+# comparand really is the single byte at 0x1409E4D3, so the shipped patch
+# is correct. The ``80 00`` we once read as a ``<`` opcode is the NEXT
+# primitive's header — which also explains the 2026-05-10 v1 bug: writing
+# 2 LE bytes at 0x1409E4D4 clobbered that header and desynchronised the
+# parser, so the gate stopped gating and Jijimon armed Airdramon
+# unconditionally. It was a parser desync, not a broken operator.
 #
 # Two physical copies of this IF block exist in the BIN (the second
 # is at 0x1409EE7E, comparand at 0x1409EE83 — same Script 210 logic
@@ -8437,8 +8487,11 @@ _verify_merit_shop_ext_wrapper_bytecode()
 # Design (three always-on pieces):
 #
 # 1. **Heap claim (1 word)** — the end-of-bss configuration word at RAM
-#    0x80113AB4 moves the malloc3 arena base from 0x801BFB64 to
-#    0x801C1B64. Boot then runs ``InitHeap3(0x801C1B70, 0x2E390)``; the
+#    0x80113AB4 (dw_decomp names it ``_end``; ``initializeHeap`` @ 0x800EEBDC
+#    computes ``heap = (_end & ~0xF) + 0x10`` and sizes it from
+#    ``_stack_addr`` 0x801FFF00 / ``_stack_size`` 0x40, giving the arena end
+#    0x801EFF00; ``_heap_size`` @ 0x80113AA8 is unused) moves the malloc3
+#    arena base from 0x801BFB64 to 0x801C1B64. Boot then runs ``InitHeap3(0x801C1B70, 0x2E390)``; the
 #    arena sentinel at 0x801EFEF8 is unchanged. The vacated region
 #    0x801BFB70..0x801C1B70 is EXACTLY 256 x 32 B — the relocated table
 #    fills it with zero spare bytes.
@@ -8926,7 +8979,12 @@ assert ROM_MERIT_SCAN_BOUND_VALUE == 0x2CA10000 | _MERIT_SCAN_BOUND_NEW_IMM, (
 # * **Walk-on crossings** — MAP_WARPS (0x78 B @ RAM 0x80138730) is rebuilt
 #   from disc data on EVERY screen load by loadMapEntities' first action,
 #   ``memcpy(0x80138730, buffer, 0x78)`` = the ``jal memcpy`` at RAM
-#   0x800A9AA0. We redirect that jal into a Cave6 wrapper that calls memcpy
+#   0x800A9AA0. Struct (dw_decomp 2026-08-28): four ``i16[10]`` coordinate
+#   arrays, then ``u16 targetMap[10]`` @ +0x50 (= 0x80138780) and
+#   ``u16 targetExit[10]`` @ +0x64; rebuilt by ``loadMapEntities``
+#   @ 0x800A9A68 (the memcpy is its +0x38). The walk-on consumer
+#   ``checkMapInteraction`` is still ASM-only upstream, so the loop-back
+#   semantics rest on our lab validation, not on C. We redirect that jal into a Cave6 wrapper that calls memcpy
 #   with the original args, then walks a gate table of
 #   ``{u8 screen, u8 slot, u16 trigger}`` rows (terminator screen=0xFF):
 #   for each row matching the mapId being loaded (callee-saved ``s5`` at
@@ -9009,6 +9067,9 @@ REGION_ACCESS_RAM_BITS: Final[dict[str, tuple[int, int]]] = {
 # as Beetle Land's 879 (see above). NOTE: the lab handoff suggested id 885
 # for this bit; 885 is :data:`ARENA_CUP_GRADE_D_TRIGGER_ID` (shipped), so
 # the production allocation moved to 878 — the one renumbering in this port.
+# Entry 0's vanilla trigger 221 is one of the six engine readers of the
+# recruit bits (see the isTriggerSet-wrapper preamble); rewriting it to 878
+# is what decouples the flight from the vanilla Birdramon recruit bit.
 BIRDRA_FLIGHT_GCANYON_TRIGGER_ID: Final = 878
 BIRDRA_FLIGHT_GCANYON_RAM_BIT: Final[tuple[int, int]] = (
     AP_TRIGGER_ARRAY_BASE + BIRDRA_FLIGHT_GCANYON_TRIGGER_ID // 8,
@@ -9037,9 +9098,10 @@ ROM_BIRDRA_FLIGHT_GCANYON_VANILLA_TRIGGER: Final = 221
 
 # --- Flight price zeroing (unconditional QoL, user-confirmed) ---------------
 #
-# Zero the u32 price field of all 6 destination entries in BOTH table
-# copies. The engine handles price 0 fine (G Canyon Top is free in
-# vanilla). Written unconditionally by the patcher — no option.
+# Zero the u32 cost field of all 6 destination entries in BOTH table
+# copies. Written unconditionally by the patcher — no option. (An older
+# comment claimed G Canyon Top is free in vanilla; it costs 1000 — the
+# zeroing here is what makes every flight free. dw_decomp audit 2026-08-28.)
 ROM_BIRDRA_FLIGHT_PRICE_OFFSETS: Final[tuple[int, ...]] = tuple(
     base + 8 * entry + 2
     for base in ROM_BIRDRA_FLIGHT_TABLE_BASES
@@ -9681,6 +9743,15 @@ del _trig
 # sufficient on its own. Before claiming any further pstat byte, capture
 # vectors rather than grepping for constants. Coverage caveat: 11 distinct
 # targets over one capture session is not an exhaustive enumeration.
+#
+# STRUCTURAL CONFIRMATION (dw_decomp audit 2026-08-28): ``ScriptState``
+# (``include/dw/script.h``) is ``... triggers[100] @ +0xF5, pstats[256]
+# @ +0x159, stack[8] @ +0x259``, size 0x29C — so the overlap is a struct
+# fact, not an inference. Engine constant pstat set from the C: {0..6,
+# 121, 122 (curling), 200, 243..250, 254, 255}; pstat(250) is used as an
+# INDIRECT index (``script_instr64.c:324-331``); pstat(0) is the time
+# speed (forced to 3 in dialog). AP's claimed band pstat 7..16 (triggers
+# 856..935) is clean under both the live capture and the C census.
 
 ITEM_SHOP_AP_ITEM_ID_BASE: Final = 149
 ITEM_SHOP_AP_ITEM_ID_COUNT: Final = 25

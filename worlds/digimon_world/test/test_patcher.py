@@ -153,7 +153,6 @@ class TestGenerateOutput(DigimonWorldTestBase):
             ROM_OGREMON_SOFTLOCK_OFFSETS,
             ROM_OGREMON_SOFTLOCK_VALUE,
             ROM_PP_CALC_PATCH_OFFSET,
-            ROM_PP_CALC_PATCH_VALUE,
             ROM_SETTRIGGER_PATCH_FORMAT,
             ROM_SETTRIGGER_PATCH_OFFSET,
             ROM_SETTRIGGER_PATCH_VALUE,
@@ -213,11 +212,10 @@ class TestGenerateOutput(DigimonWorldTestBase):
         self.assertNotIn(ROM_SETTRIGGER_WRAPPER_OFFSET, observed_offsets)
         self.assertNotIn(ROM_SETTRIGGER_PATCH_OFFSET, observed_offsets)
 
-        # PP-calc patch token.
-        expected_pp_bytes = b"".join(
-            word.to_bytes(4, "big") for word in ROM_PP_CALC_PATCH_VALUE
-        )
-        self.assertIn((ROM_PP_CALC_PATCH_OFFSET, expected_pp_bytes), observed)
+        # The standalone randomizer's PP-calc rewrite must NOT be written: it
+        # patched the prosperity loop to read a field we never seed (retired
+        # 2026-08-28 after the dw_decomp audit).
+        self.assertNotIn(ROM_PP_CALC_PATCH_OFFSET, observed_offsets)
 
         # Softlock-fix tokens.
         rotation_bytes = struct.pack("B", ROM_FIX_ROTATION_VALUE)

@@ -223,9 +223,6 @@ from .data.addresses import (
     ROM_OLD_FISHROD_REMAP_VALUE,
     ROM_RAIN_PLANT_GIVEITEM_NEUTER_VALUE,
     ROM_RAIN_PLANT_GIVEITEM_OFFSETS,
-    ROM_PP_CALC_PATCH_FORMAT,
-    ROM_PP_CALC_PATCH_OFFSET,
-    ROM_PP_CALC_PATCH_VALUE,
     ROM_RECRUITMENT,
     ROM_RECRUITMENT_FORMAT,
     ROM_ICON_CLAMP_PATCH_FORMAT,
@@ -906,23 +903,6 @@ def _write_settrigger_wrapper_tokens(patch: DigimonWorldProcedurePatch) -> None:
         ROM_SETTRIGGER_PATCH_OFFSET,
         struct.pack(ROM_SETTRIGGER_PATCH_FORMAT, *ROM_SETTRIGGER_PATCH_VALUE),
     )
-
-
-def _write_pp_calc_patch_tokens(patch: DigimonWorldProcedurePatch) -> None:
-    """Emit the PP-calc function rewrite from the standalone randomizer.
-
-    Vanilla DW1's PP-lookup function is incompatible with arbitrary
-    recruit assignment: a remapped Digimon can land in an evolution
-    slot that produces 0-PP techniques. The standalone replaces the
-    function with a flat-addressed version that's stable under
-    remapping. We always write the patch, regardless of which recruits
-    are remapped — it's a strict superset of vanilla behavior on the
-    unshuffled subset, since the function still derives PP from the
-    same Digimon parameter table.
-    """
-
-    patch_bytes = struct.pack(ROM_PP_CALC_PATCH_FORMAT, *ROM_PP_CALC_PATCH_VALUE)
-    patch.write_token(APTokenTypes.WRITE, ROM_PP_CALC_PATCH_OFFSET, patch_bytes)
 
 
 def _write_chest_item_tokens(
@@ -2705,9 +2685,9 @@ def write_patch(world: DigimonWorldWorld, output_directory: str) -> None:
     Tokens written:
 
     * 32 bytes at :data:`VOLUME_ID_OFFSET` — the AP-marked volume id.
-    * The 44-byte PP-calc function rewrite from the standalone
-      randomizer at :data:`ROM_PP_CALC_PATCH_OFFSET`.
-    * Five softlock-fix patches.
+    * Five softlock-fix patches. (The standalone randomizer's PP-calc
+      rewrite is no longer written — it patched the *prosperity* loop to
+      read a field only the standalone seeds; retired 2026-08-28.)
     * Per-chest item byte rewrites + chestGiveItem wrapper + chest
       pickup ``jal`` redirect (Phase 5 piece A).
     * setTrigger wrapper installation + entry redirect (Phase 5
@@ -2736,7 +2716,6 @@ def write_patch(world: DigimonWorldWorld, output_directory: str) -> None:
     #     "AP delivered", wild is gated on "cutscene completed".
     # The setTrigger wrapper and changeMap wrapper are no longer needed.
     _write_recruit_trigger_redirect_tokens(patch)
-    _write_pp_calc_patch_tokens(patch)
     _write_softlock_fix_tokens(patch)
     # ChestRandomization off: chests retain vanilla items + vanilla
     # giveItem flow, so the patcher emits no chest-related tokens.

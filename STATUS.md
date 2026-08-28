@@ -112,6 +112,7 @@ savestates are now for.
 | **Digivolution (v2 scope)** | `calculateRequirementScore`, `getNumMasteredMoves`, `hasDigimonRaised` in `src/main/evolution.c` / `script_common.c`; requirement table `EVO_REQ_DATA` @ 0x8012ABEC | `digivolve_accepted.state`, `species_raised.state` — for validating an AP digivolution item, not for RE | MEDIUM. The "ever raised" flag (trigger 512+form) can **veto** a digivolution whose stat requirements are met — an AP digivolution item must account for it. |
 | **Post-game heap margin** | None — measurement only | `mt_infinity.state`, `back_dimension.state` | LOW. The 8 KB ITEM_PARA claim sits 0x408 bytes above the glyph ring; late-game allocations unmeasured. |
 | **Gekomon / Whamon / Ogremon** | Script-section RE once the user's text arrives | — | MEDIUM each |
+| **Recruit-bit readers in overlays** (found 2026-08-28) | `src/trn/trn_reward.c:637,643` — Kabuterimon/Kuwagamon (triggers 219/251) grant the ×6/×5 training bonus; `src/dget/dget.c:308-357` — tournament entry counts recruits over triggers 200..310. Both read the **vanilla** bits, so an AP-delivered recruit shows the gym NPC but does not grant the bonus, and cup entry follows the vanilla count. | `training_gym.state`, `arena_lobby.state` (exists) | LOW-MEDIUM: immediate-field patches in `TRN_REL.BIN` like the top-map ones; DGET is not a clean rebase. **User decision**: should AP recruits grant the bonus / count for cups? (Consistency says yes.) |
 
 ### 2.4 v2 location sources (from PLAN.md §Phase 7, still unscheduled)
 
@@ -131,6 +132,15 @@ and locations.
   future claims must be vector-captured, not grepped.
 - `0x80134FE4` stores only `sectionId & 0xFF` while live section ids reach 1228 — nothing in RAM
   holds the authoritative section id.
+- **2026-08-28 audit of `addresses.py` against dw_decomp** (`work/dw1_re/decomp/_dw_decomp_audit/REPORT.md`):
+  14 claims, 8 confirmed, 6 corrected. Two mattered beyond comments: the `ROM_PP_CALC_PATCH`
+  copied from the standalone randomizer rewrote the **prosperity** loop to read a field only the
+  standalone seeds — it computed garbage that the client's `_enforce_prosperity` masked; **retired
+  the same day** (vanilla formula is the fallback now). And the two unpatched recruit-bit readers
+  in overlays (row in §2.3). Doc-level corrections: the flight-table layout (bytes were right, the
+  documented layout wasn't), the script IF-primitive grammar behind `prosperity_goal` (patch
+  right, comment wrong), the tech-learn chance table (`MOVE_LEARN_CHANCES[58][3]` @ 0x80125FA4,
+  not `0x80126245`), and `0x80134E30` is a partner-sequence sync bit, not "script running".
 - `SESSION_STATE.md` at the repo root is a 2026-04-30 snapshot and is superseded by this file.
 
 ---
