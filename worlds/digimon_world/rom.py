@@ -307,6 +307,16 @@ from .data.addresses import (
     read_item_table_user_data,
     read_technique_table_user_data,
 )
+from .data.addresses import (
+    FIELD_RECORD_FORMAT,
+    FIELD_RECORD_HP,
+    FIELD_RECORD_MOVES,
+    FIELD_RECORD_STAT_COUNT,
+    FIELD_RECORD_TYPE,
+    field_record_bin_offset,
+    maphead_bin_offset,
+)
+from .enemies import RECORD_INDEX, RECORDS_BY_MAP, SITES_BY_MAP, EnemyPlan
 from .ground_items import compute_ground_item_replacements
 from .starters import (
     LEVEL_CHAMPION,
@@ -2571,6 +2581,57 @@ def _write_merit_shop_locations_tokens(
     )
 
 
+def _write_field_record_words(
+    patch: DigimonWorldProcedurePatch, record_bin_offset: int, first_word: int, values: tuple[int, ...],
+) -> None:
+    """Write consecutive s16 fields of a ``.MAP`` Digimon record, sector-aware.
+
+    Fields are 2-byte aligned inside the file, so a single word never straddles a
+    Mode2/2352 user-data boundary; runs of words that stay inside one sector are
+    merged into one token.
+    """
+
+    run_start = field_record_bin_offset(record_bin_offset, first_word)
+    run = bytearray()
+    for index, value in enumerate(values):
+        flat = field_record_bin_offset(record_bin_offset, first_word + index)
+        if flat != run_start + len(run):
+            patch.write_token(APTokenTypes.WRITE, run_start, bytes(run))
+            run_start, run = flat, bytearray()
+        run += struct.pack(FIELD_RECORD_FORMAT, value)
+    patch.write_token(APTokenTypes.WRITE, run_start, bytes(run))
+
+
+def _write_enemy_tokens(patch: DigimonWorldProcedurePatch, plan: EnemyPlan) -> None:
+    """Enemy stat scaling + species randomization — pure data writes.
+
+    * Scaled records: the nine contiguous stat words (hp .. bits).
+    * Substituted species: the record ``type`` word, the four move words and
+      four priority words of every record of that species on the screen, and
+      the operand byte of every ``loadDigimon`` / ``setDigimon`` opcode for
+      that species in the screen's MAPHEAD.SCN section (the game refuses to
+      place an entity whose opcode operand disagrees with the record type).
+    """
+
+    for (map_id, slot), stats in sorted(plan.stat_overrides.items()):
+        assert len(stats) == FIELD_RECORD_STAT_COUNT, (map_id, slot, stats)
+        _write_field_record_words(patch, RECORD_INDEX[(map_id, slot)].bin_off, FIELD_RECORD_HP, tuple(stats))
+    for (map_id, slot), (moves, prio) in sorted(plan.move_overrides.items()):
+        assert len(moves) == 4 and len(prio) == 4, (map_id, slot, moves, prio)
+        _write_field_record_words(
+            patch, RECORD_INDEX[(map_id, slot)].bin_off, FIELD_RECORD_MOVES, tuple(moves) + tuple(prio),
+        )
+    for (map_id, species), substitute in sorted(plan.substitutions.items()):
+        for record in RECORDS_BY_MAP[map_id]:
+            if record.type == species:
+                _write_field_record_words(patch, record.bin_off, FIELD_RECORD_TYPE, (substitute,))
+        for site in SITES_BY_MAP.get(map_id, ()):
+            if site.species == species:
+                patch.write_token(
+                    APTokenTypes.WRITE, maphead_bin_offset(site.file_off + 1), bytes([substitute]),
+                )
+
+
 def _write_ground_item_params(
     patch: DigimonWorldProcedurePatch,
     world: DigimonWorldWorld,
@@ -2780,6 +2841,11 @@ def write_patch(world: DigimonWorldWorld, output_directory: str) -> None:
     # Piximon's Training Manual location — opt-in §82 giveItem neuter.
     if int(options.piximon_manual_location.value):
         _write_piximon_manual_tokens(patch)
+    # Enemy stat scaling / species randomization — resolved in post_fill
+    # (needs the finished placement for the sphere walk); no tokens when
+    # both options are off.
+    if not world.enemy_plan.empty:
+        _write_enemy_tokens(patch, world.enemy_plan)
 
     # Shopsanity (recycle / item / secret / merit, each off | coexist |
     # replace). The common infrastructure — extended boot hook, builder

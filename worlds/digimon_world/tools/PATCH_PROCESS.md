@@ -92,7 +92,14 @@ emulator time.
    (`dw1_redux_launch.ps1 -Script dw1_redux_watch.lua` + `dw1_watch_config.lua`).
 2. Load the relevant savestate (see DECOMP_PROCESS.md for the savestate inventory), then
    `dw1_apply_patch.py apply` — **a savestate load restores vanilla RAM, so re-apply
-   after every load**.
+   after every load**. Two data classes need more than a poke: **per-screen data** (the
+   `.MAP` Digimon records, map objects, collision) is re-read from disc on every screen load,
+   so patch the disc (`to-iso`) and load the screen fresh (`dw1_warp_state.py` on the patched
+   .bin) — a savestate on that screen already holds the vanilla copy; and **boot-resident
+   files** (MAPHEAD.SCN at 0x1B1D30, read once in `initializeScripts`) survive every screen
+   load AND every savestate, so poke the resident copy (`dw1_warp_state.py --poke ADDR:HEX`
+   applies it after the hub state loads) for net 2 and cold-boot the patched .bin for net 3.
+   Both were exercised on the 2026-08-28 enemy-data PoC (`work\dw1_re\decomp\enemy_data\`).
 3. Drive the event with `dw1_press` + screenshots; verify with peeks of the output state
    and the watch log. Iterate here — this is the loop.
 4. **Negative tests**: run the surrounding features that must stay vanilla (on the PoC:

@@ -106,7 +106,15 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--set-trigger", type=int, action="append", default=[],
                     help="trigger id to set before warping (repeatable)")
     ap.add_argument("--wait", type=float, default=12.0, help="seconds to wait for the screen to match")
+    ap.add_argument("--poke", action="append", default=[], metavar="ADDR:HEX",
+                    help="physical RAM address and hex bytes to write after the hub state loads and before "
+                         "the warp fires (repeatable). Use it for state a savestate would otherwise restore, "
+                         "e.g. the boot-resident MAPHEAD script (0x1B1D30) when testing a MAPHEAD.SCN patch.")
     args = ap.parse_args(argv)
+    poke_bytes: list[tuple[int, bytes]] = []
+    for spec in args.poke:
+        addr, _, hexstr = spec.partition(":")
+        poke_bytes.append((int(addr, 0) & 0x1FFFFF, bytes.fromhex(hexstr)))
     if not 0 <= args.map <= 255:
         raise SystemExit("--map must be 0..255")
     names = screen_names()
@@ -126,6 +134,7 @@ def main(argv: list[str]) -> int:
         return 2
 
     pokes = [f"m[{WARP_BYTE}] = {args.map}"]
+    pokes.extend(f"m[{addr + i}] = {b}" for addr, data in poke_bytes for i, b in enumerate(data))
     pokes.extend(
         f"m[{TRIGGER_BASE + t // 8}] = bit.bor(m[{TRIGGER_BASE + t // 8}], {1 << (t % 8)})"
         for t in args.set_trigger

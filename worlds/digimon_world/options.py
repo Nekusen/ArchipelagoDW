@@ -1082,6 +1082,80 @@ def get_locked_regions(options: "DigimonWorldOptions") -> frozenset[str]:
     return frozenset(options.region_locking_list.value) & frozenset(LOCKABLE_REGIONS)
 
 
+class EnemyScaling(Choice):
+    """Re-balance every field Digimon's stats by where its area falls in this seed's logic.
+
+    * ``off`` — vanilla stats everywhere.
+    * ``vanilla_curve`` — each region's vanilla difficulty is re-assigned by the
+      region's logical depth (the sphere in which it first becomes reachable): the
+      regions you can reach first get the weakest vanilla stat budgets, the deepest
+      the strongest, so an area that the item placement opens early plays like an
+      early area regardless of where it sits in the vanilla game. All Digimon of a
+      region scale by the same factor, so bosses stay proportionally tougher than
+      the fodder around them. Combat stat gains follow the enemy's stats, as in
+      vanilla.
+
+    Pure data rewrite of the per-screen enemy records on the disc — no code hooks.
+    """
+
+    display_name = "Enemy Stat Scaling"
+    option_off = 0
+    option_vanilla_curve = 1
+    default = option_off
+
+
+class EnemyScalingStrength(Range):
+    """How far ``enemy_scaling`` moves a region from its vanilla stats (percent).
+
+    0 leaves vanilla stats; 100 applies the full depth-based re-assignment; values
+    in between blend the two. Ignored when ``enemy_scaling`` is ``off``.
+    """
+
+    display_name = "Enemy Stat Scaling Strength"
+    range_start = 0
+    range_end = 100
+    default = 100
+
+
+class EnemyRandomization(Choice):
+    """Replace the field Digimon species on every screen.
+
+    * ``off`` — vanilla species.
+    * ``wild`` — every wild (non-story) species on a screen becomes another fighting
+      species. Recruit fights, story bosses, town NPCs, the intro tutorial and
+      cutscene rooms keep their vanilla species.
+    * ``wild_and_story`` — recruit and story fights are swapped too (their stats stay
+      exactly as they were, only the model and moveset change). Story cutscenes still
+      play with their vanilla dialogue; a swapped boss may lack a cutscene-specific
+      animation and stand still where the original posed.
+
+    Substitutes are drawn from species whose 3D model needs no more memory than the
+    original's, so no screen ever loads more model data than vanilla. Each swapped
+    Digimon keeps the original's stats and receives a moveset re-picked from its own
+    technique list.
+    """
+
+    display_name = "Enemy Randomization"
+    option_off = 0
+    option_wild = 1
+    option_wild_and_story = 2
+    default = option_off
+
+
+class EnemyRandomizationTier(Choice):
+    """Which species may stand in for a randomized enemy.
+
+    * ``same_level`` — Rookies become Rookies, Champions Champions, Ultimates
+      Ultimates (keeps the visual power curve honest).
+    * ``any`` — any fighting species that fits the memory budget.
+    """
+
+    display_name = "Enemy Randomization Tier"
+    option_same_level = 0
+    option_any = 1
+    default = option_same_level
+
+
 @dataclass
 class DigimonWorldOptions(PerGameCommonOptions):
     goal: Goal
@@ -1129,6 +1203,10 @@ class DigimonWorldOptions(PerGameCommonOptions):
     fishing_locations: FishingLocations
     arena_locations: ArenaLocations
     technique_rewards: TechniqueRewards
+    enemy_scaling: EnemyScaling
+    enemy_scaling_strength: EnemyScalingStrength
+    enemy_randomization: EnemyRandomization
+    enemy_randomization_tier: EnemyRandomizationTier
     god_mode: GodMode
 
 
@@ -1144,6 +1222,8 @@ option_groups: list[OptionGroup] = [
             StarterAllowInTraining, StarterAllowRookie,
             StarterAllowChampion, StarterAllowUltimate,
             StarterUseWeakestTech,
+            EnemyScaling, EnemyScalingStrength,
+            EnemyRandomization, EnemyRandomizationTier,
         ],
     ),
     OptionGroup(

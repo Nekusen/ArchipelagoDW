@@ -10673,3 +10673,111 @@ assert COELAMON_RECRUIT_LOCATION_TRIGGER_ID != PIXIMON_MANUAL_TRIGGER_ID
 assert COELAMON_RECRUIT_LOCATION_TRIGGER_ID not in _REGION_GATE_TAKEN_TRIGGERS
 assert COELAMON_RECRUIT_LOCATION_TRIGGER_ID not in _REGION_GATE_NEW_TRIGGERS
 assert COELAMON_RECRUIT_LOCATION_TRIGGER_ID not in SHOP_AP_TRIGGER_IDS
+
+
+# =============================================================================
+# Field Digimon records (.MAP) and the MAPHEAD species loader
+# =============================================================================
+#
+# Verified 2026-08-28 (dw_decomp ``src/main/tamer.c:loadMapEntities``,
+# Ghidra exports of ``loadMapDigimon`` 0x800B5D0C / ``scriptSetDigimon``
+# 0x800B6118 / ``loadMMD`` 0x800A1F68 / ``handleBattleStart`` 0x800E847C,
+# and a lab run through the three PATCH_PROCESS nets incl. two battles):
+#
+# * Every Digimon a screen can host -- wild fodder and story bosses alike
+#   -- is a record in the screen's ``.MAP`` file, right after the
+#   0x78-byte MAP_WARPS block: ``s16 count`` then per record 0x22 s16 of
+#   fields, 8 s16 of AI data and ``N x 3`` s16 waypoints (``N`` = s16
+#   index 0x21).  ``loadMapDigimon`` copies each record into
+#   ``MAP_DIGIMON_TABLE[slot]`` (type, position, AI) and
+#   ``NPC_ENTITIES[slot]`` (stats, moveset, bits) when the screen loads;
+#   ``BTL_initializeCombat`` then takes the fight's stats from
+#   ``NPC_ENTITIES`` verbatim (``INITIAL_COMBAT_STATS`` row ``i``).
+#   Rewriting a record's stat / move words on disc therefore changes
+#   that fight and nothing else -- no code involved.
+# * A record's species is its ``type`` (index 0) **and** the operands of
+#   the ``loadDigimon XX`` (``46 XX``) / ``setDigimon XX slot autotalk``
+#   (``47 XX ss aa``) opcodes in the screen's section of MAPHEAD.SCN:
+#   ``scriptSetDigimon`` only places the entity when the operand equals
+#   ``MAP_DIGIMON_TABLE[slot].typeId``.  MAPHEAD.SCN is a separate disc
+#   file, read ONCE at boot into :data:`RAM_MAPHEAD_DATA`
+#   (``initializeScripts``; ``getScript(0)`` returns that buffer, never
+#   the script archive's dead slot-0 copy) -- so a savestate keeps the
+#   boot copy and lab tests of a MAPHEAD patch need a cold boot or a
+#   RAM poke (``dw1_warp_state.py --poke``).
+# * Models: ``loadMMD`` malloc3's the whole ``\CHDAT\MMD{id/30}\{name}.MMD``
+#   file (rounded up to 2 KB) and keeps it for the screen's lifetime;
+#   at most :data:`NPC_MODEL_SLOTS` distinct NPC species can be loaded
+#   at once.  A substitute species is safe when its model needs no
+#   more heap than the original's (the per-screen footprint then never
+#   exceeds vanilla) -- see ``data/enemy_records.py`` ``SPECIES[].heap``.
+# * Move bytes are animation ids ``0x2E + k`` selecting slot ``k`` of
+#   ``DIGIMON_DATA[type].moves[16]`` (``entityGetTechFromAnim``); a
+#   substitute's moveset must be re-picked from its own list.
+
+RAM_MAP_DIGIMON_TABLE: Final = 0x0013CB50        # MapDigimonEntity[8]; typeId s16 @+0, pos s16 x/y/z @+0xA8
+RAM_MAP_DIGIMON_TABLE_STRIDE: Final = 0xC4
+RAM_NPC_ENTITIES: Final = 0x00155828             # NPCEntity[8]
+RAM_NPC_ENTITY_STRIDE: Final = 0x68
+# NPCEntity.stats: BaseStats @+0x38 = off, def, spd, brn (s16), movesPrio[4],
+# moves[4], hp, mp; CurrentStats @+0x4C = curHP, curMP; chargeMode @+0x56;
+# bits s16 @+0x60; scriptId u8 @+0x65.
+RAM_NPC_ENTITY_STATS_OFFSET: Final = 0x38
+RAM_NPC_ENTITY_BITS_OFFSET: Final = 0x60
+RAM_LOADED_DIGIMON_MODELS: Final = 0x001BE7EC    # i32[8], -1 = free (scriptLoadModel / scriptUnloadModel)
+RAM_INITIAL_COMBAT_STATS: Final = 0x0013D610     # s16[4][6] hp, mp, off, def, spd, brn; row 0 = partner
+RAM_ENEMY_COUNT: Final = 0x00134D6C              # s16, set by loadBattleData
+RAM_GAME_STATE: Final = 0x00134F0A               # i8: 0 field, non-zero from startBattle until it returns
+RAM_ENTITY_TABLE: Final = 0x0012F344             # Entity *[10]: 0 tamer, 1 partner, 2.. = NPC slot + 2
+RAM_DIGIMON_DATA: Final = 0x0012CEB4             # DigimonPara[180] x 52 B; moves[16] @+35
+RAM_MAPHEAD_DATA: Final = 0x001B1D30             # boot-resident MAPHEAD.SCN (0x61A8 B); file offsets 1:1
+NPC_MODEL_SLOTS: Final = 5
+
+MAPHEAD_SCN_LBA: Final = 142982                  # /SCN/MAPHEAD.SCN
+MAPHEAD_SCN_SIZE: Final = 24686
+MAPHEAD_OP_LOAD_DIGIMON: Final = 0x46            # 46 XX
+MAPHEAD_OP_SET_DIGIMON: Final = 0x47             # 47 XX slot autotalk
+
+# ``.MAP`` Digimon record field indices (s16 units from the record start).
+FIELD_RECORD_TYPE: Final = 0x00
+FIELD_RECORD_HP: Final = 0x0B
+FIELD_RECORD_MP: Final = 0x0C
+FIELD_RECORD_CUR_HP: Final = 0x0D
+FIELD_RECORD_CUR_MP: Final = 0x0E
+FIELD_RECORD_OFF: Final = 0x0F
+FIELD_RECORD_DEF: Final = 0x10
+FIELD_RECORD_SPD: Final = 0x11
+FIELD_RECORD_BRN: Final = 0x12
+FIELD_RECORD_BITS: Final = 0x13
+FIELD_RECORD_CHARGE: Final = 0x14
+FIELD_RECORD_MOVES: Final = 0x16                 # 4 s16: anim ids 0x2E + k, 0xFF = none
+FIELD_RECORD_PRIO: Final = 0x1A                  # 4 s16: AI weights for the four moves
+FIELD_RECORD_WAYPOINTS: Final = 0x21
+FIELD_RECORD_HEAD_WORDS: Final = 0x22
+FIELD_RECORD_TAIL_WORDS: Final = 8
+FIELD_RECORD_STAT_COUNT: Final = 9               # hp .. bits, contiguous from FIELD_RECORD_HP
+FIELD_RECORD_FORMAT: Final = "<h"
+
+
+def field_record_bin_offset(record_bin_offset: int, word_index: int) -> int:
+    """Flat .bin offset of s16 field ``word_index`` of the record whose first byte is at
+    ``record_bin_offset`` (sector-aware: a record may straddle a 2048-B user-data boundary)."""
+
+    return _flat_to_user_data(record_bin_offset, word_index * 2)
+
+
+def maphead_bin_offset(file_offset: int) -> int:
+    """Flat .bin offset of byte ``file_offset`` of MAPHEAD.SCN (== its offset in
+    :data:`RAM_MAPHEAD_DATA`, and the offset the script disassembly prints)."""
+
+    assert 0 <= file_offset < MAPHEAD_SCN_SIZE, file_offset
+    return (MAPHEAD_SCN_LBA + file_offset // USER_DATA_BYTES) * SECTOR_SIZE_BYTES \
+        + SECTOR_HEADER_BYTES + file_offset % USER_DATA_BYTES
+
+
+# Self-check against the standalone randomizer's documented Gabumon
+# enemy-stat anchor (``data.py: gabuPatchWrites``, MIST06.MAP): our
+# record for that Gabumon starts at 0x0A7EEA76 and its HP word must land
+# on the randomizer's 0x0A7EEA8C.
+assert field_record_bin_offset(0x0A7EEA76, FIELD_RECORD_HP) == 0x0A7EEA8C
+assert maphead_bin_offset(1158) == (MAPHEAD_SCN_LBA + 1158 // 2048) * 2352 + 24 + 1158 % 2048

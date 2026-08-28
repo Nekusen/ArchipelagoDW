@@ -22,12 +22,13 @@ What is intentionally still stubbed:
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any, ClassVar
+from typing import Any, ClassVar, TextIO
 
 from worlds.AutoWorld import World
 
 from . import (
     chest_assignments,
+    enemies,
     items,
     locations,
     regions,
@@ -163,6 +164,33 @@ class DigimonWorldWorld(World):
         from .options import get_locked_regions
         slot_data["locked_regions"] = sorted(get_locked_regions(self.options))
         return slot_data
+
+    #: Enemy stat-scaling / species-randomization decisions, resolved in
+    #: :meth:`post_fill` (sphere walk needs the finished placement) and
+    #: consumed by :func:`rom.write_patch`.
+    enemy_plan: enemies.EnemyPlan = enemies.EMPTY_PLAN
+
+    def post_fill(self) -> None:
+        self.enemy_plan = enemies.build_enemy_plan(self)
+
+    def write_spoiler(self, spoiler_handle: TextIO) -> None:
+        plan = self.enemy_plan
+        if plan.empty:
+            return
+        name = self.multiworld.player_name[self.player]
+        if plan.region_factors:
+            spoiler_handle.write(f"\n\nEnemy stat scaling ({name}):\n")
+            for region in sorted(plan.region_factors, key=lambda r: (plan.region_depths.get(r, 0), r)):
+                spoiler_handle.write(
+                    f"  {region}: sphere {plan.region_depths.get(region, '?')}, x{plan.region_factors[region]:.2f}\n"
+                )
+        if plan.substitutions:
+            spoiler_handle.write(f"\n\nEnemy randomization ({name}):\n")
+            for (map_id, species), substitute in sorted(plan.substitutions.items()):
+                screen = enemies.SCREEN_FILENAMES.get(map_id, str(map_id))
+                spoiler_handle.write(
+                    f"  {screen}: {enemies.SPECIES_BY_ID[species].name} -> {enemies.SPECIES_BY_ID[substitute].name}\n"
+                )
 
     def generate_output(self, output_directory: str) -> None:
         """Phase 3 entry point — emit the per-player ``.apdw1`` patch.

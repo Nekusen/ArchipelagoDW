@@ -40,6 +40,7 @@ harness can then drive the event itself.
 | `machinedramon.state` | Mt. Infinity L13 (map 225 MGEN99), walking UP starts the final boss | God mode; trigger 50 NOT set |
 | `mt_infinity.state` | Mid Mt. Infinity (map 219 MGEN05) | God mode |
 | `back_dimension.state` | Back Dimension (map 226 MGEN11) | God mode; trigger 50 (game beaten) SET |
+| `enemy_poc_battle.state` / `enemy_poc_icemon_battle.state` | Field battle just started (MAYO03 Goburimon with edited stats / MAYO01 substituted Icemon) -- unattended, via warp + tamer teleport | Captured on `work\dw1_re\enemy_poc.bin` (data-only patch). Cover the **enemy-stat scaling** validation path: `INITIAL_COMBAT_STATS` row 1 holds the patched record. `post_battle_learn` is still open (needs a fight one blow from a technique learn). |
 
 Session rules learned the hard way (three emulator crashes): during a user-driven session use
 **no per-frame Lua listeners** (`dw1_redux_input.lua`), **no REST data GETs** (`peek`/screenshot

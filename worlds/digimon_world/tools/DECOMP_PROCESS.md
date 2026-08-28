@@ -199,6 +199,13 @@ Game-behavior facts for scripted play (user-confirmed 2026-08-20):
     (the house interior stayed vanilla).
   - `machinedramon.state` (map 225, L13 -- walk UP for the boss), `mt_infinity.state` (map 219),
     `back_dimension.state` (map 226, trigger 50 set) -- all reached through that repoint.
+  - Enemy-data PoC set (2026-08-28, captured on the PATCHED `work\dw1_re\enemy_poc.bin`, which
+    only differs from vanilla in map records + MAPHEAD operands): `enemy_poc_map2.state` (MAYO03,
+    Goburimon slot 0 with edited stats 1234/77/222/33/44/55/999, slot 1 x2), `enemy_poc_map0.state`
+    (MAYO01 with ModokiBetamon swapped for Icemon, resident MAPHEAD poked), `enemy_poc_battle.state`
+    (the edited-Goburimon fight just started), `enemy_poc_icemon_battle.state` (the Icemon fight
+    just started). Load them with that .bin mounted; on the vanilla disc the field stats are still
+    the RAM ones but a screen reload brings vanilla back.
 - **User-driven session rules** (three crashes on 2026-08-28): no per-frame Lua listeners
   (`dw1_redux_input.lua`) while the user plays, no REST data GETs (`peek` and the screenshot
   tool now pause/Lua-read), and wrap `createSaveState()` in `PCSX.pauseEmulator()`.
