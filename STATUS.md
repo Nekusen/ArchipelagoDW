@@ -55,6 +55,13 @@ disc-boot byte-verified):
 **2026-08-22/23 decomp campaign** — see §3. One shipped-code bug found and fixed on the way: AP
 technique grants now set the companion mastery bit vanilla sets (`d8048b33`).
 
+**2026-08-28 — dw_decomp adopted** (`1ed5e9a4`). A community **byte-matching** decompilation of
+this exact build ([jype0/dw_decomp](https://github.com/jype0/dw_decomp), MIT) is now the primary
+reading source for game code: ~87 % of all functions in C, all 15 overlays included, 72 structs.
+Bridge from our addresses to its names: `tools/dw1_decomp_xref.py` / `tools/DW_DECOMP_XREF.md`;
+its symbols are imported into the Ghidra project. Most of §3's "decomp programme" is thereby
+reframed — see §3.1. The psxrecomp-based PC port is **parked** pending its author's appeal.
+
 ### 1.2 Verification state
 
 | Layer | State |
@@ -92,13 +99,17 @@ Grouped by **what blocks each item**, because that is what decides the order.
 
 ### 2.3 Needs RE — with its requirements
 
-| Item | Decomp units required | Savestates required | Effort |
+Since 2026-08-28 the "decomp required" column mostly reads "read this dw_decomp file" — the
+code is known; what remains is design, patching, and **runtime validation**, which is what the
+savestates are now for.
+
+| Item | Code source (dw_decomp unless noted) | Savestates required | Effort |
 | --- | --- | --- | --- |
-| **In-game check notifications** | `FUN_800FF0FC` @ 0x800FF288 (dialog page/box driver). `dialogRenderString` already modelled. | `dialog_columns.state` (the 7 control codes a notification would use are asm-derived only) | **MEDIUM** — downgraded from "riskiest item in the backlog" on 2026-08-23: the low-risk route is a line-buffer substitution at `0x801BE174 + row*0x40`, not a renderer hook. |
-| **Enemy-stat scaling by sphere** | Training stat-gain routines; `battleStatsGainsAndDrops` @ 0x800ECEE8 (in `BTL_REL` — see overlay gap in §3.3) | `training_gym.state`, `post_battle_learn.state` | HIGH (MEDIUM as scaling-only). Also needs the user's scaling-policy design. |
-| **Wild-digimon randomization** | `BTL_REL` overlay import + the encounter/moveset tables the standalone randomizer catalogues | `battle_pending.state` exists; overlay import is the blocker | HIGH. Needs user design. |
-| **Fishing locations (expansion)** | `FISH_REL` overlay import; 6 ITEM_PARA readers there are static-verified only | `fishing.state` — **the lab has no fishing state at all** | MEDIUM |
-| **Digivolution (v2 scope)** | `calculateRequirementScore` @ 0x800E26B8 (requirement table at 0x8012ABEC, stride 0x1C); `hasDigimonRaised` finishing | `digivolve_accepted.state`, `species_raised.state` | MEDIUM. Note the "ever raised" flag (trigger 512+form) can **veto** a digivolution whose stat requirements are met — an AP digivolution item must account for it. |
+| **In-game check notifications** | Dialog page/box driver `MAIN_func_800FF0FC` and renderer `drawString2` in `src/main/script_common.c` — **in C, nothing left to decompile**. | `dialog_columns.state` — now for *testing* an injected string that uses the tab/column codes, not for understanding them | **MEDIUM → LOW-MEDIUM**: design + one patch. Low-risk route is a line-buffer substitution at `0x801BE174 + row*0x40`, not a renderer hook. |
+| **Enemy-stat scaling by sphere** | Training: `src/trn/`, `src/trn2/` (**100 % in C**); post-battle gains `battleStatsGainsAndDrops` in `src/main/battle_ui.c` | `training_gym.state`, `post_battle_learn.state` — for validating the scaling patch | MEDIUM. Needs the user's scaling-policy design. |
+| **Wild-digimon randomization** | `src/btl/` (94 % in C) + encounter/moveset tables (the standalone randomizer catalogues the ROM side) | `battle_pending.state` exists | MEDIUM-HIGH. Needs user design. Overlay import no longer a blocker. |
+| **Fishing locations (expansion)** | `src/fish/` (95 % in C). The 6 `FISH_REL` ITEM_PARA readers our relocation patched can now be read in C. | `fishing.state` — **still needed**: the relocation's FISH_REL readers have never been *exercised*; the lab has no fishing state | MEDIUM |
+| **Digivolution (v2 scope)** | `calculateRequirementScore`, `getNumMasteredMoves`, `hasDigimonRaised` in `src/main/evolution.c` / `script_common.c`; requirement table `EVO_REQ_DATA` @ 0x8012ABEC | `digivolve_accepted.state`, `species_raised.state` — for validating an AP digivolution item, not for RE | MEDIUM. The "ever raised" flag (trigger 512+form) can **veto** a digivolution whose stat requirements are met — an AP digivolution item must account for it. |
 | **Post-game heap margin** | None — measurement only | `mt_infinity.state`, `back_dimension.state` | LOW. The 8 KB ITEM_PARA claim sits 0x408 bytes above the glyph ring; late-game allocations unmeasured. |
 | **Gekomon / Whamon / Ogremon** | Script-section RE once the user's text arrives | — | MEDIUM each |
 
@@ -128,11 +139,23 @@ and locations.
 
 ### 3.1 Purpose and bar
 
-Decomp is **instrumental, not a completeness goal**: functions are decompiled because a patch or a
-feature needs their exact semantics. The bar is **100 % replay of emulator-captured call vectors**
-against a portable C model — reading-level pseudo-C is a draft, never a deliverable. Process:
-[DECOMP_PROCESS.md](worlds/digimon_world/tools/DECOMP_PROCESS.md); agents `dw1-decomp` /
-`dw1-patch`; output stays in gitignored `work/dw1_re/decomp/` (public fork).
+**Since 2026-08-28: read dw_decomp first.** `references/dw_decomp/` is byte-matching (CI `cmp`s
+the rebuilt SLUS + all 15 overlays against the originals), so any function present there as C is
+known to the bit. Resolve an address with `tools/dw1_decomp_xref.py --lookup`; if it is in C,
+read it — decompiling it again is wasted work. Of the 34 functions this project has cared
+about, 27 are in C there; 6 are still `INCLUDE_ASM` stubs (`build_shop_runtime_list`,
+`build_merit_shop_list`, `dailyPStatTrigger` — all three already VERIFIED by us —
+`startAnimation`, `unlearnMove`, `0x800E5B50`).
+
+What our own pipeline is still for: (a) the ASM-only remainder, (b) **verifying patches** —
+a static decomp says what the code is, only replay says what the game does with it at runtime,
+(c) runtime questions (which values actually flow, which branches a real save exercises).
+The bar for those is unchanged: **100 % replay of emulator-captured call vectors** against a
+portable C model. Process: [DECOMP_PROCESS.md](worlds/digimon_world/tools/DECOMP_PROCESS.md);
+agents `dw1-decomp` / `dw1-patch`; output stays in gitignored `work/dw1_re/decomp/`.
+
+Study-only policy: read, learn, cite `file:line`; never copy their C into the world package.
+Their names are not ours (their `renderString` is our `FUN_800E5B50`) — resolve by address.
 
 Statuses: `VERIFIED` (bar met) · `PARTIAL` (replayed clean, but a branch or input class is
 knowingly uncovered — always paired with a savestate request) · `PROVISIONAL` (modelled, not
@@ -153,6 +176,11 @@ and are outside this denominator** (§3.3).
 | **By static call sites** | ~5 % | **14.45 %** (788 / 5454) |
 
 The call-site number is the one that reflects strategy: hot, foundational functions first.
+
+These numbers measure *our* replay-verified models and are now a secondary metric. The primary
+one is dw_decomp's: **2406 functions in C vs 369 ASM stubs = 86.7 %** of the whole game (main
+82.8 %, overlays 89.5 %), byte-exact. Our 31 add runtime evidence on top of that for the
+functions our patches touch.
 
 ### 3.3 Ledger (17 units)
 
@@ -179,22 +207,24 @@ The call-site number is the one that reflects strategy: hot, foundational functi
 Every PARTIAL is replay-clean; the status names an input class the lab could not produce. §4 maps
 each to the state that closes it.
 
-### 3.4 Standing tooling gap: overlays
+### 3.4 Overlays — gap closed as a source, open only as a capture target
 
-`BTL_REL`, `FISH_REL`, `TRN_REL` and the other 13 overlays are **not imported into Ghidra**. That
-single gap blocks battle internals, fishing and training — three of the roadmap's RE items. The
-import itself is tooling work (raw MIPS at the documented load address, `dw1_iso_extract.py`), not
-capture work; DECOMP_PROCESS.md tier T4 describes it as "not yet standardized". It should be the
-first RE task of the next campaign because so much hangs off it.
+dw_decomp has C and symbol files for all 15 overlays (`src/btl`, `src/fish`, `src/trn`, …, with
+load addresses in `config/<overlay>.yaml`), so battle internals, fishing and training are now
+**readable**. Importing an overlay into our Ghidra project is only needed to *vector-capture* an
+overlay function that is ASM-only upstream — a rare case, and no longer on any roadmap path.
 
-### 3.5 Next targets (autonomous, no savestate needed)
+### 3.5 Next targets
 
-1. **Overlay import** (§3.4) — unblocks three roadmap items.
-2. `FUN_800FF0FC` — the dialog page/box driver; the last piece for notifications.
-3. `calculateRequirementScore` @ 0x800E26B8 — digivolution gating, requirement table.
-4. `playSound` (151 callers), `startAnimation` (96), `FUN_800E5B50` (104) — highest remaining
-   call-site leverage.
-5. Re-capture `renderString` with the 0xE10 window (config change only) to convert 446 skips.
+1. **Audit shipped assumptions against the C** — every `addresses.py` comment that says
+   "inferred" or "static-census-derived" is now checkable (in progress 2026-08-28).
+2. **Wave-2 lab tooling**: parse `include/dw/*.h` into a Ghidra data-type archive so decompiler
+   views use their structs; overlay import only if a capture ever needs it.
+3. ASM-only functions still worth our pipeline: `startAnimation` (96 callers), `0x800E5B50`
+   (104), `unlearnMove`.
+4. Re-capture `renderString` with the 0xE10 window (config change only) to convert 446 skips.
+5. **Open user decision**: contribute our three verified models for functions still ASM-only
+   upstream (`dailyPStatTrigger` with the card-duplicate bug documented, the two shop builders).
 
 ---
 
@@ -234,18 +264,19 @@ exit hang (PCSX-Redux only), Gekomon / Whamon / Ogremon (need text).
   user session ─────►│ BizHawk validation   │──► release-validated 0.6.x ──► Phase 5 docs ──► WebWorld
                      └──────────────────────┘                                                    └──► .apworld
 
-  user savestates ──► PARTIAL units → VERIFIED ──┐
-                                                  ├──► notifications (needs FUN_800FF0FC + dialog_columns)
-  overlay import ───► BTL/FISH/TRN decomp ────────┤
-                                                  ├──► enemy-stat scaling (needs training_gym + user policy)
+  dw_decomp (read) ─► code known for every item ──┐
+                                                  ├──► notifications (design + patch; dialog_columns to test)
+  user savestates ──► runtime validation ─────────┤
+                                                  ├──► enemy-stat scaling (training_gym + user policy)
   user text ────────► Gekomon / Whamon / Ogremon  │
-                                                  ├──► fishing locations (needs fishing.state)
+                                                  ├──► fishing locations (fishing.state to exercise FISH_REL)
                                                   │
                                                   └──► digivolution v2 (digivolve_accepted + species_raised)
 ```
 
-Two things are on every path: the **savestate batch** and the **overlay import**. Everything in
-§2.2 is independent of both and can proceed at any time.
+Since 2026-08-28 the code side of every RE item is covered by reading dw_decomp; the only shared
+dependency left is the **savestate batch**, and its role changed from "verify our models" to
+"validate our patches in the real game". Everything in §2.2 is independent of it.
 
 ---
 
@@ -254,6 +285,7 @@ Two things are on every path: the **savestate batch** and the **overlay import**
 | What | Where |
 | --- | --- |
 | Address manifest (single source of truth) | `worlds/digimon_world/data/addresses.py` |
+| Game code (reading source) | `references/dw_decomp/` (gitignored clone; pinned `04cef877`) — bridge: `tools/dw1_decomp_xref.py`, table `tools/DW_DECOMP_XREF.md` |
 | Process docs | `worlds/digimon_world/tools/{DECOMP_PROCESS,PATCH_PROCESS,TOOLING,AGENT_VOCABULARY}.md` |
 | Savestate queue | `worlds/digimon_world/tools/SAVESTATE_REQUESTS.md` |
 | Decomp ledger + units (gitignored) | `work/dw1_re/decomp/LEDGER.md`, `work/dw1_re/decomp/<unit>/` |

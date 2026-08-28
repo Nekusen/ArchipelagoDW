@@ -47,11 +47,19 @@ Archipelago world auto-discovery). Reuse shipped byte-builders from addresses.py
 
 ## Pipeline
 
-### Step 1 — Decomp first
+### Step 1 — Know the code first
 
-The patch target must be a VERIFIED unit ([DECOMP_PROCESS.md](DECOMP_PROCESS.md)) or an
-address whose surrounding code is understood from one. Designing patches from guesswork
-is the failure mode this whole process replaces.
+Designing patches from guesswork is the failure mode this whole process replaces. The
+target's code must be known exactly, from one of two sources:
+
+- **dw_decomp** (since 2026-08-28, the usual case): resolve the target with
+  `python worlds\digimon_world\tools\dw1_decomp_xref.py --lookup 0x<ADDR>`. If it is in C in
+  `references\dw_decomp\`, that C is byte-matching — read it, cite `file:line` in the design,
+  and treat it as the "verified understanding" this step used to demand. Still capture the
+  vanilla words of every site you redirect (net 2 checks them).
+- **A VERIFIED unit of our own** ([DECOMP_PROCESS.md](DECOMP_PROCESS.md)) when the target is an
+  `ASM stub` upstream, or when the design hinges on *runtime* facts a static decomp cannot
+  give (which values actually flow through the site, what a real save exercises).
 
 ### Step 2 — Design, and model the design in C
 
