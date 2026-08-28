@@ -72,6 +72,11 @@ column:
 | Low (provenance) | `script_vm_cold_start.state` | Before the first script of a screen runs. | `callScriptSection`'s 43 replay-invisible stores are all C-confirmed with exact widths (`script_engine.c:95-120`). Only needed for provenance, or to test a script-start hook if one is ever designed. |
 | Medium (patch validation) | `dialog_columns.state` | A dialog using the tab/skip control codes (multi-column stat readout, arena board). | The seven control codes are C-confirmed (`script_common.c:2601-2701`). The state is now for **testing an injected notification string** that uses them — the in-game notifications feature. |
 
+**Technique-data objective (next, set 2026-08-28)** needs no new state: `BTL_calculateDamage`
+vectors come from `enemy_poc_battle.state`, `enemy_poc_icemon_battle.state` and
+`battle_pending.state` (battles in progress); the `.MMD` animation census is a static read of
+the disc.
+
 ## Anticipated gaps
 
 Systems with no state in the lab at all. Not blocking anything today; listed so a future capture

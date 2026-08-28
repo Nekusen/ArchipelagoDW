@@ -24,7 +24,7 @@ project moved out of "build the world" and into **feature expansion + polish + v
 | YAML options | 51, in 5 option groups |
 | World test suite | **1044 passed**, 4 skipped, 9427 subtests, ~16 s with `-n auto` |
 | Lint | `ruff` at a 311-finding baseline (303 pre-existing + the census tool's CLI prints, T201, like the other lab tools) |
-| Commits ahead of `main` | 99 |
+| Commits ahead of `main` | 100 |
 | Decomp coverage | **31 / 1120** SLUS game functions verified — 2.8 % by count, **14.5 % of static call sites** |
 
 ### 1.1 What is shipped
@@ -97,6 +97,11 @@ Same day, by the `dw1-patch` agent: the **Green Gym bonus now follows AP-deliver
 (`TRN_GYM_BONUS_WORD_PATCHES`, always-on; the vanilla bit alone no longer grants it). Cup entry was
 deliberately left on the client's arena enforcer (user decision).
 
+**Next objective (agreed 2026-08-28): randomize technique data and species technique lists** —
+see §2.3 (requirements) and §3.5 (the two RE steps that come first: `BTL_calculateDamage` and the
+`.MMD` animation-table census). The user's direction is "randomize everything that can be
+randomized"; the candidate inventory is in the `dw1-backlog` memory.
+
 ### 1.2 Verification state
 
 | Layer | State |
@@ -142,6 +147,7 @@ savestates are now for.
 | --- | --- | --- | --- |
 | **In-game check notifications** | Dialog page/box driver `MAIN_func_800FF0FC` and renderer `drawString2` in `src/main/script_common.c` — **in C, nothing left to decompile**. | `dialog_columns.state` — now for *testing* an injected string that uses the tab/column codes, not for understanding them | **MEDIUM → LOW-MEDIUM**: design + one patch. Low-risk route is a line-buffer substitution at `0x801BE174 + row*0x40`, not a renderer hook. |
 | ~~**Enemy-stat scaling by sphere**~~ **SHIPPED 2026-08-28** as `enemy_stats: progressive` | Turned out to be data: every field Digimon is a `.MAP` record (`loadMapDigimon`, Ghidra export) that the battle copies verbatim (`BTL_initializeCombat`); no code hook. | Validated: `enemy_poc_map2.state`, `enemy_poc_battle.state` (edited record fought) | Done in the lab (3 nets). **Open**: the user's BizHawk pass, and whether the default policy (vanilla region budgets re-assigned by sphere depth, one factor per region so bosses stay proportionally tougher) is the balance they want. |
+| **Technique data + species technique lists** — **NEXT OBJECTIVE (set 2026-08-28)** | Both are static SLUS tables, so randomizing them is data: `MOVE_DATA` (0x8012623C, 122 × 16 B: distance, power, MP, iframes, range, element, status, accuracy, status chance) and `DIGIMON_DATA.moves[16]` (0x8012CEB4 + 35 per species; a record's move byte `0x2E+k` selects slot `k`). The 7×7 element matrix `MAIN_D_80125F70` is read by the enemy AI (`BTL_selectEnemyMove`, `battle_main.c:3380`) and by the partner's battle-learn filter (`battle_ui.c:224`); whether **damage** uses it sits in `BTL_calculateDamage` (BTL overlay 0x8005BEB8, **ASM-only upstream**). Whether a species can gain technique **slots** depends on its `.MMD` animation table (`loadMMD`: header u32[1] = anim table; anim ids `0x2E+k`). Partner-side pool = technique ids < 58 (mastery bitmap, `technique_rewards`); 58+ are enemy-only. Facts collected in the `dw1-technique-data` memory. | Damage vectors: `enemy_poc_battle.state`, `enemy_poc_icemon_battle.state`, `battle_pending.state` (all exist). Nothing to request from the user. | MEDIUM. Order: (1) import BTL_REL.BIN into the Ghidra project at its `config/btl.yaml` address — the lab's **first overlay import** — and decomp `BTL_calculateDamage` to VERIFIED with those battle states; (2) static census of the 178 `.MMD` animation tables (no emulator); (3) design: technique-data randomization is global (the partner uses the same table) vs. enemy-only via list shuffles inside populated slots; (4) data patch + tests, same pipeline as `enemy_stats`. |
 | ~~**Wild-digimon randomization**~~ **SHIPPED 2026-08-28** as `enemy_randomization` | Species = record type + MAPHEAD.SCN `loadDigimon`/`setDigimon` operands (`scriptSetDigimon` guard); models are malloc3'd whole (`loadMMD`), so swaps are heap-budgeted. | Validated: `enemy_poc_map0.state`, `enemy_poc_icemon_battle.state` (Icemon swap fought to the end) | Done for `wild`; `wild_and_story` ships **untested in a story cutscene** (a substitute may lack a scripted animation). Heap slack beyond size-neutral swaps unmeasured. |
 | **Fishing locations (expansion)** | `src/fish/` (95 % in C). The 6 `FISH_REL` ITEM_PARA readers our relocation patched can now be read in C. | `fishing.state` — **still needed**: the relocation's FISH_REL readers have never been *exercised*; the lab has no fishing state | MEDIUM |
 | **Digivolution (v2 scope)** | `calculateRequirementScore`, `getNumMasteredMoves`, `hasDigimonRaised` in `src/main/evolution.c` / `script_common.c`; requirement table `EVO_REQ_DATA` @ 0x8012ABEC | `digivolve_accepted.state`, `species_raised.state` — for validating an AP digivolution item, not for RE | MEDIUM. The "ever raised" flag (trigger 512+form) can **veto** a digivolution whose stat requirements are met — an AP digivolution item must account for it. |
@@ -261,14 +267,25 @@ overlay function that is ASM-only upstream — a rare case, and no longer on any
 
 ### 3.5 Next targets
 
-1. **Audit shipped assumptions against the C** — every `addresses.py` comment that says
-   "inferred" or "static-census-derived" is now checkable (in progress 2026-08-28).
-2. **Wave-2 lab tooling**: parse `include/dw/*.h` into a Ghidra data-type archive so decompiler
-   views use their structs; overlay import only if a capture ever needs it.
-3. ASM-only functions still worth our pipeline: `startAnimation` (96 callers), `0x800E5B50`
-   (104), `unlearnMove`.
-4. Re-capture `renderString` with the 0xE10 window (config change only) to convert 446 skips.
-5. **Open user decision**: contribute our three verified models for functions still ASM-only
+1. **`BTL_calculateDamage` (BTL overlay 0x8005BEB8) — first target of the technique-data
+   objective (§2.3).** ASM-only upstream, so it needs the pipeline: import `BTL_REL.BIN`
+   (disc LBA 147703) into the Ghidra project at the address in dw_decomp `config/btl.yaml`
+   (the lab's first overlay import), export, capture vectors from the three battle states,
+   replay. The answer wanted: does the 7×7 element matrix (or `DigimonPara.special`) enter
+   the damage formula, or only the AI / learn filter?
+2. **`.MMD` animation-table census** (static, no emulator): per species, how many animation
+   entries the model carries versus how many technique slots its list populates — decides
+   whether species lists may gain slots or only swap inside populated ones. `startAnimation`
+   (ASM-only, 96 callers) is the reader to confirm the table layout against.
+3. **Audit shipped assumptions against the C** — every `addresses.py` comment that says
+   "inferred" or "static-census-derived" is now checkable (in progress 2026-08-28; the
+   flight-table, IF-grammar and PP-calc rows are done).
+4. ~~Wave-2 lab tooling: parse `include/dw/*.h` into a Ghidra data-type archive~~ done
+   2026-08-28 (`DW1ImportHeaders.java`, 1827 types; typed globals applied).
+5. Other ASM-only functions still worth our pipeline: `0x800E5B50` (104 callers),
+   `unlearnMove`.
+6. Re-capture `renderString` with the 0xE10 window (config change only) to convert 446 skips.
+7. **Open user decision**: contribute our three verified models for functions still ASM-only
    upstream (`dailyPStatTrigger` with the card-duplicate bug documented, the two shop builders).
 
 ---
@@ -289,7 +306,7 @@ that.
 | --- | --- | --- | --- |
 | ✅ `fishing.state` (captured 2026-08-28) | Exercises the 6 relocated `FISH_REL` ITEM_PARA readers (never run live) | Fishing locations; ITEM_PARA residual check | **High** (validation) |
 | ✅ `training_gym.state` (captured 2026-08-28) | Runtime evidence for the stat-gain routines (`src/trn/` is in C) | TRN gym-bonus patch | **High** (validation) |
-| ✅ `enemy_poc_battle.state`, `enemy_poc_icemon_battle.state` (captured 2026-08-28, unattended: warp + tamer teleport) | A field battle that has just started against a patched record / a substituted species | Enemy scaling + randomization (shipped) | Done |
+| ✅ `enemy_poc_battle.state`, `enemy_poc_icemon_battle.state` (captured 2026-08-28, unattended: warp + tamer teleport) | A field battle that has just started against a patched record / a substituted species; with `battle_pending.state`, the vector source for `BTL_calculateDamage` | Enemy stats (shipped); **technique-data objective** (next) | Done |
 | `post_battle_learn.state` | Natural evidence for the companion-bit fix | Technique-learn confidence | Low (validation) |
 | `digivolve_accepted.state` | Validation of a future AP digivolution item; `getNumMasteredMoves` → VERIFIED | Digivolution v2 | Medium (validation) |
 | `dialog_columns.state` | Testing an injected notification string that uses the column codes | **In-game notifications** | Medium (validation) |

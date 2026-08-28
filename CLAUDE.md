@@ -187,8 +187,13 @@ These come from [docs/style.md](docs/style.md) and the ruff config and override 
   hooks needed) and shipped as `enemy_stats` (stats + techniques re-balanced by
   sphere depth) and `enemy_randomization` (species substitution, heap-
   budgeted), lab-validated through the three nets incl. real battles;
-  data table `data/enemy_records.py`, module `enemies.py`. Full detail:
-  [STATUS.md](STATUS.md).
+  data table `data/enemy_records.py`, module `enemies.py`. The Green Gym
+  bonus now follows AP recruits (`TRN_GYM_BONUS_WORD_PATCHES`). **Next
+  objective (agreed the same day): randomize technique data (`MOVE_DATA`)
+  and species technique lists** — first steps are the `BTL_calculateDamage`
+  decomp (BTL overlay, first overlay import into Ghidra) and a static
+  `.MMD` animation-table census; see STATUS.md §2.3 / §3.5 and the
+  `dw1-technique-data` memory. Full detail: [STATUS.md](STATUS.md).
 - **Architecture** (locked): BizHawk + Nymashock + APProcedurePatch +
   generic Lua connector — the FFT Ivalice Island pattern. A DuckStation
   client also ships. PCSX-Redux is the RE-lab emulator (not player-facing).
