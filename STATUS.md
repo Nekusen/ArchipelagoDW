@@ -23,8 +23,8 @@ project moved out of "build the world" and into **feature expansion + polish + v
 | Locations / items | 279 / 217 |
 | YAML options | 51, in 5 option groups |
 | World test suite | **1035 passed**, 4 skipped, 9304 subtests, ~15 s with `-n auto` |
-| Lint | `ruff` at a stable 303-finding baseline (pre-existing; no new findings introduced) |
-| Commits ahead of `main` | 93 |
+| Lint | `ruff` at a 311-finding baseline (303 pre-existing + the census tool's CLI prints, T201, like the other lab tools) |
+| Commits ahead of `main` | 96 |
 | Decomp coverage | **31 / 1120** SLUS game functions verified — 2.8 % by count, **14.5 % of static call sites** |
 
 ### 1.1 What is shipped

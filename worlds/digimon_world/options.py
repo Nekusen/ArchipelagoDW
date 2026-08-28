@@ -1092,8 +1092,8 @@ class EnemyScaling(Choice):
       the strongest, so an area that the item placement opens early plays like an
       early area regardless of where it sits in the vanilla game. All Digimon of a
       region scale by the same factor, so bosses stay proportionally tougher than
-      the fodder around them. Combat stat gains follow the enemy's stats, as in
-      vanilla.
+      the fodder around them. Combat stat gains and the Bits a fight pays follow
+      the enemy's stats, as in vanilla.
 
     Pure data rewrite of the per-screen enemy records on the disc — no code hooks.
     """

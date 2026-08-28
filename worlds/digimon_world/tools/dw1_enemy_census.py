@@ -15,10 +15,10 @@ the screen loads, and a battle uses the NPC entity's stats verbatim.  Record lay
     30..32 flee vector                             33  waypoint count N
     then 8 s16 (table +0x84) and N x 3 s16 waypoints
 
-Reads the vanilla disc through the cached ISO file table (``work/dw1_re/iso_files.json``,
-written by the one-off walk in this session) and the SLUS image in ``work/dw1_re/`` for
-MAP_ENTRIES / DIGIMON_DATA / MOVE_NAMES.  Output: ``work/dw1_re/enemy_census.tsv`` plus a
-per-screen summary on stdout.  Game-derived output stays under ``work/`` (gitignored).
+Reads the vanilla disc through the ISO9660 file table (cached in ``work/dw1_re/iso_files.json``,
+rebuilt from the disc when missing) and the SLUS image in ``work/dw1_re/`` for MAP_ENTRIES /
+DIGIMON_DATA / MOVE_NAMES.  Output: ``work/dw1_re/enemy_census.tsv`` plus a per-screen summary
+on stdout.  Game-derived output stays under ``work/`` (gitignored).
 """
 
 from __future__ import annotations
@@ -105,6 +105,49 @@ def read_disc_file(binf, lba: int, size: int) -> bytes:
     return b"".join(chunks)[:size]
 
 
+def walk_iso_tree(binf) -> list[tuple[int, int, str]]:
+    """Every file on the disc as ``(lba, size, "/DIR/NAME.EXT")`` from the ISO9660 directory tree."""
+
+    def walk(lba: int, size: int, path: str, acc: list) -> None:
+        data = read_disc_file(binf, lba, (size + USER - 1) // USER * USER)
+        pos = 0
+        while pos < len(data):
+            length = data[pos]
+            if length == 0:
+                pos = (pos // USER + 1) * USER
+                continue
+            rec = data[pos:pos + length]
+            entry_lba = struct.unpack_from("<I", rec, 2)[0]
+            entry_size = struct.unpack_from("<I", rec, 10)[0]
+            flags, name_len = rec[25], rec[32]
+            name = rec[33:33 + name_len].decode("latin1")
+            if name not in ("\x00", "\x01"):
+                full = f"{path}/{name.split(';')[0]}"
+                if flags & 2:
+                    walk(entry_lba, entry_size, full, acc)
+                else:
+                    acc.append((entry_lba, entry_size, full))
+            pos += length
+
+    pvd = read_disc_file(binf, 16, USER)
+    root_lba = struct.unpack_from("<I", pvd, 158)[0]
+    root_size = struct.unpack_from("<I", pvd, 166)[0]
+    files: list[tuple[int, int, str]] = []
+    walk(root_lba, root_size, "", files)
+    return sorted(files)
+
+
+def load_iso_table(bin_path: str) -> dict[str, tuple[int, int]]:
+    if ISO_TABLE.exists():
+        rows = json.load(open(ISO_TABLE))
+    else:
+        with open(bin_path, "rb") as binf:
+            rows = walk_iso_tree(binf)
+        ISO_TABLE.parent.mkdir(parents=True, exist_ok=True)
+        json.dump(rows, open(ISO_TABLE, "w"))
+    return {name: (lba, size) for lba, size, name in rows}
+
+
 def parse_map(data: bytes, n8: int, n4: int) -> tuple[int, list[dict]]:
     """Return (entity section offset, records)."""
     idx = 1 + n8 + n4 + (1 if (n8 or n4) else 0)
@@ -115,7 +158,7 @@ def parse_map(data: bytes, n8: int, n4: int) -> tuple[int, list[dict]]:
     recs = []
     for slot in range(count):
         base = pos
-        vals = struct.unpack_from("<%dh" % RECORD_S16, data, pos)
+        vals = struct.unpack_from(f"<{RECORD_S16}h", data, pos)
         pos += RECORD_S16 * 2
         pos += TAIL_S16 * 2
         n_wp = vals[0x21]
@@ -247,8 +290,7 @@ def emit_python(path: str, digimon: list[dict], models: dict[int, int], rows: li
     lines.append(")")
     lines.append("")
     lines.append("MAPHEAD_SITES: Final[tuple[tuple[int, int, int, int, int], ...]] = (")
-    for s in sorted(sites):
-        lines.append(f"    ({s[0]}, {s[1]}, {s[2]}, {s[3]}, {s[4]}),")
+    lines.extend(f"    ({s[0]}, {s[1]}, {s[2]}, {s[3]}, {s[4]})," for s in sorted(sites))
     lines.append(")")
     lines.append("")
     pathlib.Path(path).write_text("\n".join(lines), encoding="utf-8")
@@ -268,7 +310,7 @@ def main() -> int:
     entries = load_map_entries(slus)
     digimon = load_digimon_data(slus)
     move_names = load_move_names(slus)
-    files = {name: (lba, size) for lba, size, name in json.load(open(ISO_TABLE))}
+    files = load_iso_table(args.bin)
 
     rows = []
     with open(args.bin, "rb") as binf:
@@ -285,14 +327,14 @@ def main() -> int:
             lba, size = files[path]
             data = read_disc_file(binf, lba, size)
             try:
-                ent_off, recs = parse_map(data, n8, n4)
+                _, recs = parse_map(data, n8, n4)
             except struct.error as exc:
                 print(f"map {map_id} {name}: parse error {exc}", file=sys.stderr)
                 continue
             for r in recs:
                 d = digimon[r["type"]] if r["type"] < NUM_DIGIMON else None
                 mv = []
-                for k, m in enumerate(r["moves"]):
+                for m in r["moves"]:
                     if m == 0xFF or d is None:
                         mv.append("-")
                     else:
@@ -305,7 +347,7 @@ def main() -> int:
                     "type": r["type"], "digimon": d["name"] if d else "?",
                     "level": d["level"] if d else -1, "ptype": d["type"] if d else -1,
                     "script_id": r["script_id"],
-                    **{k: v for k, v in zip(STAT_NAMES, r["stats"])},
+                    **dict(zip(STAT_NAMES, r["stats"], strict=True)),
                     "charge": r["charge"], "moves": ",".join(mv),
                     "move_slots": ",".join(f"{m:02X}" for m in r["moves"]),
                     "prio": ",".join(str(p) for p in r["prio"]), "waypoints": r["waypoints"],
