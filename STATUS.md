@@ -231,8 +231,8 @@ exit hang (PCSX-Redux only), Gekomon / Whamon / Ogremon (need text).
 
 ```
                      ┌──────────────────────┐
-  user session ─────►│ BizHawk validation   │──► release-validated 0.6.x ──► Phase 5 docs ──► WebWorld ──► .apworld
-                     └──────────────────────┘
+  user session ─────►│ BizHawk validation   │──► release-validated 0.6.x ──► Phase 5 docs ──► WebWorld
+                     └──────────────────────┘                                                    └──► .apworld
 
   user savestates ──► PARTIAL units → VERIFIED ──┐
                                                   ├──► notifications (needs FUN_800FF0FC + dialog_columns)
@@ -241,7 +241,7 @@ exit hang (PCSX-Redux only), Gekomon / Whamon / Ogremon (need text).
   user text ────────► Gekomon / Whamon / Ogremon  │
                                                   ├──► fishing locations (needs fishing.state)
                                                   │
-                                                  └──► digivolution v2 (needs digivolve_accepted + species_raised)
+                                                  └──► digivolution v2 (digivolve_accepted + species_raised)
 ```
 
 Two things are on every path: the **savestate batch** and the **overlay import**. Everything in
