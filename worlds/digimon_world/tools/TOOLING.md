@@ -48,6 +48,9 @@ Game-derived artifacts and per-session state. Never committed. Contains:
 | `dw1_redux_screenshot.py` | The "eyes": REST VRAM dump → PNG of the visible 320x240 framebuffer. Pair with scripted input for screens that can't be blind-mashed (name entry). |
 | `dw1_ghidra.ps1` | Standard headless Ghidra wrapper (JAVA_HOME, project, script path handled). |
 | `ghidra_scripts/DW1ExportFunc.java` | Exports one function's decomp.c + listing.asm + refs.txt bundle for the decomp pipeline. |
+| `ghidra_scripts/DW1ImportSymbols.java` | Imports dw_decomp's `config/symbols*.txt` into the project (primary names where Ghidra had `FUN_`/`DAT_`, secondary labels otherwise). Writes the project — run WITHOUT `-ReadOnly`, serialized. Applied 2026-08-28 (6648 symbols). |
+| `ghidra_scripts/DW1FunctionStats.java` | Whole-program function census (address, name, size, callers, callees) to a TSV — the decomp coverage denominator. |
+| `dw1_decomp_xref.py` | Bridge from our address manifest to dw_decomp: for any RAM address, its dw_decomp symbol (+offset), and for functions whether it is in C (which file) or an `INCLUDE_ASM` stub. `--lookup` for one address; `-o DW_DECOMP_XREF.md` regenerates the committed table. |
 | `dw1_apply_patch.py` | One patch spec (JSON), three nets: `apply` (live-RAM pokes), `verify` (readback diff — works on poked RAM and on a booted patched ISO), `to-iso` (sector-aware .bin build + EDC recalc). See [PATCH_PROCESS.md](PATCH_PROCESS.md). |
 | `DECOMP_PROCESS.md` | The standardized function-decomp pipeline (pilot-proven; agent + workflow available). |
 | `PATCH_PROCESS.md` | The standardized patch-test loop built on top of the decomp output (PoC-proven; `dw1-patch` agent available). |

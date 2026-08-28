@@ -5,9 +5,41 @@ Established 2026-08-20 with the trigger-family pilot (`isTriggerSet` / `getTrigg
 `setTrigger` / `unsetTrigger`). Infrastructure: see [TOOLING.md](TOOLING.md). When the goal of
 a decomp is a ROM patch, the follow-on procedure is [PATCH_PROCESS.md](PATCH_PROCESS.md).
 
-**Verification bar**: a function is DONE when its C reimplementation replays 100% of the call
-vectors captured from the real game (emulator differential testing). Reading-level Ghidra
-pseudo-C is a *draft*, never a deliverable.
+## Read dw_decomp first (2026-08-28)
+
+`references/dw_decomp/` (jype0/dw_decomp, MIT) is a **byte-matching** decompilation of this exact
+build: its CI rebuilds SLUS_010.32 and all 15 overlays and `cmp`s them against the originals on
+every push. About 87 % of all functions are in C there, all overlays included, with 72 structs in
+`include/dw/`. **Any function present there as C is already known to the bit** — decompiling it
+again here is wasted work.
+
+So the pipeline now starts with a lookup, not an export:
+
+```
+python worlds/digimon_world/tools/dw1_decomp_xref.py --lookup 0x800FF0FC
+```
+
+(or read [DW_DECOMP_XREF.md](DW_DECOMP_XREF.md), the pre-generated table for every RAM address
+in `data/addresses.py`). Three outcomes:
+
+| xref says | What to do |
+| --- | --- |
+| **`C: src/...`** | Read that file. That is the function. Record what you learned in the unit's NOTES / `addresses.py` as usual, citing `file:line`. Only build a model + capture vectors if the *question is about runtime behaviour* (which values actually flow, which branches a real save exercises, what a patch must preserve) — a static decomp cannot answer those. |
+| **`ASM stub`** | Not decompiled upstream. Run the full pipeline below; the stub's `listing.asm` equivalent is in their `asm/` after `make regenerate`, but our Ghidra export is just as good. |
+| no symbol | Usually free space inside a function's tail (our patch regions) or a runtime buffer. The xref names the enclosing function; read it there. |
+
+The dw_decomp symbol map is also imported into the Ghidra project (`DW1ImportSymbols.java`),
+so exports and decompiler views show their names. **Their names are not ours**: their
+`renderString` is our `FUN_800E5B50`, our `renderString` is their `drawString`. Never assume a
+name matches — resolve by address.
+
+The study-only policy applies: read, learn, cite. Do not copy their C into the world package.
+
+**Verification bar** (unchanged for what still goes through the pipeline): a function is DONE when
+its C reimplementation replays 100% of the call vectors captured from the real game (emulator
+differential testing). Reading-level Ghidra pseudo-C is a *draft*, never a deliverable. A
+dw_decomp C file is a *stronger* source than our replay for **what the code is**; replay remains
+the only source for **what the game does with it at runtime**.
 
 **When the game state needed for capture is unavailable**, the unit is still worth doing: write
 and cross-check the model, record it as `PROVISIONAL` in the ledger, and add a row to
@@ -23,9 +55,16 @@ committed.
 
 ### Step 1 — Locate and scope the unit
 
-- Resolve name/address in `work\dw1_re\slus_symbols.txt` (from `references/DW1-Code/memoryMap.txt`)
-  or the Ghidra project. Only SLUS functions (`0x80090800..0x80135000`) are in the project today;
-  overlay functions need the overlay imported first (not yet standardized).
+- **First** resolve the address with `dw1_decomp_xref.py --lookup` (see the top of this document).
+  If it is in C upstream, you are reading, not decompiling — skip to Step 3's cross-check duties
+  and Step 7's recording.
+- Otherwise resolve name/address in `work\dw1_re\slus_symbols.txt` (from
+  `references/DW1-Code/memoryMap.txt`) or the Ghidra project, which now also carries the
+  dw_decomp names. Only SLUS functions (`0x80090800..0x80135000`) are in the project today.
+  Overlay functions: dw_decomp has C for all 15 overlays (`src/btl`, `src/fish`, `src/trn`, …)
+  and per-overlay symbol files (`config/symbols_btl.txt`, …) with load addresses in
+  `config/<overlay>.yaml` — read there; importing overlays into Ghidra is still not standardized
+  and is only needed for vector capture of an overlay function that is ASM-only upstream.
 - The decomp unit is the function **plus its non-library callee closure**: follow `refs.txt`
   CALLEES recursively; game callees (FUN_* or Syd-named) join the unit or must already be done;
   PsyQ callees (memcpy, rand, …) are stubbed with libc equivalents in the C.
@@ -218,7 +257,7 @@ python verify.py            # exit 0 + "VERDICT: OK" required
 | T1 | Pure/leaf, few data refs (trigger family) | none — pipeline as-is |
 | T2 | Reads static tables (ITEM_PARA readers) | dump the tables once into the bundle; harness loads them |
 | T3 | Deep callee closure / struct-heavy | decomp callees first (bottom-up); define structs in Ghidra as you learn them |
-| T4 | Overlay code, DMA/IRQ/timing-sensitive | overlay import into Ghidra required; vector capture may need custom regions or CdRead hooks |
+| T4 | Overlay code, DMA/IRQ/timing-sensitive | read dw_decomp's `src/<overlay>/` first (all 15 are there); Ghidra overlay import only if the function is ASM-only upstream AND needs vector capture; capture may need custom regions or CdRead hooks |
 
 ## Known gotchas
 

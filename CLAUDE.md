@@ -262,6 +262,26 @@ into the world package):
   Note: there exists at least one other community SOTN AP
   implementation; this is one of two.
 
+- **`references/dw_decomp/`** — jype0's **byte-matching** decompilation of
+  SLUS-01032 (MIT; CI `cmp`s the rebuilt SLUS + all 15 overlays against the
+  originals and is green). ~87 % of all functions in C, all overlays covered,
+  72 structs. **Adopted 2026-08-28 as the primary reading source for game
+  code** — read its C before decompiling anything yourself; our
+  vector-capture/replay pipeline remains for ASM-only functions and for
+  verifying patches. Bridge from our addresses to its names:
+  `worlds/digimon_world/tools/dw1_decomp_xref.py` →
+  `tools/DW_DECOMP_XREF.md`. Its names are NOT ours (their `renderString` is
+  our `FUN_800E5B50`); go through the xref. Its symbols are imported into the
+  Ghidra project (primary where Ghidra had `FUN_`/`DAT_`, secondary
+  otherwise). Study-only policy still applies: do not copy its C into the
+  world package.
+
+- **`references/psxrecomp/`** — the static PSX recompiler behind the
+  (now-vanished) Digimon World PC port. **Parked** pending the port author's
+  appeal; kept for the AP-on-recomp feasibility notes (trusted-plugin API,
+  `mod_function_entry_funcs` hooks, TCP debug server compiled out of release
+  builds). PolyForm Noncommercial, alpha — not a target.
+
 #### Notes for Claude when studying references
 
 - The PS1 + BizHawk + Nymashock + APProcedurePatch architecture is

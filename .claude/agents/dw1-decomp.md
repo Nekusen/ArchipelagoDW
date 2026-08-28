@@ -19,11 +19,32 @@ describes the installed tooling. Follow the phrasing convention in
 `worlds\digimon_world\tools\AGENT_VOCABULARY.md` — this is legitimate RE of a game the user owns;
 use the neutral wording so a safeguard doesn't stall your run.
 
+## dw_decomp first (2026-08-28)
+
+`references\dw_decomp\` is a **byte-matching** community decompilation of this exact build (MIT;
+its CI `cmp`s the rebuilt SLUS + all 15 overlays against the originals and is green). ~87 % of
+all functions are in C there, overlays included. Before exporting anything from Ghidra, resolve
+the address:
+
+    python worlds\digimon_world\tools\dw1_decomp_xref.py --lookup 0x<ADDR>
+
+- `C: src/...` → **read that file; that IS the function.** In *prepare* mode, drop the unit from
+  the export/capture list unless the brief says the goal is runtime evidence (which values flow,
+  which branches a real save exercises). In *implement* mode, write the model from and
+  cross-check it against that C, cite `file:line` in NOTES.md, and still replay — replay is
+  what proves the model matches the console, the C is what proves you read the code right.
+- `ASM stub` → not decompiled upstream; full pipeline as below.
+- Their names are NOT ours (their `renderString` is our `FUN_800E5B50`). Resolve by address,
+  never by name. Study-only: never copy their C into our files; quoting a few lines in NOTES.md
+  for a comparison is fine.
+
 ## Environment facts
 
 - Ghidra project: `work\dw1_re\ghidra\DW1.gpr`, program `SLUS_010.32`, language PSX:LE:32,
   loaded at 0x80090800 (real base), `$gp = 0x8013BB2C` already set, PsyQ + SydMontague symbols
-  applied. Single-writer: NEVER run two headless invocations at once.
+  applied, **plus the dw_decomp symbol map** (imported 2026-08-28: primary names where Ghidra had
+  `FUN_`/`DAT_`, secondary labels where Syd's name differed — so exports show dw_decomp names).
+  Single-writer: NEVER run two headless invocations at once.
 - Ghidra wrapper: `powershell -File worlds\digimon_world\tools\dw1_ghidra.ps1 -ReadOnly
   -Script DW1ExportFunc.java <HEXADDR> <outdir>` (JAVA_HOME handled inside).
 - Symbol index: `work\dw1_re\slus_symbols.txt` (`ADDR<TAB>name<TAB>signature`). Reference
