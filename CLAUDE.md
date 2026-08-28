@@ -152,6 +152,8 @@ These come from [docs/style.md](docs/style.md) and the ruff config and override 
   rewrite from scratch.
 - **Working branch**: `digimon-world-ps1`
 - **World package location** (target): `worlds/digimon_world/`
+- **Live status, roadmap and RE requirements**: [STATUS.md](STATUS.md) — read it first when
+  resuming. The summary below is a snapshot; STATUS.md is the file that gets updated.
 - **Current status** (2026-08-22): fully functional world, `world_version 0.6.0`.
   Core generation/patcher/client are complete and the v1 feature set is
   in; the project is now in a feature-expansion + polish phase. The 2026-08

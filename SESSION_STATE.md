@@ -1,3 +1,7 @@
+> **SUPERSEDED (2026-08-23).** This is a 2026-04-30 snapshot from the recruit-visibility arc and
+> is kept only as a historical record. The live project state, roadmap and RE requirements are in
+> [STATUS.md](STATUS.md).
+
 # Session State — DW1 APWorld
 
 Snapshot 2026-04-30 (end of recruit-visibility arc + first city-loader
