@@ -176,6 +176,13 @@ These come from [docs/style.md](docs/style.md) and the ruff config and override 
   the user's BizHawk validation session, Phase 5 setup docs, the
   region-locking option-integration pass, and deferred big features
   (enemy randomization, in-game notifications).
+- **2026-08-28**: jype0's byte-matching `dw_decomp` adopted as the reading
+  source for game code (see References); its symbols, structs and typed
+  globals are in the Ghidra project. Audits against it found no model
+  discrepancies, retired one bogus shipped patch (`ROM_PP_CALC_PATCH`) and
+  queued the unpatched recruit-bit readers in `TRN_REL`/`DGET_REL`. Six lab
+  savestates captured; `tools/dw1_warp_state.py` produces a savestate on
+  any screen unattended. Full detail: [STATUS.md](STATUS.md).
 - **Architecture** (locked): BizHawk + Nymashock + APProcedurePatch +
   generic Lua connector — the FFT Ivalice Island pattern. A DuckStation
   client also ships. PCSX-Redux is the RE-lab emulator (not player-facing).
@@ -194,10 +201,14 @@ These come from [docs/style.md](docs/style.md) and the ruff config and override 
   `C:\opt\tools\`, harness scripts and the full guide in
   [worlds/digimon_world/tools/TOOLING.md](worlds/digimon_world/tools/TOOLING.md).
   Game-derived artifacts go to `work/` (gitignored), never into the repo.
-- **Function decomp**: standardized, pilot-verified pipeline in
+- **Function decomp**: **read `references/dw_decomp/` first** (resolve any
+  address with `tools/dw1_decomp_xref.py --lookup`); ~87 % of the game is
+  byte-matching C there. Our own pipeline in
   [worlds/digimon_world/tools/DECOMP_PROCESS.md](worlds/digimon_world/tools/DECOMP_PROCESS.md)
-  (bar: 100% replay of emulator-captured call vectors). Batch via the `dw1-decomp`
-  agent + `dw1-decomp-batch` workflow. Decomp output stays in `work/` — never commit it.
+  (bar: 100% replay of emulator-captured call vectors) remains for ASM-only
+  functions, patch verification and runtime questions. Batch via the
+  `dw1-decomp` agent + `dw1-decomp-batch` workflow. Decomp output stays in
+  `work/` — never commit it.
 - **Conventions**:
   - All code, identifiers, commit messages, and committed documentation in
     English.

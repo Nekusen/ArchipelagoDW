@@ -24,7 +24,7 @@ project moved out of "build the world" and into **feature expansion + polish + v
 | YAML options | 47, in 5 option groups |
 | World test suite | **1001 passed**, 4 skipped, 9181 subtests, ~15 s with `-n auto` |
 | Lint | `ruff` at a stable 303-finding baseline (pre-existing; no new findings introduced) |
-| Commits ahead of `main` | 81 |
+| Commits ahead of `main` | 93 |
 | Decomp coverage | **31 / 1120** SLUS game functions verified — 2.8 % by count, **14.5 % of static call sites** |
 
 ### 1.1 What is shipped
@@ -61,6 +61,14 @@ reading source for game code: ~87 % of all functions in C, all 15 overlays inclu
 Bridge from our addresses to its names: `tools/dw1_decomp_xref.py` / `tools/DW_DECOMP_XREF.md`;
 its symbols are imported into the Ghidra project. Most of §3's "decomp programme" is thereby
 reframed — see §3.1. The psxrecomp-based PC port is **parked** pending its author's appeal.
+
+**2026-08-28 — audit and lab session.** Two audits against dw_decomp's C: zero discrepancies in
+our replay models; in the manifest, 8 claims confirmed, 6 corrected, one shipped patch retired
+(`ROM_PP_CALC_PATCH`, `dfe692db`) and one gameplay inconsistency queued (§2.3, recruit-bit readers
+in overlays). The Ghidra project now carries dw_decomp's symbols, all 72 structs and 154 typed
+globals. A user session captured six savestates (§4) and produced **`dw1_warp_state.py`**: an
+unattended savestate on any of the 255 screens via the debug map (`2870fe07`). Lab tooling
+hardened after three emulator crashes (`peek` and screenshots now go through Lua).
 
 ### 1.2 Verification state
 
@@ -308,7 +316,9 @@ dependency left is the **savestate batch**, and its role changed from "verify ou
 | Savestate queue | `worlds/digimon_world/tools/SAVESTATE_REQUESTS.md` |
 | Decomp ledger + units (gitignored) | `work/dw1_re/decomp/LEDGER.md`, `work/dw1_re/decomp/<unit>/` |
 | Function census (gitignored) | `work/dw1_re/function_census.tsv` |
-| Lab savestates (gitignored) | `work/dw1_re/*.state` (26 today) |
+| Lab savestates (gitignored) | `work/dw1_re/*.state` (32; `debug_warp.state` is the teleport hub) |
+| Savestate on any screen, unattended | `worlds/digimon_world/tools/dw1_warp_state.py --map <id> --out <name>` |
+| Capture-session log (gitignored) | `work/dw1_re/session_2026-08-28_savestates.md` |
 | BizHawk validation checklist (gitignored) | `work/dw1_re/BIZHAWK_SESSION_CHECKLIST.md` |
 | Agents | `.claude/agents/{dw1-decomp,dw1-patch}.md` |
 | Historical plan / reference notes | `PLAN.md`, `REFERENCES_NOTES.md` |

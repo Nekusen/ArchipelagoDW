@@ -2,7 +2,7 @@
 
 The decomp bar is 100% replay of **emulator-captured** call vectors ([DECOMP_PROCESS.md](DECOMP_PROCESS.md)).
 Capturing them needs the game to actually execute the function, which needs a savestate that
-reaches it. The lab already holds 26 states in `work\dw1_re\` (inventoried in DECOMP_PROCESS.md
+reaches it. The lab already holds 32 states in `work\dw1_re\` (inventoried in DECOMP_PROCESS.md
 step 4) and they cover a lot — but not everything.
 
 **This file is the queue.** When a decomp is blocked only by "no savestate reaches this code",

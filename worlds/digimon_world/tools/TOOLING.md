@@ -41,11 +41,11 @@ Game-derived artifacts and per-session state. Never committed. Contains:
 | `dw1_redux_bootstrap.lua` | Loaded on every launch. Registers REST handlers `/api/v1/lua/{ping,quit,eval,run}` — arbitrary Lua from Python, so watchpoints can be armed/disarmed mid-session without restarting. `eval` takes `?code=` (redux rejects URLs over ~256 bytes); `run` executes a file from the CWD, which `dw1_redux_api.py` uses automatically for longer code. Verified end-to-end 2026-08-19. |
 | `dw1_redux_watch.lua` | Watchpoint harness ("who touches this byte?"). Reads `dw1_watch_config.lua` from `work\dw1_re` (falls back to the trigger array). Each hit logs `cycles, name, type, width, addr, pc, ra, value` to `dw1_watch_log.txt`. Feed the `pc` to Ghidra. |
 | `dw1_redux_smoke.lua` | Boot → wait ~25 s → dump 2MB RAM + savestate → quit. Validated 2026-08-19 (markers `MAYO/MGEN/OGRE` found in the dump). |
-| `dw1_redux_api.py` | Python driver for the REST API (stdlib only). `status/dump/peek/poke/pause/resume/reset/symbols/lua/quit/ping/check-dump`. Offsets are physical (BizHawk `MainRAM` convention, same as `data/addresses.py`). |
+| `dw1_redux_api.py` | Python driver for the REST API (stdlib only). `status/dump/peek/poke/pause/resume/reset/symbols/lua/quit/ping/check-dump`. `peek` reads through Lua (`getMemPtr`) — the raw-RAM GET ships all 2 MB and crashed live sessions. Offsets are physical (BizHawk `MainRAM` convention, same as `data/addresses.py`). |
 | `dw1_iso_extract.py` | List/extract root files from the .bin (ISO9660 over Mode2/2352). Already used to pull `SLUS_010.32`; the overlays (`SHOP_REL.BIN`, `BTL_REL.BIN`, `STD_REL.BIN`, …) are one command away. |
 | `dw1_redux_vectors.lua` | Call-vector capture for decomp verification (config-driven Exec breakpoints logging args/memory/returns as JSONL). See [DECOMP_PROCESS.md](DECOMP_PROCESS.md). |
 | `dw1_redux_input.lua` | Scripted play: `dw1_press({'RIGHT','CROSS'})` timed tap queue + `dw1_masher('x'/'title')`. Installable live via `dw1_redux_api.py lua "Support.extra.dofile(...)"`. |
-| `dw1_redux_screenshot.py` | The "eyes": REST VRAM dump → PNG of the visible 320x240 framebuffer. Pair with scripted input for screens that can't be blind-mashed (name entry). |
+| `dw1_redux_screenshot.py` | The "eyes": `PCSX.GPU.takeScreenShot()` through the Lua endpoint → PNG (16/24-bit). Safe while the game runs. `--vram x y w h` keeps the raw VRAM REST path for texture pages — parked emulator only, it segfaults live sessions. |
 | `dw1_ghidra.ps1` | Standard headless Ghidra wrapper (JAVA_HOME, project, script path handled). |
 | `ghidra_scripts/DW1ExportFunc.java` | Exports one function's decomp.c + listing.asm + refs.txt bundle for the decomp pipeline. |
 | `ghidra_scripts/DW1ImportSymbols.java` | Imports dw_decomp's `config/symbols*.txt` into the project (primary names where Ghidra had `FUN_`/`DAT_`, secondary labels otherwise). Writes the project — run WITHOUT `-ReadOnly`, serialized. Applied 2026-08-28 (6648 symbols). |
@@ -93,6 +93,12 @@ decompiled C — prepend its bin to PATH so gcc finds `as`).
   flag already exposes the server on port 3333 for any external gdb.
 
 ## Known quirks
+
+- **User-driven (live) sessions, rules from three crashes on 2026-08-28**: no per-frame Lua
+  listeners (`dw1_redux_input.lua`) while the user plays, no REST data GETs (`/cpu/ram/raw`,
+  `/gpu/vram/raw`), and wrap `PCSX.createSaveState()` in `pauseEmulator()`/`resumeEmulator()`.
+  Lua evals were fine throughout. Scripted lab sessions (nobody at the pad) may use the
+  harness listeners as before.
 
 - First launch of a **fresh** workbench dir would normally start with the web server off; the
   launcher's `pcsx.json` pre-seed avoids that. If REST ever refuses connections, check

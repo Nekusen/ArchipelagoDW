@@ -41,6 +41,8 @@ verified-unit style in `work\dw1_re\decomp\triggers\`.
   `$gp = 0x8013BB2C` set). Export bundles with `powershell -File
   worlds\digimon_world\tools\dw1_ghidra.ps1 -ReadOnly -Script DW1ExportFunc.java <HEXADDR>
   <outdir>` — serialize invocations, the project is single-writer.
+- Reaching a screen: `python worlds\digimon_world\tools\dw1_warp_state.py --map <id> --out <name>`
+  (debug-map warp, lands verified by `CURRENT_SCREEN`) — a savestate on any screen without a user.
 - Emulator lab: launch `powershell -File <ABSOLUTE path>\dw1_redux_launch.ps1` with
   ABSOLUTE `-Script`/`-Iso` paths; REST client `worlds\digimon_world\tools\dw1_redux_api.py`
   (wait for the literal `pong` from `ping` — its exit code lies). One session at a time;

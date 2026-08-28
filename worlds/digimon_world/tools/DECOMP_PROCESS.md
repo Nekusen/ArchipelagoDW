@@ -123,6 +123,9 @@ frequency — the most-called functions are usually the highest-leverage units.
 - **One emulator session at a time** (fixed REST port), and **one controller of that session**:
   never leave a background poller that ends in `quit` running while you keep driving the session
   (a stale poller killed a capture run mid-intro on 2026-08-20).
+- **Reaching any screen**: `python worlds\digimon_world\tools\dw1_warp_state.py --map <id> --out <name>`
+  (optionally `--god`, `--set-trigger N`) warps through the debug map and saves once
+  `CURRENT_SCREEN` confirms the landing — use it before asking anyone to walk anywhere.
 - Getting into gameplay: prefer loading `work\dw1_re\postintro.state` (Lua:
   `PCSX.loadSaveState(Support.File.open('postintro.state'))`). Starting a NEW game instead
   requires launching with `-FreshCards`: **DW1 auto-saves to the memory card the moment the

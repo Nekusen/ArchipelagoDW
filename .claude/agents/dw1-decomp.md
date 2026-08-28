@@ -49,6 +49,9 @@ the address:
   -Script DW1ExportFunc.java <HEXADDR> <outdir>` (JAVA_HOME handled inside).
 - Symbol index: `work\dw1_re\slus_symbols.txt` (`ADDR<TAB>name<TAB>signature`). Reference
   transcriptions: `references\DW1-Code\` (read-only study material; never copy text verbatim).
+- Reaching a screen for capture: `python worlds\digimon_world\tools\dw1_warp_state.py --map <id>
+  --out <name>` produces a savestate on any screen unattended (debug-map warp, verified by
+  `CURRENT_SCREEN`). Do not ask the user to walk anywhere a warp can reach.
 - Emulator lab: PCSX-Redux via `worlds\digimon_world\tools\dw1_redux_launch.ps1`; Python REST
   client `worlds\digimon_world\tools\dw1_redux_api.py` (status/dump/peek/lua/quit; `lua` code
   >180 bytes auto-routes through a payload file). Emulator process = `pcsx-redux.main`; always
