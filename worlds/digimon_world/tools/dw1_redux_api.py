@@ -50,6 +50,21 @@ class ReduxClient:
         return data[:RAM_SIZE]
 
     def peek(self, offset: int, size: int) -> bytes:
+        """Read ``size`` bytes at physical ``offset``.
+
+        Small reads go through the Lua eval endpoint and ``PCSX.getMemPtr()``. The raw-RAM GET
+        ignores ``size`` and always ships the full 2 MB, which is slow, times out, and has
+        crashed the emulator mid-session more than once (2026-08-22, 2026-08-28). Only a
+        genuinely large request falls back to the full dump.
+        """
+
+        if size <= 4096:
+            code = (
+                "local m = PCSX.getMemPtr() local t = {} "
+                f"for i = 0, {size - 1} do t[#t + 1] = string.format('%02X', m[{offset} + i]) end "
+                "return table.concat(t)"
+            )
+            return bytes.fromhex(self.eval_lua(code).strip())
         return self.dump_ram()[offset:offset + size]
 
     def poke(self, offset: int, data: bytes) -> None:
