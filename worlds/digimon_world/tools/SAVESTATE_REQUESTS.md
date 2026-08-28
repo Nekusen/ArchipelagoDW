@@ -20,6 +20,8 @@ verified without any further human involvement.
 4. Nothing else — no dumps, no notes. The row says what the state must be positioned at; getting
    the position right matters more than the surrounding save data.
 
+**Most screens no longer need a human at all** (2026-08-28): `python worlds/digimon_world/tools/dw1_warp_state.py --map <id> --out <name>` warps there through the debug map and saves once `CURRENT_SCREEN` confirms the landing. What still needs a person is *state* the warp cannot set up -- a dialog open at the right line, a battle in progress, an item in hand -- so the rows below describe that.
+
 Positioning rule of thumb: **stop one input short of the event**. The most useful states in the
 lab are the ones sitting on an open dialog or one step from a transition, because the capture
 harness can then drive the event itself.
