@@ -1493,11 +1493,13 @@ class BgmShuffle(Choice):
 
 class InGameNotifications(DefaultOnToggle):
     """Show Archipelago events in the game: an item received from the
-    multiworld ("Got: Meat") or one you found for another player ("Sent:
-    Master Sword") appears as a short banner at the top of the screen for about
-    five seconds while you walk around, drawn the way area names are. Messages
-    are deferred — never lost — while a menu, a dialog, a battle or a screen
-    change is in progress, and shown one at a time.
+    multiworld ("Got: Meat from Link") or one you found for another player
+    ("Sent: Master Sword to Link") appears as a short banner in the top-right
+    corner of the screen for about five seconds while you walk around, drawn
+    the way area names are; the other player's name is dropped when the
+    message would not fit. Messages are deferred — never lost — while a menu,
+    a dialog, a battle or a screen change is in progress, and shown one at a
+    time.
     """
 
     display_name = "In-Game Notifications"

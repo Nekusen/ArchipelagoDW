@@ -1110,6 +1110,21 @@ def sanitize_notification(text: str) -> str:
     return cleaned
 
 
+def _with_player(text: str, ctx: Any, slot: int | None, preposition: str) -> str:
+    """``text`` + " <preposition> <player name>" when the slot's name is known and the longer
+    message still fits the banner untouched; otherwise ``text`` as is (the other player's name is
+    the part worth dropping, never the item)."""
+
+    if slot is None:
+        return text
+    names = getattr(ctx, "player_names", None) or {}
+    name = names.get(slot) if isinstance(names, dict) else None
+    if not name:
+        return text
+    longer = f"{text} {preposition} {name}"
+    return longer if sanitize_notification(longer) == longer else text
+
+
 class NotificationQueue:
     """Messages waiting for the in-game banner: one at a time, bounded, overflow summarised."""
 
@@ -1172,8 +1187,10 @@ class DigimonWorldClient:
         a patcher-written RAM region)."""
 
     def on_package(self, ctx: "DigimonWorldClientContext", cmd: str, args: dict) -> None:
-        """Inbound server packets: queue a "Sent: <item>" banner for every item this
-        player finds for another world (``PrintJSON`` / ``ItemSend``)."""
+        """Inbound server packets: queue a "Sent: <item> to <player>" banner for every item this
+        player finds for another world (``PrintJSON`` / ``ItemSend``: ``item`` names the item in
+        the receiver's game, ``receiving`` is the receiver's slot); the receiver's name is dropped
+        when the message would not fit the banner."""
 
         if cmd != "PrintJSON" or args.get("type") != "ItemSend" or not self._in_game_notifications:
             return
@@ -1183,7 +1200,7 @@ class DigimonWorldClient:
             return
         lookup = getattr(ctx.item_names, "lookup_in_slot", None)
         name = lookup(item.item, receiving) if lookup is not None else ctx.item_names.lookup_in_game(item.item)
-        self._notifications.push(f"Sent: {name}")
+        self._notifications.push(_with_player(f"Sent: {name}", ctx, receiving, "to"))
 
     def __init__(self) -> None:
         # Cache for AP-side lookups; populated lazily on first watcher
@@ -1441,12 +1458,7 @@ class DigimonWorldClient:
         text = f"Got: {item_name}"
         sender = getattr(item, "player", None)
         if sender is not None and sender != ctx.slot:
-            names = getattr(ctx, "player_names", None) or {}
-            sender_name = names.get(sender) if isinstance(names, dict) else None
-            if sender_name:
-                longer = f"{text} from {sender_name}"
-                if sanitize_notification(longer) == longer:
-                    text = longer
+            text = _with_player(text, ctx, sender, "from")
         self._notifications.push(text)
 
     async def _push_notifications(self, ctx: DigimonWorldClientContext) -> None:

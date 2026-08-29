@@ -42,6 +42,7 @@ from ..data.addresses import (
     NOTIFY_TOP_HOOK_LUI_PATCHED,
     NOTIFY_TOP_HOOK_LUI_VANILLA,
     NOTIFY_TOP_RENDER_MAP_NAME_RAM,
+    NOTIFY_TOP_X_MODE,
     NOTIFY_TOP_Y,
     RAM_NOTIFY_FLAG,
     RAM_NOTIFY_TEXT,
@@ -97,7 +98,7 @@ class _Ctx:
     def __init__(self) -> None:
         self.bizhawk_ctx = object()
         self.slot = 1
-        self.item_names = _Names({1: {10: "Meat"}, 2: {20: "Master Sword"}})
+        self.item_names = _Names({1: {10: "Meat"}, 2: {20: "Master Sword", 21: "Ultimate Digivolver"}})
         self.player_names = {1: "Rt", 2: "Link"}
 
 
@@ -142,15 +143,20 @@ class TestTokens(unittest.TestCase):
         self.assertEqual(((NOTIFY_TOP_HOOK_LUI_PATCHED & 0xFFFF) << 16) | (NOTIFY_TOP_HOOK_ADDIU_PATCHED & 0xFFFF),
                          NOTIFY_TOP_F1_RAM)
 
-    def test_top_renderer_right_mode(self) -> None:
-        """The right-aligned variant differs from the shipped words only where the lab's
-        ``notification_top_right.json`` did: the x constant and the three width-dependent words."""
-        f1, f2 = _build_notify_top_words(-112, "right", 12, 148)
-        diff1 = [i for i, (a, b) in enumerate(zip(f1, NOTIFY_TOP_F1_WORDS, strict=True)) if a != b]
-        diff2 = [i for i, (a, b) in enumerate(zip(f2, NOTIFY_TOP_F2_WORDS, strict=True)) if a != b]
+    def test_top_renderer_x_modes(self) -> None:
+        """The shipped words are the right-aligned build (the user's pick); it differs from the
+        centre build only where the lab's two specs did: the x constant and the three
+        width-dependent words."""
+        self.assertEqual(NOTIFY_TOP_X_MODE, "right")
+        self.assertEqual(_build_notify_top_words(-112, "right", 12, 148), (NOTIFY_TOP_F1_WORDS, NOTIFY_TOP_F2_WORDS))
+        c1, c2 = _build_notify_top_words(-112, "centre", 12, 148)
+        diff1 = [i for i, (a, b) in enumerate(zip(c1, NOTIFY_TOP_F1_WORDS, strict=True)) if a != b]
+        diff2 = [i for i, (a, b) in enumerate(zip(c2, NOTIFY_TOP_F2_WORDS, strict=True)) if a != b]
         self.assertEqual((diff1, diff2), ([9], [5, 6, 9]))
-        self.assertEqual(f1[9], 0x24050098)                                    # a1 = 152
-        self.assertEqual((f2[5], f2[6], f2[9]), (0, 0, 0x00A72823))            # nop, nop, subu a1, a1, a3
+        self.assertEqual((c1[9], NOTIFY_TOP_F1_WORDS[9]), (0x2405000C, 0x24050098))       # a1 = 12 / 152
+        self.assertEqual((c2[5], c2[6], c2[9]), (0x00022042, 0x000420C0, 0x00A42823))   # srl, sll, subu a1, a1, a0
+        self.assertEqual((NOTIFY_TOP_F2_WORDS[5], NOTIFY_TOP_F2_WORDS[6], NOTIFY_TOP_F2_WORDS[9]),
+                         (0, 0, 0x00A72823))                                            # nop, nop, subu a1, a1, a3
 
     def test_dormant_istriggerset_wrapper_stays_retired(self) -> None:
         """Its Cave6 range overlaps fragment 1 (and the AP item description string): the writer
@@ -270,7 +276,10 @@ class TestClientContract(unittest.TestCase):
         client._notify_received(ctx, _Item(10, 1), "Meat")
         self.assertEqual(client._notifications.pop(), "Got: Meat")
         client.on_package(ctx, "PrintJSON", {"type": "ItemSend", "item": _Item(20, 1), "receiving": 2})  # type: ignore[arg-type]
-        self.assertEqual(client._notifications.pop(), "Sent: Master Sword")
+        self.assertEqual(client._notifications.pop(), "Sent: Master Sword to Link")
+        # The receiver's name is dropped, never the item, when the message would not fit the banner.
+        client.on_package(ctx, "PrintJSON", {"type": "ItemSend", "item": _Item(21, 1), "receiving": 2})  # type: ignore[arg-type]
+        self.assertEqual(client._notifications.pop(), "Sent: Ultimate Digivolver")
         client.on_package(ctx, "PrintJSON", {"type": "ItemSend", "item": _Item(10, 2), "receiving": 1})  # type: ignore[arg-type]
         client.on_package(ctx, "PrintJSON", {"type": "Hint", "item": _Item(20, 1), "receiving": 2})  # type: ignore[arg-type]
         self.assertIsNone(client._notifications.pop())

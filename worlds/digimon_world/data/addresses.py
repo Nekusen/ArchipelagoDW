@@ -11371,8 +11371,11 @@ del _off, _size
 # so the vanilla path writes nothing. ``Y_TOP = -112`` puts the row on lines
 # 8..20, clear of the clock HUD (x 16..48, y 14..50) for any message up to
 # 30 characters; a y scan down to -112 showed no clipping. ``X_MODE =
-# "right"`` right-aligns the composited rect at ``X_RIGHT + 4`` instead
-# (parameter kept, not shipped). Lab: both modes 267/267 in the C model,
+# "right"`` (shipped -- the user's pick) right-aligns the composited rect
+# at x = X_RIGHT + 4 = +152, ~8 px from the right edge, so the banner reads
+# as a corner toast; ``"centre"`` is the vanilla formula (the rect, not
+# the glyph run, is what aligns: mixed-case glyphs are narrower than 8 px,
+# so long messages end a little left of short ones). Lab: both modes 267/267 in the C model,
 # live on the field / dark ground / after dialog, menu and pickup, a vanilla
 # map change mid-fade still centred, cold boot on ``notification_top.bin``.
 # The callback runs once per 30 Hz game loop, so ``NOTIFY_DURATION_FRAMES``
@@ -11386,7 +11389,7 @@ del _off, _size
 NOTIFY_TOP_F1_RAM: Final = 0x800958D0            # Cave6, 12 words: the gap after AP_ITEM_DESC_STRING
 NOTIFY_TOP_F2_RAM: Final = 0x8009593C            # Cave6, 17 words: retired v1 recycle giveItem slot + edges
 NOTIFY_TOP_Y: Final = -112                       # renderString y -> the 12-px row sits on lines 8..20
-NOTIFY_TOP_X_MODE: Final = "centre"              # "centre" (vanilla formula) or "right"
+NOTIFY_TOP_X_MODE: Final = "right"               # "right" (shipped, the user's pick) or "centre" (vanilla formula)
 NOTIFY_TOP_X_BASE: Final = 12                    # centre mode: x = X_BASE - (len/2)*8 (vanilla constant)
 NOTIFY_TOP_X_RIGHT: Final = 148                  # right mode: composited rect right edge at X_RIGHT + 4
 NOTIFY_TOP_RENDER_MAP_NAME_RAM: Final = 0x800D9258   # vanilla renderMapName (tail-jump target)
@@ -11459,20 +11462,29 @@ def _build_notify_top_words(y_top: int, x_mode: str, x_base: int, x_right: int) 
 NOTIFY_TOP_F1_WORDS, NOTIFY_TOP_F2_WORDS = _build_notify_top_words(
     NOTIFY_TOP_Y, NOTIFY_TOP_X_MODE, NOTIFY_TOP_X_BASE, NOTIFY_TOP_X_RIGHT,
 )
-# The words the lab validated (net 3 cold boot on ``notification_top.bin``); the builder must
-# reproduce them whenever the parameters are the lab's.
-_NOTIFY_TOP_LAB_PARAMS: Final = (-112, "centre", 12, 148)
-_NOTIFY_TOP_LAB_F1: Final = (
-    0x240100EF, 0x10810003, 0x27BDFFD8, 0x08036496, 0x27BD0028, 0xAFBF0024, 0x3C048009, 0x0C024487,
-    0x24845FC0, 0x2405000C, 0x0802564F, 0x2403000C,
-)
-_NOTIFY_TOP_LAB_F2: Final = (
-    0xAFA30010, 0xAFA00014, 0xAFA00018, 0xAFA0001C, 0xAFA00020, 0x00022042, 0x000420C0, 0x000238C0,
-    0x24E70004, 0x00A42823, 0x2406FF90, 0x0C0396D4, 0x00002021, 0x8FBF0024, 0x27BD0028, 0x03E00008,
-    0x00000000,
-)
-if (NOTIFY_TOP_Y, NOTIFY_TOP_X_MODE, NOTIFY_TOP_X_BASE, NOTIFY_TOP_X_RIGHT) == _NOTIFY_TOP_LAB_PARAMS:
-    assert (NOTIFY_TOP_F1_WORDS, NOTIFY_TOP_F2_WORDS) == (_NOTIFY_TOP_LAB_F1, _NOTIFY_TOP_LAB_F2)
+# The words the lab validated -- both x modes through net 1 (C model 267/267) and net 2 (live);
+# net 3's cold boot used the centre words (``notification_top.bin``), the right words differ
+# from them in four immediates only. The builder must reproduce both sets.
+_NOTIFY_TOP_LAB_WORDS: Final[dict[tuple[int, str, int, int], tuple[tuple[int, ...], tuple[int, ...]]]] = {
+    (-112, "centre", 12, 148): (
+        (0x240100EF, 0x10810003, 0x27BDFFD8, 0x08036496, 0x27BD0028, 0xAFBF0024, 0x3C048009, 0x0C024487,
+         0x24845FC0, 0x2405000C, 0x0802564F, 0x2403000C),
+        (0xAFA30010, 0xAFA00014, 0xAFA00018, 0xAFA0001C, 0xAFA00020, 0x00022042, 0x000420C0, 0x000238C0,
+         0x24E70004, 0x00A42823, 0x2406FF90, 0x0C0396D4, 0x00002021, 0x8FBF0024, 0x27BD0028, 0x03E00008,
+         0x00000000),
+    ),
+    (-112, "right", 12, 148): (
+        (0x240100EF, 0x10810003, 0x27BDFFD8, 0x08036496, 0x27BD0028, 0xAFBF0024, 0x3C048009, 0x0C024487,
+         0x24845FC0, 0x24050098, 0x0802564F, 0x2403000C),
+        (0xAFA30010, 0xAFA00014, 0xAFA00018, 0xAFA0001C, 0xAFA00020, 0x00000000, 0x00000000, 0x000238C0,
+         0x24E70004, 0x00A72823, 0x2406FF90, 0x0C0396D4, 0x00002021, 0x8FBF0024, 0x27BD0028, 0x03E00008,
+         0x00000000),
+    ),
+}
+for _params, _lab in _NOTIFY_TOP_LAB_WORDS.items():
+    assert _build_notify_top_words(*_params) == _lab, _params
+del _params, _lab
+assert (NOTIFY_TOP_Y, NOTIFY_TOP_X_MODE, NOTIFY_TOP_X_BASE, NOTIFY_TOP_X_RIGHT) in _NOTIFY_TOP_LAB_WORDS
 # Vanilla libgs dead code under the two fragments (pinned from the disc; re-checked by the
 # disc-gated test).
 NOTIFY_TOP_F1_VANILLA_WORDS: Final = (

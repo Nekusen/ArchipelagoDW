@@ -208,8 +208,9 @@ These come from [docs/style.md](docs/style.md) and the ruff config and override 
   choice. **Decided later the same day**: the entrance shuffle is
   **parked** as a future improvement (the logic rewrite is too large even
   by region; design + data stay in `work/`); the notification banner
-  is **shipped at the top of the screen** (`renderMapNameAp` dispatcher in
-  Cave6 — now code-full — vanilla loading banner untouched, three nets); a
+  is **shipped in the top-right corner** (`renderMapNameAp` dispatcher in
+  Cave6 — now code-full — vanilla loading banner untouched, three nets;
+  "Sent: <item> to <player>" / "Got: <item> from <player>"); a
   suspected Lava Cave boulder bypass through the
   Drill Tunnel <-> Mt. Panorama shortcut was retracted (the prompts read
   the vanilla recruit bit; Drimogemon sits behind the boulder). Not

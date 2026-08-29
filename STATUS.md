@@ -24,7 +24,7 @@ project moved out of "build the world" and into **feature expansion + polish + v
 | YAML options | 80, in 5 option groups |
 | World test suite | **1144 passed**, 4 skipped, 10532 subtests, ~18 s with `-n auto` (one class is disc-gated: it re-checks vanilla bytes when `Digimon World (USA).bin` sits at the repo root) |
 | Lint | `ruff` at a 322-finding baseline (303 pre-existing + the two census tools' CLI prints, T201, like the other lab tools) |
-| Commits ahead of `main` | 113 |
+| Commits ahead of `main` | 114 |
 | Decomp coverage | **31 / 1120** SLUS game functions verified — 2.8 % by count, **14.5 % of static call sites** |
 
 ### 1.1 What is shipped
@@ -223,9 +223,14 @@ composites the mailbox text with `renderString` at y = -112 (lines 8..20), clear
 HUD for any message up to 30 characters. Live: short and 27-char messages at the top, a vanilla
 map change mid-fade still centred, dialog / menu / pickup deferrals unchanged, cold boot on
 `notification_top.bin`; `addresses.py` builds the words from `NOTIFY_TOP_Y` /
-`NOTIFY_TOP_X_MODE` (a right-aligned variant was captured too, not shipped) and pins the lab
-words plus the vanilla dead code under both fragments (disc-gated test); a real-disc round
-trip confirmed the four new sites. Facts learned: the callback runs once per 30 Hz game loop
+`NOTIFY_TOP_X_MODE` and pins both lab word sets plus the vanilla dead code under the two
+fragments (disc-gated test); a real-disc round trip confirmed the four new sites. **After
+seeing the captures the user picked the right-aligned variant** (`NOTIFY_TOP_X_MODE =
+"right"`: the composited rect ends ~8 px from the right edge, a corner toast; four immediates
+differ from the centre words, net 1 + net 2 live, round trip re-run) and asked that "Sent"
+name the receiver: the client now shows `Sent: <item> to <player>` (the `ItemSend` packet's
+`receiving` slot), dropping the name — never the item — when the 26-char rule would not hold,
+symmetric with `Got: <item> from <player>`. Facts learned: the callback runs once per 30 Hz game loop
 (150 iterations ≈ 5 s), and **Cave6 is now code-full** (4 + 12 + 12 B left) — the next code
 feature goes through the heap claim. The dormant `isTriggerSet` head-wrapper constant overlaps
 fragment 1; a test keeps its writer uncalled.
