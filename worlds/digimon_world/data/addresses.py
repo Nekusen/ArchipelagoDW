@@ -9445,10 +9445,12 @@ _SCRIPT_ARCHIVE_SLOTS: Final[dict[int, int]] = {
     44: 0x22800,    # GCAN09 (screen 44): bridge exit S51
     66: 0x30000,    # GIAS00 (screen 69): Mt. Panorama mouth S51
     84: 0x3C800,    # FRZL01 (screen 88): Great Canyon mouth S51
+    135: 0x5F000,   # GKYO02 (screen 141, Volume Villa interior): Gekomon's arena dialog §8
 }
 _SCRIPT_ARCHIVE_SLOT_SIZES: Final[dict[int, int]] = {
     6: 0x1000, 7: 0x1000, 101: 0x800, 162: 0x2800, 163: 0x2000, 176: 0x1800,
     8: 0x800, 18: 0x2000, 24: 0x800, 44: 0x800, 66: 0x800, 84: 0x800,
+    135: 0x1800,
 }
 
 
@@ -10826,6 +10828,72 @@ assert COELAMON_RECRUIT_LOCATION_TRIGGER_ID != PIXIMON_MANUAL_TRIGGER_ID
 assert COELAMON_RECRUIT_LOCATION_TRIGGER_ID not in _REGION_GATE_TAKEN_TRIGGERS
 assert COELAMON_RECRUIT_LOCATION_TRIGGER_ID not in _REGION_GATE_NEW_TRIGGERS
 assert COELAMON_RECRUIT_LOCATION_TRIGGER_ID not in SHOP_AP_TRIGGER_IDS
+
+
+# =============================================================================
+# Gekomon location (always on; a recruit-set check with no item) — Script 135 §8 splice
+# =============================================================================
+#
+# Static research 2026-08-29 (``work/dw1_re/decomp/gekomon/NOTES.md``, every
+# byte checked on the disc): Volume Villa interior (screen 141, ``GKYO02``)
+# runs Script 135; the third Gekomon's dialog (§8, ``.MAP`` record 3) is the
+# game's whole "Gekomon recruit": ``if trigger(205) == true`` (Greymon
+# recruited = the arena exists — the operand at 0x14043B3A is already
+# redirected 205 -> 725 by :data:`ROM_FIELD_SPAWN_TRIGGER_PATCHES`, so on the
+# AP build the dialog keys on the Progressive Arena T1 mirror) -> "Gekomon
+# joined the Arena!". The joined branch sets NOTHING — no PP, no trigger
+# (Gekomon's id 110 puts 310 in the scripted-fight band nobody writes) — so
+# vanilla leaves no bit to poll and the check needs an 8-byte splice at the
+# branch's tail: the ``endSection`` + file terminator + four residue bytes
+# at vm 5562 become ``setTrigger 780; endSection; terminator``. 0xFE and
+# 0xFF are the same VM opcode (``script_common.c:3535``) and ``getScript``
+# loads the slot by the archive size table, so moving the terminator four
+# bytes down is inert; the dialog replays on every talk and re-sets the bit.
+# User decisions (2026-08-29): location only — no "Gekomon Recruit" item,
+# because Gekomon is one of the Digimon bundled into Progressive Arena — the
+# event recruits Gekomon alone (ShogunGekomon's 319 is a "met Shogun" story
+# flag), and the check joins the recruit set: always in the pool, rule
+# Progressive Arena x1 (``arena_locations`` only covers checks fired inside
+# the arena). Trigger 780 is a fresh AP location bit (779 = Coelamon;
+# 781..783 are the last free ones).
+
+GEKOMON_LOCATION_NAME: Final = "Gekomon"
+GEKOMON_TRIGGER_ID: Final = 780
+GEKOMON_LOCATION_BIT: Final[tuple[int, int]] = (
+    AP_TRIGGER_ARRAY_BASE + GEKOMON_TRIGGER_ID // 8,
+    GEKOMON_TRIGGER_ID % 8,
+)
+assert GEKOMON_LOCATION_BIT == (0x001BE02E, 4), GEKOMON_LOCATION_BIT
+GEKOMON_LOCATION_RAM_BITS: Final[dict[str, tuple[int, int]]] = {
+    GEKOMON_LOCATION_NAME: GEKOMON_LOCATION_BIT,
+}
+GEKOMON_SCRIPT: Final = 135
+GEKOMON_GATE_VM_OFFSET: Final = 4782        # §8: if trigger(205) == true then 4860 (12-B IF; id at +4)
+GEKOMON_SPLICE_VM_OFFSET: Final = 5562      # §8 tail: endSection, file terminator, residue
+ROM_GEKOMON_GATE_OPERAND_OFFSET: Final = script_vm_to_bin_offset(GEKOMON_SCRIPT, GEKOMON_GATE_VM_OFFSET + 4)
+ROM_GEKOMON_SPLICE_OFFSET: Final = script_vm_to_bin_offset(GEKOMON_SCRIPT, GEKOMON_SPLICE_VM_OFFSET)
+ROM_GEKOMON_SPLICE_VANILLA: Final = bytes((0xFE, 0x00, 0xFF, 0x00, 0x1C, 0x00, 0xFE, 0x00))
+ROM_GEKOMON_SPLICE_VALUE: Final = encode_set_trigger(GEKOMON_TRIGGER_ID) + bytes((0xFE, 0x00, 0xFF, 0x00))
+assert ROM_GEKOMON_GATE_OPERAND_OFFSET == 0x14043B3A, hex(ROM_GEKOMON_GATE_OPERAND_OFFSET)
+assert ROM_GEKOMON_SPLICE_OFFSET == 0x14043E42, hex(ROM_GEKOMON_SPLICE_OFFSET)
+assert ROM_GEKOMON_SPLICE_VALUE == bytes((0x1C, 0x00, 0x0C, 0x03, 0xFE, 0x00, 0xFF, 0x00))
+assert len(ROM_GEKOMON_SPLICE_VALUE) == len(ROM_GEKOMON_SPLICE_VANILLA) == 8
+assert GEKOMON_SPLICE_VM_OFFSET + 8 <= _SCRIPT_ARCHIVE_SLOT_SIZES[GEKOMON_SCRIPT]
+assert 24 <= ROM_GEKOMON_SPLICE_OFFSET % 2352 <= 2072 - 8          # single-sector write
+# The gate operand is one of the always-on 205 -> 725 redirects (Greymon's AP mirror bit).
+assert (ROM_GEKOMON_GATE_OPERAND_OFFSET, 205, 725) in ROM_FIELD_SPAWN_TRIGGER_PATCHES
+# Trigger-budget audit: not a recruit bit, not an AP recruit mirror, not another feature's bit,
+# and inside the trigger array (below the Meramon-tunnel state byte).
+assert GEKOMON_TRIGGER_ID not in (COELAMON_RECRUIT_LOCATION_TRIGGER_ID, PIXIMON_MANUAL_TRIGGER_ID)
+assert not 203 <= GEKOMON_TRIGGER_ID <= 258 and not 723 <= GEKOMON_TRIGGER_ID <= 779
+assert GEKOMON_TRIGGER_ID not in _REGION_GATE_TAKEN_TRIGGERS
+assert GEKOMON_TRIGGER_ID not in _REGION_GATE_NEW_TRIGGERS
+assert GEKOMON_TRIGGER_ID not in SHOP_AP_TRIGGER_IDS
+assert AP_TRIGGER_ARRAY_BASE + GEKOMON_TRIGGER_ID // 8 < RAM_MERAMON_TUNNEL_DRIMOGEMON_STATE
+# No ground-item shuffle site (written after apply_tokens) sits inside the splice.
+for _item_off in ROM_MAP_ITEM_OFFSETS:
+    assert _item_off + 1 < ROM_GEKOMON_SPLICE_OFFSET or _item_off >= ROM_GEKOMON_SPLICE_OFFSET + 8, hex(_item_off)
+del _item_off
 
 
 # =============================================================================

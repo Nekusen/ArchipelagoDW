@@ -20,11 +20,11 @@ project moved out of "build the world" and into **feature expansion + polish + v
 | Measure | Value |
 | --- | --- |
 | World version | 0.6.0 (`minimum_ap_version` 0.6.7) |
-| Locations / items | 279 / 217 |
+| Locations / items | 280 / 217 |
 | YAML options | 80, in 5 option groups |
-| World test suite | **1144 passed**, 4 skipped, 10532 subtests, ~18 s with `-n auto` (one class is disc-gated: it re-checks vanilla bytes when `Digimon World (USA).bin` sits at the repo root) |
+| World test suite | **1158 passed**, 4 skipped, 10801 subtests, ~18 s with `-n auto` (one class is disc-gated: it re-checks vanilla bytes when `Digimon World (USA).bin` sits at the repo root) |
 | Lint | `ruff` at a 322-finding baseline (303 pre-existing + the two census tools' CLI prints, T201, like the other lab tools) |
-| Commits ahead of `main` | 114 |
+| Commits ahead of `main` | 115 |
 | Decomp coverage | **31 / 1120** SLUS game functions verified — 2.8 % by count, **14.5 % of static call sites** |
 
 ### 1.1 What is shipped
@@ -235,6 +235,23 @@ symmetric with `Got: <item> from <player>`. Facts learned: the callback runs onc
 feature goes through the heap claim. The dormant `isTriggerSet` head-wrapper constant overlaps
 fragment 1; a test keeps its writer uncalled.
 
+**Same day — Gekomon location** (user text received; static research agent
+`work/dw1_re/decomp/gekomon/NOTES.md`, every byte checked on the disc; lab: three nets in flight, dw1-patch agent). Volume Villa
+interior (screen 141) runs Script 135, and the third Gekomon's dialog §8 is the game's whole
+"Gekomon recruit": `if trigger(205) == true` (Greymon recruited = the arena exists — the operand
+is already one of the always-on 205 → 725 redirects, so on the AP build it keys on the Progressive
+Arena T1 mirror) → "Gekomon joined the Arena!". The joined branch sets nothing (no PP, no bit;
+Gekomon's 310 is a scripted-fight band slot nobody writes; ShogunGekomon's 319 is a "met Shogun"
+story flag), which confirms the user's recollection and their decisions: **a recruit-set location
+with no item of its own — Gekomon is one of the Digimon bundled into Progressive Arena — and the
+event recruits Gekomon alone** (it is not an `arena_locations` check: that option only covers
+checks fired inside the arena). Shipped as `"Gekomon"` (69_064_000, Geko Swamp, always in the
+pool, rule `Progressive Arena ×1`, location group `Recruits`, outside `RECRUIT_NAMES`) fired by an
+8-byte splice at the branch's tail (`endSection` + file terminator + residue → `setTrigger 780;
+endSection; terminator`; 0xFE/0xFF are the same VM opcode, so moving the terminator is inert) —
+`GEKOMON_*` in `addresses.py`, `_write_gekomon_tokens` (always on), `client.LOCATION_RAM_BITS`,
+`test_gekomon.py`; real-disc round trip green. Trigger 780 claimed (781..783 are the last free bits).
+
 **Same day — the five dead region-gate rows FIXED** (`dw1-patch` agent, three nets; notes
 `work/dw1_re/decomp/gate_fix/NOTES.md`, spec `patches/gate_fix.json`): seven script-class gates
 of the shipped `SCRIPT_GATE_PATCHES` shape — 24 writes, 12 stubs in the slot-tail residue of
@@ -285,8 +302,7 @@ Grouped by **what blocks each item**, because that is what decides the order.
 | --- | --- | --- |
 | **BizHawk validation session** | One play session on the real client against `work/dw1_re/BIZHAWK_SESSION_CHECKLIST.md` — now also the 2026-08-29 options (technique data, drops, gifts, QoL patches, digivolution, species lists, raising, music, notifications, the five re-gated borders). | Closes the August batches. May generate corrective work. |
 | **Savestate batch** | The states in [SAVESTATE_REQUESTS.md](worlds/digimon_world/tools/SAVESTATE_REQUESTS.md) — see §4. **First sitting done 2026-08-28** (6 states incl. the `debug_warp` teleport hub); Medium rows remain | Patch validation in the real game (fishing, training, post-game heap margin) |
-| **Gekomon recruit** | The vanilla recruit method, as text | New recruit; needs bit/visibility RE afterwards |
-| **Whamon / Ogremon quest softlocks** | Reproduction recipes, as text | Script state-machine RE + guard patches |
+| **Ogremon quest softlocks** | Text received 2026-08-29: (a) room 2 after room 3 (the shipped standalone patch); (b) NEW — the Drill Tunnel Ogremon fight reached first: the cutscene fires, the models are absent, the game hangs; (c) unknown: battle 1 after battle 3; (d) what the standalone fix really does. A static research agent is mapping the whole chain (`work/dw1_re/decomp/ogremon_chain/`). | Guard patches follow the research; the user's BizHawk pass verifies. |
 | **Logic review** | The user's own pass over `rules.py` | — |
 
 ### 2.2 Ready now — no RE, no user input
@@ -317,7 +333,7 @@ savestates are now for.
 | **Fishing locations (expansion)** | `src/fish/` (95 % in C). The 6 `FISH_REL` ITEM_PARA readers our relocation patched can now be read in C. | `fishing.state` — **still needed**: the relocation's FISH_REL readers have never been *exercised*; the lab has no fishing state | MEDIUM |
 | **Digivolution (v2 scope)** | `calculateRequirementScore`, `getNumMasteredMoves`, `hasDigimonRaised` in `src/main/evolution.c` / `script_common.c`; requirement table `EVO_REQ_DATA` @ 0x8012ABEC | `digivolve_accepted.state`, `species_raised.state` — for validating an AP digivolution item, not for RE | MEDIUM. The "ever raised" flag (trigger 512+form) can **veto** a digivolution whose stat requirements are met — an AP digivolution item must account for it. |
 | **Post-game heap margin** | None — measurement only | `mt_infinity.state`, `back_dimension.state` | LOW. The 8 KB ITEM_PARA claim sits 0x408 bytes above the glyph ring; late-game allocations unmeasured. |
-| **Gekomon / Whamon / Ogremon** | Script-section RE once the user's text arrives | — | MEDIUM each |
+| ~~**Gekomon**~~ **SHIPPED 2026-08-29** (location only, recruit set) / **Ogremon chain** | Gekomon: Script 135 §8 (see §1.1). Ogremon / Whamon: static chain research in flight — every battle's read/set triggers, MAPHEAD model loads, the standalone fix's exact semantics, the out-of-order matrix. | `gekomon_talk.state` (§4). Ogremon: to be requested by the research. | Gekomon: done pending the lab's three nets. Ogremon: MEDIUM (guards = script-gate IFs). |
 | **Recruit-bit readers in overlays** (found 2026-08-28) | `src/trn/trn_reward.c:637,643` — Kabuterimon/Kuwagamon (triggers 219/251) grant the ×6/×5 training bonus; `src/dget/dget.c:308-357` — tournament entry counts recruits over triggers 200..310. Both read the **vanilla** bits, so an AP-delivered recruit shows the gym NPC but does not grant the bonus, and cup entry follows the vanilla count. | `training_gym.state`, `arena_lobby.state` (exists) | **Decided and done 2026-08-28**: TRN **shipped** (always-on `TRN_GYM_BONUS_WORD_PATCHES`: the two `addiu` immediates in `TRN_REL.BIN` now read 739 / 771; three nets incl. 7 real sessions + an 84/84 mode sweep, `work/dw1_re/decomp/trn_gym_bonus/`); DGET **no** (cup tiers stay attached to Progressive Arena only, which the client's arena enforcer already guarantees — the vanilla count reader stays). |
 
 ### 2.4 v2 location sources (from PLAN.md §Phase 7, still unscheduled)
@@ -331,8 +347,9 @@ and locations.
 - `test_fill` fails on some random seeds under `region_locking: all` (pre-existing, not the batch).
 - Merit-shop `mark_bought` faults; the client reconciler is load-bearing. One unreproduced
   greyed-out-row sighting in Volume Villa.
-- **Trigger-bit budget is nearly exhausted**: 780..783 are the last audited-free bits; ids ≥ 800
-  overlap the pstat array and are off limits. Any new flag needs a claim decision first.
+- **Trigger-bit budget is nearly exhausted**: 781..783 are the last audited-free bits (780 went to
+  the Gekomon location on 2026-08-29); ids ≥ 800 overlap the pstat array and are off limits. Any new
+  flag needs a claim decision first.
 - **Cave6 is code-full** (2026-08-29): 4 + 12 + 12 B left after the top-banner renderer; any new
   resident code must be claimed from the heap (the ITEM_PARA claim word, `0x80113AB4`).
 - The `>=800-is-pstat` audit's *method* (static constant-caller census) under-counted the pstat
@@ -481,6 +498,7 @@ that.
 | ✅ `mt_infinity.state`, `back_dimension.state` (captured 2026-08-28) | Post-game heap-margin measurement | Heap safety of the ITEM_PARA claim | Medium |
 | ✅ `machinedramon.state` (captured 2026-08-28) | Ending path, trigger 50 | Goal robustness | Medium |
 | `card_trade.state` | Card-value path live | Card multiplier (shipped on static analysis + one live check) | Medium |
+| `gekomon_talk.state` | Gekomon's §8 dialog with the splice (bit 780 set / not set by trigger 205) | Gekomon location (shipped 2026-08-29) | Medium (validation; captured by the patch mission) |
 | `species_raised.state` | `hasDigimonRaised` → VERIFIED | — (the flag's semantics are C-confirmed) | Low (provenance) |
 | `script_vm_cold_start.state` | `callScriptSection` → VERIFIED | — (all 43 stores C-confirmed) | Low (provenance) |
 | `long_text.state`, `numeric_ui.state` | `renderCharacter` / `convertAsciiToJis` corners | — (C-confirmed) | Low (provenance) |

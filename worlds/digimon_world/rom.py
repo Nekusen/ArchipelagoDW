@@ -229,6 +229,8 @@ from .data.addresses import (
     ROM_GACHA_MP_FLOPPY_FIX_OFFSET,
     ROM_GEAR_GIVEITEM_NEUTER_VALUE,
     ROM_GEAR_GIVEITEM_OFFSETS,
+    ROM_GEKOMON_SPLICE_OFFSET,
+    ROM_GEKOMON_SPLICE_VALUE,
     ROM_GETTOPCITY_TRIGGER_FORMAT,
     ROM_GETTOPCITY_TRIGGER_PATCHES,
     ROM_GREAT_CANYON_APPROACH_GATE_OFFSETS,
@@ -2790,6 +2792,19 @@ def _write_bgm_tokens(patch: DigimonWorldProcedurePatch, plan: BgmPlan) -> None:
         patch.write_token(APTokenTypes.WRITE, maphead_bin_offset(site.vm + 1), bytes([font]))
 
 
+def _write_gekomon_tokens(patch: DigimonWorldProcedurePatch) -> None:
+    """Gekomon's arena location — one 8-byte write at the tail of Script 135 §8
+    (Volume Villa interior): ``endSection`` + file terminator + residue become
+    ``setTrigger 780`` + ``endSection`` + terminator, so the "Gekomon joined the
+    Arena!" dialog sets the AP location bit vanilla never provided (the joined branch
+    sets nothing at all). Always on — the location is always in the pool, like the
+    other recruit checks; see ``GEKOMON_*`` in ``data/addresses.py`` and
+    ``work/dw1_re/decomp/gekomon/NOTES.md``.
+    """
+
+    patch.write_token(APTokenTypes.WRITE, ROM_GEKOMON_SPLICE_OFFSET, ROM_GEKOMON_SPLICE_VALUE)
+
+
 def _write_notification_tokens(patch: DigimonWorldProcedurePatch) -> None:
     """In-game AP notifications — ten writes, all inside single sectors (see the notification
     section of ``data/addresses.py``; lab-validated through the three nets 2026-08-29, the
@@ -3131,6 +3146,7 @@ def write_patch(world: DigimonWorldWorld, output_directory: str) -> None:
     # Piximon's Training Manual location — opt-in §82 giveItem neuter.
     if int(options.piximon_manual_location.value):
         _write_piximon_manual_tokens(patch)
+    _write_gekomon_tokens(patch)
     # Enemy stat scaling / species randomization — resolved in post_fill
     # (needs the finished placement for the sphere walk); no tokens when
     # both options are off.

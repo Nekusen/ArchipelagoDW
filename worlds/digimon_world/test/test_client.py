@@ -241,9 +241,10 @@ class TestChestDispatch(DigimonWorldTestBase):
         # 1 boss-defeat event (Meteormon).
         # 25 item shop + 12 secret shop rows (shopsanity, 2026-08-21).
         # 1 Piximon's Training Manual (opt-in, trigger 877, 2026-08-21).
+        # 1 Gekomon arena dialog (opt-in with arena_locations, trigger 780, 2026-08-29).
         self.assertEqual(
             len(LOCATION_RAM_BITS),
-            43 + 63 + 8 + 10 + 7 + 14 + 25 + 12 + 5 + 20 + 1 + 1,
+            43 + 63 + 8 + 10 + 7 + 14 + 25 + 12 + 5 + 20 + 1 + 1 + 1,
         )
 
 

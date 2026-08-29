@@ -45,6 +45,7 @@ from worlds.generic.Rules import add_rule
 from .data.addresses import (
     ARENA_CUP_TIERS,
     FISHING_LOCATION_NAMES,
+    GEKOMON_LOCATION_NAME,
     ITEM_SHOP_LOCATION_NAMES,
     ITEM_SHOP_TIER_COUNTS,
     PIXIMON_MANUAL_LOCATION_NAME,
@@ -53,9 +54,9 @@ from .data.addresses import (
 )
 from .items import PROSPERITY_PER_ITEM
 from .locations import (
+    _CHEST_BY_SLOT,
     ARENA_CUP_NAMES,
     RECRUIT_PP_REQUIREMENTS,
-    _CHEST_BY_SLOT,
 )
 from .options import get_locked_regions
 from .regions import _EDGES, region_access_item_name
@@ -997,6 +998,12 @@ def _set_arena_cup_rules(world: DigimonWorldWorld) -> None:
             except KeyError:
                 continue   # tier excluded by arena_locations option
             world.set_rule(loc, Has(_PROGRESSIVE_ARENA_NAME, count=count))
+    # Gekomon's "joined the Arena!" dialog (Volume Villa, Script 135 §8) is
+    # gated in-game on the arena existing — Greymon's bit, which the AP build
+    # redirects to the Progressive Arena T1 mirror — and on nothing else. A
+    # recruit-set location with no item of its own (Gekomon is bundled into
+    # Progressive Arena), always in the pool, no PP term (user, 2026-08-29).
+    world.set_rule(world.get_location(GEKOMON_LOCATION_NAME), Has(_PROGRESSIVE_ARENA_NAME, count=1))
     # Keep the addresses-side and locations-side tables exercised.
     assert len(ARENA_CUP_NAMES) == len(ARENA_CUP_TIERS) * 4
 

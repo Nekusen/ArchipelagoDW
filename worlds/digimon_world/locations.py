@@ -17,6 +17,7 @@ the same way:
 * ``69_061_xxx`` — Boss-defeat events (always on)
 * ``69_062_xxx`` — item shop AP rows (25, opt-in via :class:`worlds.digimon_world.options.ItemShopLocations`)
 * ``69_063_xxx`` — secret shop AP rows (12, opt-in via :class:`worlds.digimon_world.options.SecretShopLocations`)
+* ``69_064_xxx`` — Gekomon's arena-dialog recruit check (1, always on; no item of its own)
 
 Locked v1 MVP scope: chests + recruits + starter. NPC-gift "K Prosperity"
 locations are gone — prosperity is now a real AP item shipped in the
@@ -46,6 +47,7 @@ from .data.addresses import (
     BOSS_LOCATION_RAM_BITS,
     CARD_LOCATION_NIBBLES,
     FISHING_LOCATION_NAMES,
+    GEKOMON_LOCATION_NAME,
     ITEM_SHOP_LOCATION_NAMES,
     MERIT_SHOP_LOCATION_NAMES,
     NANIMON_QUEST_LOCATION_RAM_BITS,
@@ -707,6 +709,20 @@ assert len(_ARENA_CUP_LOCATIONS) == 20, len(_ARENA_CUP_LOCATIONS)
 
 ARENA_CUP_NAMES: Final[tuple[str, ...]] = tuple(_ARENA_CUP_LOCATIONS)
 
+# Gekomon's "joined the Arena!" dialog in Volume Villa (Script 135 §8) is the
+# game's whole Gekomon recruit: gated in-game on the arena existing
+# (Greymon's bit, the Progressive Arena T1 mirror on the AP build), no PP,
+# no city effect. User decision 2026-08-29: a recruit-set location with no
+# item of its own — Gekomon is one of the Digimon bundled into Progressive
+# Arena, so the rule is Progressive Arena x1 (``rules._set_arena_cup_rules``)
+# and the check is always in the pool (``arena_locations`` only covers checks
+# fired inside the arena). It stays out of ``RECRUIT_NAMES`` (no "<name>
+# Recruit" item, no 200+X bit, no PP row) and fires through a ROM splice that
+# makes the dialog set trigger 780 (``GEKOMON_*`` in :mod:`.data.addresses`).
+_GEKOMON_LOCATIONS: Final[dict[str, LocationEntry]] = {
+    GEKOMON_LOCATION_NAME: LocationEntry(69_064_000, "Geko Swamp"),
+}
+
 
 # =============================================================================
 # Boss-defeat locations (always on)
@@ -745,6 +761,7 @@ _BOSS_LOCATIONS: Final[dict[str, LocationEntry]] = {
 _LOCATION_TABLE: Final[dict[str, LocationEntry]] = {
     **{name: LocationEntry(_RECRUIT_DW_IDS[name], _RECRUIT_REGIONS[name])
        for name in RECRUIT_NAMES},
+    **_GEKOMON_LOCATIONS,
     **_CHEST_LOCATIONS,
     **_KEYITEM_LOCATIONS,
     **_PIXIMON_MANUAL_LOCATIONS,
@@ -765,7 +782,9 @@ LOCATION_NAME_TO_ID: Final[dict[str, int]] = {
 }
 
 LOCATION_NAME_GROUPS: Final[dict[str, set[str]]] = {
-    "Recruits": set(RECRUIT_NAMES),
+    # Gekomon rides the Recruits group: a recruit check with no item of its
+    # own (bundled into Progressive Arena).
+    "Recruits": set(RECRUIT_NAMES) | set(_GEKOMON_LOCATIONS),
     "Chests": set(_CHEST_LOCATIONS),
     # Piximon's Manual rides the Key Items group: it shares the
     # 69_004_xxx id block and the "in-game pickup turned check" shape

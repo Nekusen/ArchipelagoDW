@@ -213,7 +213,12 @@ These come from [docs/style.md](docs/style.md) and the ruff config and override 
   "Sent: <item> to <player>" / "Got: <item> from <player>"); a
   suspected Lava Cave boulder bypass through the
   Drill Tunnel <-> Mt. Panorama shortcut was retracted (the prompts read
-  the vanilla recruit bit; Drimogemon sits behind the boulder). Not
+  the vanilla recruit bit; Drimogemon sits behind the boulder). **Gekomon location shipped**
+  (recruit set, always on, no item — Gekomon is bundled into Progressive
+  Arena — rule Progressive Arena ×1; an 8-byte Script 135 §8 splice sets
+  trigger 780). Ogremon-chain softlock research (Drill Tunnel fight first
+  hangs; standalone fix semantics) in `work/dw1_re/decomp/ogremon_chain/`.
+  Not
   ported: recruit-identity
   shuffle, intro hash, happyVending, jukebox truncation, forced starter.
   Table audit corrected one claim: the element matrix is read by the
