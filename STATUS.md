@@ -22,9 +22,9 @@ project moved out of "build the world" and into **feature expansion + polish + v
 | World version | 0.6.0 (`minimum_ap_version` 0.6.7) |
 | Locations / items | 279 / 217 |
 | YAML options | 80, in 5 option groups |
-| World test suite | **1140 passed**, 4 skipped, 10532 subtests, ~18 s with `-n auto` (one class is disc-gated: it re-checks vanilla bytes when `Digimon World (USA).bin` sits at the repo root) |
+| World test suite | **1144 passed**, 4 skipped, 10532 subtests, ~18 s with `-n auto` (one class is disc-gated: it re-checks vanilla bytes when `Digimon World (USA).bin` sits at the repo root) |
 | Lint | `ruff` at a 322-finding baseline (303 pre-existing + the two census tools' CLI prints, T201, like the other lab tools) |
-| Commits ahead of `main` | 110 |
+| Commits ahead of `main` | 113 |
 | Decomp coverage | **31 / 1120** SLUS game functions verified — 2.8 % by count, **14.5 % of static call sites** |
 
 ### 1.1 What is shipped
@@ -210,9 +210,25 @@ the flag so the message is shown again later. The "Woah!" pickup box was investi
 rejected (a blocking three-line UI flow, ~70 words). Client side (`client.NotificationQueue`):
 "Got: <item> [from <player>]" on every delivered item, "Sent: <item>" on every `ItemSend` this
 player finds for another world, sanitised to the renderer's glyph set / 26-char width rule, one
-message at a time when the flag reads 0, bursts summarised. Residuals: screen-centre position
-under speech bubbles; a top-of-screen variant needs new Cave6 space. `IS_SCRIPT_PAUSED`
+message at a time when the flag reads 0, bursts summarised. `IS_SCRIPT_PAUSED`
 (0x80134FF4) turns out to be misnamed: 1 = no script running.
+
+**Same day, later — the banner moved to the top of the screen** (user decision: the centre is too
+invasive; `dw1-patch` agent through the three nets, NOTES.md §10). The vanilla loading banner
+must stay centred, so `renderMapName` is untouched: the two words of `addMapNameObject` that
+build the render pointer it hands to `addObject` now point at `renderMapNameAp`, a 29-word
+Cave6 dispatcher in two fragments (the gap after the AP item-description string + the retired
+recycle giveItem slot) — any real screen tail-jumps to vanilla `renderMapName`; screen 239
+composites the mailbox text with `renderString` at y = -112 (lines 8..20), clear of the clock
+HUD for any message up to 30 characters. Live: short and 27-char messages at the top, a vanilla
+map change mid-fade still centred, dialog / menu / pickup deferrals unchanged, cold boot on
+`notification_top.bin`; `addresses.py` builds the words from `NOTIFY_TOP_Y` /
+`NOTIFY_TOP_X_MODE` (a right-aligned variant was captured too, not shipped) and pins the lab
+words plus the vanilla dead code under both fragments (disc-gated test); a real-disc round
+trip confirmed the four new sites. Facts learned: the callback runs once per 30 Hz game loop
+(150 iterations ≈ 5 s), and **Cave6 is now code-full** (4 + 12 + 12 B left) — the next code
+feature goes through the heap claim. The dormant `isTriggerSet` head-wrapper constant overlaps
+fragment 1; a test keeps its writer uncalled.
 
 **Same day — the five dead region-gate rows FIXED** (`dw1-patch` agent, three nets; notes
 `work/dw1_re/decomp/gate_fix/NOTES.md`, spec `patches/gate_fix.json`): seven script-class gates
@@ -262,7 +278,6 @@ Grouped by **what blocks each item**, because that is what decides the order.
 
 | Item | What is needed | Why it matters |
 | --- | --- | --- |
-| **Notification banner position** | **Decided (2026-08-29): top of the screen** (the centre is too invasive). A `dw1-patch` mission is building it: `addMapNameObject`'s `renderMapName` pointer re-targeted at a Cave6 dispatcher (`mapId != 239` -> vanilla `renderMapName`, else the mailbox text at the top); the vanilla loading banner stays at the centre. Still the user's: top-centre vs top-right once the lab screenshots are in. | Purely visual; nets pending. |
 | **BizHawk validation session** | One play session on the real client against `work/dw1_re/BIZHAWK_SESSION_CHECKLIST.md` — now also the 2026-08-29 options (technique data, drops, gifts, QoL patches, digivolution, species lists, raising, music, notifications, the five re-gated borders). | Closes the August batches. May generate corrective work. |
 | **Savestate batch** | The states in [SAVESTATE_REQUESTS.md](worlds/digimon_world/tools/SAVESTATE_REQUESTS.md) — see §4. **First sitting done 2026-08-28** (6 states incl. the `debug_warp` teleport hub); Medium rows remain | Patch validation in the real game (fishing, training, post-game heap margin) |
 | **Gekomon recruit** | The vanilla recruit method, as text | New recruit; needs bit/visibility RE afterwards |
@@ -289,7 +304,7 @@ savestates are now for.
 | --- | --- | --- | --- |
 | **Entrance shuffle by region — PARKED (user decision 2026-08-29, future improvement)** | `MapWarps` per `.MAP` (walk-on) + script `warpTo` sites; graph and pool in `work/dw1_re/decomp/entrance_shuffle/NOTES.md`; AP side = generic ER (`disconnect_entrance_for_randomization` + `randomize_entrances(coupled=True)`), rules stay bound to the physical mouth, region-lock post-pass after ER. Also found: `changeMap` performs no variant remap (all variant selection is script-side) and two vanilla routes are missing from `regions.py` (GIAS02 §51 -> FACT05 iron door; post-story MAYO11 §53 <-> MIHA04B §51). | Validation is emulator-bound (3-5 days of the estimate). | PARKED: ~10-14 days if resumed (patcher 3-4, logic + tests 3-4, client 0.5-1, validation 3-5) — the logic re-keying is the part the user judged too large for now. If resumed: candidates to add = the DT <-> Mt.P prompt shortcut (B16, needs its Ogremon-fled clause neutralised in the two stubs) and the Seadramon ferry; B11/B12 only after checking MAYO02_2 pre-story. |
 | ~~**Region-locking dead gate rows**~~ **FIXED 2026-08-29** (seven script-class gates, `_SCRIPT_GATE_FIX_PATCHES` in `addresses.py`, 24 writes validated through the three nets) | See §1.1. The suspected Lava Cave boulder bypass through the DT <-> Mt.P shortcut was a false alarm (the prompts read the vanilla recruit bit; Drimogemon sits behind the boulder). | `gate_fix_map{7,17,17_cent,23,44,69,88}.state` (vanilla) + `gate_fix_n3_map{69,7}.state` (patched) in `work/dw1_re/`. | None. `regions.py` edges for the shortcut would add no reachability (same requirement as the Meramon Tunnel route). |
-| ~~**In-game check notifications**~~ **SHIPPED 2026-08-29** (`in_game_notifications`) | Not the dialog line-buffer route after all: the area-name banner path (`addMapNameObject` / `renderMapName`, all C) driven from a spliced render callback in Cave6; see §1.1. | `notification_field.state` (banner on screen, patched disc) exists for regressions. | Open only cosmetics: top-of-screen / boxed variant needs ~26 more words of Cave6 (two-fragment placement or a heap-claim extension). |
+| ~~**In-game check notifications**~~ **SHIPPED 2026-08-29** (`in_game_notifications`) | Not the dialog line-buffer route after all: the area-name banner path (`addMapNameObject` / `renderMapName`, all C) driven from a spliced render callback in Cave6; see §1.1. | `notification_field.state` (centre variant) and `notification_top_field.state` (shipped top variant, on `notification_top.bin`) exist for regressions. | Done — at the top of the screen since the same day (§1.1). A *boxed* banner would need the UI-box flow (~70 words) on heap-claimed RAM; not requested. |
 | ~~**Enemy-stat scaling by sphere**~~ **SHIPPED 2026-08-28** as `enemy_stats: progressive` | Turned out to be data: every field Digimon is a `.MAP` record (`loadMapDigimon`, Ghidra export) that the battle copies verbatim (`BTL_initializeCombat`); no code hook. | Validated: `enemy_poc_map2.state`, `enemy_poc_battle.state` (edited record fought) | Done in the lab (3 nets). **Open**: the user's BizHawk pass, and whether the default policy (vanilla region budgets re-assigned by sphere depth, one factor per region so bosses stay proportionally tougher) is the balance they want. |
 | ~~**Species technique lists**~~ **SHIPPED 2026-08-29** as `species_technique_lists` (in-place, class- and element-preserving) | Settled by the `.MMD` animation census: lists cannot grow (a model carries animations for exactly its populated slots; only MegaSeadramon / Machinedramon have one spare), so the option re-fills slots in place. The element matrix is a damage multiplier (sum of the defender-specialty cells / 30, read from the BTL / STD assembly) and the partner AI's ranking key. | None. Runtime check in the user's BizHawk pass (a wild Digimon using a swapped technique; brain training / battle learning of a swapped partner technique). | Provenance only: a VERIFIED replay of `BTL_calculateDamage` against the three battle states. |
 | ~~**Digivolution randomization**~~ **SHIPPED 2026-08-29** (`digivolution_randomization` + obtain-all / requirements / special) | Tree `EVO_PATHS_DATA[62]` (`EvolutionPath{from[5], to[6]}`, 0x8012B66C, walked by `evolution.c:60-230`; Fresh -> In-Training hard-coded in `getFreshEvolutionTarget`), requirements `EVO_REQ_DATA[63]` (`evl.h:47-62`, scored by `calculateRequirementScore` `evolution.c:303-411`), gains `EVO_GAINS_DATA[66]` (applied in `EVL_applyEvolution` 0x80063350, ASM-only — only Devimon's row is rewritten), special evolutions = SLUS immediates in `handleSpecialEvolutions` (`evolution.c:231-300`) + script bytes (`ROM_SPECIAL_EVO`). Pure data; no AP-logic change — the option warns that the three partner-gated areas become luck without `type_lock_unlocks`. | None. Runtime validation pending in the user's BizHawk pass (a natural digivolution under random requirements, a death digivolution, the suit). | Open follow-up only: `EVL_applyEvolution` decomp if the gains table is ever randomized beyond Devimon. |
@@ -313,6 +328,8 @@ and locations.
   greyed-out-row sighting in Volume Villa.
 - **Trigger-bit budget is nearly exhausted**: 780..783 are the last audited-free bits; ids ≥ 800
   overlap the pstat array and are off limits. Any new flag needs a claim decision first.
+- **Cave6 is code-full** (2026-08-29): 4 + 12 + 12 B left after the top-banner renderer; any new
+  resident code must be claimed from the heap (the ITEM_PARA claim word, `0x80113AB4`).
 - The `>=800-is-pstat` audit's *method* (static constant-caller census) under-counted the pstat
   range — live capture saw targets up to 254. Its conclusion for the bytes AP claims still holds;
   future claims must be vector-captured, not grepped.
@@ -507,7 +524,7 @@ dependency left is the **savestate batch**, and its role changed from "verify ou
 | Savestate queue | `worlds/digimon_world/tools/SAVESTATE_REQUESTS.md` |
 | Decomp ledger + units (gitignored) | `work/dw1_re/decomp/LEDGER.md`, `work/dw1_re/decomp/<unit>/` |
 | Function census (gitignored) | `work/dw1_re/function_census.tsv` |
-| Lab savestates (gitignored) | `work/dw1_re/*.state` (32; `debug_warp.state` is the teleport hub) |
+| Lab savestates (gitignored) | `work/dw1_re/*.state` (49; `debug_warp.state` is the teleport hub) |
 | Savestate on any screen, unattended | `worlds/digimon_world/tools/dw1_warp_state.py --map <id> --out <name>` |
 | Capture-session log (gitignored) | `work/dw1_re/session_2026-08-28_savestates.md` |
 | BizHawk validation checklist (gitignored) | `work/dw1_re/BIZHAWK_SESSION_CHECKLIST.md` |

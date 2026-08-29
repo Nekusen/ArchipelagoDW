@@ -6,6 +6,7 @@ lab-validated through the three PATCH_PROCESS nets on 2026-08-29
 from __future__ import annotations
 
 import asyncio
+import inspect
 import os
 import struct
 import unittest
@@ -30,14 +31,32 @@ from ..data.addresses import (
     NOTIFY_MAP_NAME_PTR_VANILLA,
     NOTIFY_MAP_NAME_SLOT,
     NOTIFY_TEXT_MAX_CHARS,
+    NOTIFY_TOP_F1_RAM,
+    NOTIFY_TOP_F1_VANILLA_WORDS,
+    NOTIFY_TOP_F1_WORDS,
+    NOTIFY_TOP_F2_RAM,
+    NOTIFY_TOP_F2_VANILLA_WORDS,
+    NOTIFY_TOP_F2_WORDS,
+    NOTIFY_TOP_HOOK_ADDIU_PATCHED,
+    NOTIFY_TOP_HOOK_ADDIU_VANILLA,
+    NOTIFY_TOP_HOOK_LUI_PATCHED,
+    NOTIFY_TOP_HOOK_LUI_VANILLA,
+    NOTIFY_TOP_RENDER_MAP_NAME_RAM,
+    NOTIFY_TOP_Y,
     RAM_NOTIFY_FLAG,
     RAM_NOTIFY_TEXT,
+    ROM_ISTRIGGERSET_WRAPPER_RAM,
     ROM_NOTIFY_CALLBACK_OFFSET,
     ROM_NOTIFY_HOOK_ADDIU_OFFSET,
     ROM_NOTIFY_HOOK_LUI_OFFSET,
     ROM_NOTIFY_LOADING_NAME_OFFSET,
     ROM_NOTIFY_MAILBOX_OFFSET,
     ROM_NOTIFY_MAP_NAME_PTR_OFFSET,
+    ROM_NOTIFY_TOP_F1_OFFSET,
+    ROM_NOTIFY_TOP_F2_OFFSET,
+    ROM_NOTIFY_TOP_HOOK_ADDIU_OFFSET,
+    ROM_NOTIFY_TOP_HOOK_LUI_OFFSET,
+    _build_notify_top_words,
 )
 from .bases import DigimonWorldTestBase
 
@@ -82,24 +101,65 @@ class _Ctx:
         self.player_names = {1: "Rt", 2: "Link"}
 
 
+def _words(words: tuple[int, ...]) -> bytes:
+    return b"".join(struct.pack("<I", w) for w in words)
+
+
 class TestTokens(unittest.TestCase):
-    def test_six_writes(self) -> None:
+    def test_ten_writes(self) -> None:
         patch = _TokenCollector()
         rom_module._write_notification_tokens(patch)  # type: ignore[arg-type]
         tokens = dict(patch.tokens)
-        self.assertEqual(len(patch.tokens), 6)
-        self.assertEqual(tokens[ROM_NOTIFY_CALLBACK_OFFSET],
-                         b"".join(struct.pack("<I", w) for w in NOTIFY_CALLBACK_WORDS))
+        self.assertEqual(len(patch.tokens), 10)
+        self.assertEqual(tokens[ROM_NOTIFY_CALLBACK_OFFSET], _words(NOTIFY_CALLBACK_WORDS))
         self.assertEqual(tokens[ROM_NOTIFY_MAILBOX_OFFSET], bytes(NOTIFY_MAILBOX_SIZE))
         self.assertEqual(tokens[ROM_NOTIFY_HOOK_LUI_OFFSET], struct.pack("<I", NOTIFY_HOOK_LUI_PATCHED))
         self.assertEqual(tokens[ROM_NOTIFY_HOOK_ADDIU_OFFSET], struct.pack("<I", NOTIFY_HOOK_ADDIU_PATCHED))
         self.assertEqual(tokens[ROM_NOTIFY_MAP_NAME_PTR_OFFSET], struct.pack("<I", NOTIFY_MAILBOX_RAM + 4))
         self.assertEqual(tokens[ROM_NOTIFY_LOADING_NAME_OFFSET], bytes([NOTIFY_MAP_NAME_SLOT]))
+        self.assertEqual(tokens[ROM_NOTIFY_TOP_F1_OFFSET], _words(NOTIFY_TOP_F1_WORDS))
+        self.assertEqual(tokens[ROM_NOTIFY_TOP_F2_OFFSET], _words(NOTIFY_TOP_F2_WORDS))
+        self.assertEqual(tokens[ROM_NOTIFY_TOP_HOOK_LUI_OFFSET], struct.pack("<I", NOTIFY_TOP_HOOK_LUI_PATCHED))
+        self.assertEqual(tokens[ROM_NOTIFY_TOP_HOOK_ADDIU_OFFSET], struct.pack("<I", NOTIFY_TOP_HOOK_ADDIU_PATCHED))
 
     def test_callback_shape(self) -> None:
         self.assertEqual(len(NOTIFY_CALLBACK_WORDS), 28)
         self.assertEqual(NOTIFY_CALLBACK_WORDS[-2], 0x03E00008)        # jr ra
         self.assertEqual(NOTIFY_CALLBACK_WORDS[-1], 0)                 # delay slot nop
+
+    def test_top_renderer_shape(self) -> None:
+        """The two fragments of ``renderMapNameAp``: sizes, control flow, the y immediate, and the
+        vanilla path leaving the stack pointer where it found it."""
+        self.assertEqual((len(NOTIFY_TOP_F1_WORDS), len(NOTIFY_TOP_F2_WORDS)), (12, 17))
+        f1, f2 = NOTIFY_TOP_F1_WORDS, NOTIFY_TOP_F2_WORDS
+        self.assertEqual(f1[0], 0x240100EF)                                    # at = 239
+        self.assertEqual(f1[1], 0x10810003)                                    # beq a0, at, +3
+        self.assertEqual(f1[3], 0x08000000 | ((NOTIFY_TOP_RENDER_MAP_NAME_RAM >> 2) & 0x03FFFFFF))   # j renderMapName
+        self.assertEqual((f1[2] & 0xFFFF, f1[4] & 0xFFFF), (0xFFD8, 0x0028))   # open / close the frame
+        self.assertEqual(f1[10], 0x08000000 | ((NOTIFY_TOP_F2_RAM >> 2) & 0x03FFFFFF))   # hop to F2
+        self.assertEqual(f2[10], 0x24060000 | (NOTIFY_TOP_Y & 0xFFFF))         # a2 = y
+        self.assertEqual(f2[-2:], (0x03E00008, 0))                             # jr ra; nop
+        self.assertEqual(((NOTIFY_TOP_HOOK_LUI_PATCHED & 0xFFFF) << 16) | (NOTIFY_TOP_HOOK_ADDIU_PATCHED & 0xFFFF),
+                         NOTIFY_TOP_F1_RAM)
+
+    def test_top_renderer_right_mode(self) -> None:
+        """The right-aligned variant differs from the shipped words only where the lab's
+        ``notification_top_right.json`` did: the x constant and the three width-dependent words."""
+        f1, f2 = _build_notify_top_words(-112, "right", 12, 148)
+        diff1 = [i for i, (a, b) in enumerate(zip(f1, NOTIFY_TOP_F1_WORDS, strict=True)) if a != b]
+        diff2 = [i for i, (a, b) in enumerate(zip(f2, NOTIFY_TOP_F2_WORDS, strict=True)) if a != b]
+        self.assertEqual((diff1, diff2), ([9], [5, 6, 9]))
+        self.assertEqual(f1[9], 0x24050098)                                    # a1 = 152
+        self.assertEqual((f2[5], f2[6], f2[9]), (0, 0, 0x00A72823))            # nop, nop, subu a1, a1, a3
+
+    def test_dormant_istriggerset_wrapper_stays_retired(self) -> None:
+        """Its Cave6 range overlaps fragment 1 (and the AP item description string): the writer
+        exists for its design notes only and must never be called."""
+        self.assertGreater(ROM_ISTRIGGERSET_WRAPPER_RAM + 80, NOTIFY_TOP_F1_RAM)   # the overlap this guards
+        source = inspect.getsource(rom_module)
+        calls = [ln for ln in source.splitlines()
+                 if "_write_istriggerset_wrapper_tokens(" in ln and not ln.lstrip().startswith("def ")]
+        self.assertEqual(calls, [])
 
 
 @unittest.skipUnless(_VANILLA_BIN.exists() or os.environ.get("DW1_VANILLA_BIN"), "vanilla disc not available")
@@ -111,6 +171,17 @@ class TestVanillaBytesOnDisc(unittest.TestCase):
         self.assertEqual(struct.unpack_from("<I", rom, ROM_NOTIFY_MAP_NAME_PTR_OFFSET)[0],
                          NOTIFY_MAP_NAME_PTR_VANILLA)
         self.assertEqual(rom[ROM_NOTIFY_LOADING_NAME_OFFSET], 0)
+
+    def test_top_renderer_sites(self) -> None:
+        rom = Path(os.environ.get("DW1_VANILLA_BIN", _VANILLA_BIN)).read_bytes()
+        self.assertEqual(struct.unpack_from("<I", rom, ROM_NOTIFY_TOP_HOOK_LUI_OFFSET)[0],
+                         NOTIFY_TOP_HOOK_LUI_VANILLA)
+        self.assertEqual(struct.unpack_from("<I", rom, ROM_NOTIFY_TOP_HOOK_ADDIU_OFFSET)[0],
+                         NOTIFY_TOP_HOOK_ADDIU_VANILLA)
+        self.assertEqual(rom[ROM_NOTIFY_TOP_F1_OFFSET:ROM_NOTIFY_TOP_F1_OFFSET + 48],
+                         _words(NOTIFY_TOP_F1_VANILLA_WORDS))
+        self.assertEqual(rom[ROM_NOTIFY_TOP_F2_OFFSET:ROM_NOTIFY_TOP_F2_OFFSET + 68],
+                         _words(NOTIFY_TOP_F2_VANILLA_WORDS))
 
 
 class TestSanitizer(unittest.TestCase):

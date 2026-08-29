@@ -131,6 +131,10 @@ from .data.addresses import (
     NOTIFY_MAILBOX_RAM,
     NOTIFY_MAILBOX_SIZE,
     NOTIFY_MAP_NAME_SLOT,
+    NOTIFY_TOP_F1_WORDS,
+    NOTIFY_TOP_F2_WORDS,
+    NOTIFY_TOP_HOOK_ADDIU_PATCHED,
+    NOTIFY_TOP_HOOK_LUI_PATCHED,
     RAINBOWHORN_ITEM_ID,
     RAINBOWHORN_NEW_CLUT_INDEX,
     RAINBOWHORN_TILE_BIN_OFFSETS,
@@ -273,6 +277,10 @@ from .data.addresses import (
     ROM_NOTIFY_LOADING_NAME_OFFSET,
     ROM_NOTIFY_MAILBOX_OFFSET,
     ROM_NOTIFY_MAP_NAME_PTR_OFFSET,
+    ROM_NOTIFY_TOP_F1_OFFSET,
+    ROM_NOTIFY_TOP_F2_OFFSET,
+    ROM_NOTIFY_TOP_HOOK_ADDIU_OFFSET,
+    ROM_NOTIFY_TOP_HOOK_LUI_OFFSET,
     ROM_OGREMON_SOFTLOCK_FORMAT,
     ROM_OGREMON_SOFTLOCK_OFFSETS,
     ROM_OGREMON_SOFTLOCK_VALUE,
@@ -1170,7 +1178,10 @@ def _write_istriggerset_wrapper_tokens(patch: DigimonWorldProcedurePatch) -> Non
     read at runtime -- it is not. The mirror was a previous design
     that did not ship.
 
-    Safe to delete in a future cleanup pass.
+    Safe to delete in a future cleanup pass. **Must not be revived as is**: since
+    2026-08-29 its Cave6 range (``ROM_ISTRIGGERSET_WRAPPER_RAM`` 0x800958B0 + 80 B)
+    overlaps ``AP_ITEM_DESC_STRING`` and fragment 1 of the notification top-banner
+    renderer (``NOTIFY_TOP_F1_RAM``); ``test_notifications`` asserts it stays uncalled.
 
     Original design notes follow.
 
@@ -2780,13 +2791,18 @@ def _write_bgm_tokens(patch: DigimonWorldProcedurePatch, plan: BgmPlan) -> None:
 
 
 def _write_notification_tokens(patch: DigimonWorldProcedurePatch) -> None:
-    """In-game AP notifications — six writes, all inside single sectors (see the notification
-    section of ``data/addresses.py``; lab-validated through the three nets 2026-08-29):
+    """In-game AP notifications — ten writes, all inside single sectors (see the notification
+    section of ``data/addresses.py``; lab-validated through the three nets 2026-08-29, the
+    top-of-screen renderer the same day):
 
     * the 28-word render callback and the zero-filled mailbox in Cave6;
     * the ``lui`` / ``addiu`` pair of ``initializeFileReadQueue`` that installs the callback;
     * ``MAP_NAME_PTR[66] = &mailbox.text`` and ``MAP_ENTRIES[239].loadingName = 66`` so the
-      game's own area-name banner draws the mailbox text.
+      game's own area-name banner draws the mailbox text;
+    * the two-fragment ``renderMapNameAp`` renderer and the ``lui`` / ``addiu`` pair of
+      ``addMapNameObject`` that routes every banner object through it — the AP banner
+      (screen 239) is composited at the top of the screen, every real screen's loading
+      banner tail-jumps to the vanilla ``renderMapName`` (centre).
     """
 
     patch.write_token(APTokenTypes.WRITE, ROM_NOTIFY_CALLBACK_OFFSET,
@@ -2797,6 +2813,14 @@ def _write_notification_tokens(patch: DigimonWorldProcedurePatch) -> None:
     patch.write_token(APTokenTypes.WRITE, ROM_NOTIFY_MAP_NAME_PTR_OFFSET,
                       struct.pack("<I", NOTIFY_MAILBOX_RAM + 4))
     patch.write_token(APTokenTypes.WRITE, ROM_NOTIFY_LOADING_NAME_OFFSET, bytes([NOTIFY_MAP_NAME_SLOT]))
+    patch.write_token(APTokenTypes.WRITE, ROM_NOTIFY_TOP_F1_OFFSET,
+                      b"".join(struct.pack("<I", word) for word in NOTIFY_TOP_F1_WORDS))
+    patch.write_token(APTokenTypes.WRITE, ROM_NOTIFY_TOP_F2_OFFSET,
+                      b"".join(struct.pack("<I", word) for word in NOTIFY_TOP_F2_WORDS))
+    patch.write_token(APTokenTypes.WRITE, ROM_NOTIFY_TOP_HOOK_LUI_OFFSET,
+                      struct.pack("<I", NOTIFY_TOP_HOOK_LUI_PATCHED))
+    patch.write_token(APTokenTypes.WRITE, ROM_NOTIFY_TOP_HOOK_ADDIU_OFFSET,
+                      struct.pack("<I", NOTIFY_TOP_HOOK_ADDIU_PATCHED))
 
 
 def _write_gift_tokens(patch: DigimonWorldProcedurePatch, plan: GiftPlan) -> None:

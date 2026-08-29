@@ -7250,11 +7250,17 @@ def _slus_ram_to_bin_offset(ram_addr: int) -> int:
 #   0x80095800..0x800958B4  merit shop wrapper (180 B for N=1 dispatch entry,
 #                            grows by 28 B per additional dispatch entry)
 #   0x800958B4..0x800958CD  AP_ITEM_DESC_STRING (25 B, "Item from the multiworld")
-#   0x800958CD..0x80095900  ~51-byte gap
+#   0x800958D0..0x80095900  notification top-banner renderer, fragment 1
+#                            (48 B, opt-in `in_game_notifications`; was the
+#                            ~51-byte gap. NOTE: the dormant isTriggerSet
+#                            wrapper constant 0x800958B0 + 80 B overlaps this
+#                            AND the desc string — that writer stays retired)
 #   0x80095900..0x8009593C  combat trampolines tr1+tr2+tr3 (60 B,
 #                            installed only when combat_stat_multiplier > 1)
-#   0x80095940..0x8009597C  retired v1 recycle giveItem wrapper slot
-#                            (60 B, no longer written — free)
+#   0x8009593C..0x80095980  notification top-banner renderer, fragment 2
+#                            (68 B, opt-in; was the retired v1 recycle
+#                            giveItem wrapper slot 0x80095940..0x8009597C
+#                            plus its edges)
 #   0x80095980..0x80095D80  RELOC_ITEM_DESC_PTR (1024 B, opt-in) <- this section
 #   0x80095D80..0x80095F40  AP_DESC_STRINGS (448 B, opt-in)       <-
 #   0x80095F40..0x80096BCC  tail, claimed piecemeal by later features:
@@ -7270,7 +7276,8 @@ def _slus_ram_to_bin_offset(ram_addr: int) -> int:
 #       occupies the space of the retired merit scan/name teleport
 #       wrappers)
 #     - transition-gate wrapper + table 0x800966C4..0x800967F0
-#       (region-gate section at the bottom of this file), 16 B spare
+#       (region-gate section at the bottom of this file), then
+#       SHOP_AP_CONFIG 0x800967F0..0x800967F4 (4 B) and 12 B spare
 #       before the sector-148350 boundary at 0x80096800
 #     - EXT_ITEM_PARA seed block 0x80096800..0x80096BC0 (960 B = 30
 #       slots, ALWAYS-ON zero-fill + opt-in shop entries; reuses the
@@ -7278,9 +7285,13 @@ def _slus_ram_to_bin_offset(ram_addr: int) -> int:
 #     - AP notification mailbox 0x80095FBC..0x80096000 (68 B, opt-in
 #       `in_game_notifications`, fills the former 70-B gap) and its
 #       render callback 0x80096650..0x800966C0 (112 B, the former
-#       116-B free range; see the notification section at the bottom)
+#       116-B free range) and the top-banner renderer fragments at
+#       0x800958D0 / 0x8009593C listed above (see the notification
+#       section at the bottom)
 #     Remaining free: 0x800966C0..0x800966C4 (4 B),
-#     0x800967F0..0x80096800 (16 B) and 0x80096BC0..0x80096BCC (12 B).
+#     0x800967F4..0x80096800 (12 B) and 0x80096BC0..0x80096BCC (12 B) —
+#     no code-sized range is left; the next feature that needs code goes
+#     through the heap-claim word (0x80113AB4, ITEM_PARA section).
 #
 # Recycle-shop usage adds 1472 bytes inside Cave6, well within the
 # remaining headroom. An assertion at the bottom of this block enforces
@@ -11262,8 +11273,10 @@ BGM_MODE_DAY_ONLY: Final = 1
 #
 # Lab-validated 2026-08-29 through the three PATCH_PROCESS nets (dw1-patch
 # agent; ``work/dw1_re/decomp/notifications/NOTES.md``): the client writes a
-# short ASCII message into a RAM mailbox and the game shows it, centred on
-# screen for 150 frames, through its own area-name banner path --
+# short ASCII message into a RAM mailbox and the game shows it at the top of
+# the screen (top-banner renderer below; the vanilla loading banner keeps the
+# centre) for 150 game-loop iterations (~5 s at the 30 Hz game loop), through
+# its own area-name banner path --
 # ``addMapNameObject(239)`` draws ``MAP_NAME_PTR[MAP_ENTRIES[239].loadingName]``
 # and registers the ``renderMapName`` object; ``removeObject`` takes it down.
 # Screen 239 is an all-zero ``MAP_ENTRIES`` row and ``MAP_NAME_PTR[66]`` an
@@ -11331,5 +11344,174 @@ assert NOTIFY_MAILBOX_RAM + NOTIFY_MAILBOX_SIZE <= 0x80096000                # m
 assert NOTIFY_MAILBOX_RAM >= 0x80095F80 + 58                                   # after the icon-id table
 for _off, _size in ((ROM_NOTIFY_CALLBACK_OFFSET, len(NOTIFY_CALLBACK_WORDS) * 4),
                     (ROM_NOTIFY_MAILBOX_OFFSET, NOTIFY_MAILBOX_SIZE)):
+    assert (_off - 24) % 2352 + _size <= 2048, hex(_off)   # single-sector writes
+del _off, _size
+
+# --- Top-of-screen renderer (lab-validated 2026-08-29, dw1-patch agent; NOTES.md §10) ----------
+#
+# The banner object that ``addMapNameObject`` registers renders through
+# ``renderMapName`` (``map.c:2939``): ``renderString(0, 12 - (len/2)*8, -6,
+# len*8 + 4, 12, 0, 0, 0, 0)``. Its coordinates are screen-centre-origin on
+# the 320x240 frame, so y = -6 puts the 12-px row on lines 114..126 -- the
+# middle of the screen, which the user found too invasive for AP messages.
+# The vanilla loading banner must stay there, so instead of touching
+# ``renderMapName`` the two words of ``addMapNameObject`` that build the
+# render pointer handed to ``addObject(0xfa1, mapId, NULL, fn)`` -- ``lui a3``
+# @ 0x800D8FF8 and ``addiu a3`` @ 0x800D900C, the ``jal addObject`` delay slot
+# -- are re-targeted at ``renderMapNameAp`` in Cave6:
+#
+#     if (mapId != 239) j renderMapName            (a0 / ra / sp exactly as vanilla)
+#     len = strlen(mailbox.text)                   (BIOS A-table thunk @ 0x8009121C)
+#     renderString(0, X_BASE - (len/2)*8, Y_TOP, len*8 + 4, 12, 0, 0, 0, 0)
+#
+# 29 words in two fragments joined by a ``j`` (F1 = the gap after
+# ``AP_ITEM_DESC_STRING``, F2 = the retired v1 recycle giveItem slot plus
+# its edges); the ``beq`` delay slot opens the 0x28 frame for both paths and
+# the ``j renderMapName`` delay slot closes it again for the vanilla path,
+# so the vanilla path writes nothing. ``Y_TOP = -112`` puts the row on lines
+# 8..20, clear of the clock HUD (x 16..48, y 14..50) for any message up to
+# 30 characters; a y scan down to -112 showed no clipping. ``X_MODE =
+# "right"`` right-aligns the composited rect at ``X_RIGHT + 4`` instead
+# (parameter kept, not shipped). Lab: both modes 267/267 in the C model,
+# live on the field / dark ground / after dialog, menu and pickup, a vanilla
+# map change mid-fade still centred, cold boot on ``notification_top.bin``.
+# The callback runs once per 30 Hz game loop, so ``NOTIFY_DURATION_FRAMES``
+# = 150 is ~5 s of wall time.
+#
+# The dormant isTriggerSet head-wrapper (``ROM_ISTRIGGERSET_WRAPPER_RAM`` =
+# 0x800958B0, 80 B) overlaps F1 AND ``AP_ITEM_DESC_STRING``; its writer is
+# never called (``rom._write_istriggerset_wrapper_tokens``, guarded by
+# ``test_notifications``) and must stay retired.
+
+NOTIFY_TOP_F1_RAM: Final = 0x800958D0            # Cave6, 12 words: the gap after AP_ITEM_DESC_STRING
+NOTIFY_TOP_F2_RAM: Final = 0x8009593C            # Cave6, 17 words: retired v1 recycle giveItem slot + edges
+NOTIFY_TOP_Y: Final = -112                       # renderString y -> the 12-px row sits on lines 8..20
+NOTIFY_TOP_X_MODE: Final = "centre"              # "centre" (vanilla formula) or "right"
+NOTIFY_TOP_X_BASE: Final = 12                    # centre mode: x = X_BASE - (len/2)*8 (vanilla constant)
+NOTIFY_TOP_X_RIGHT: Final = 148                  # right mode: composited rect right edge at X_RIGHT + 4
+NOTIFY_TOP_RENDER_MAP_NAME_RAM: Final = 0x800D9258   # vanilla renderMapName (tail-jump target)
+NOTIFY_TOP_STRLEN_RAM: Final = 0x8009121C            # BIOS A-table thunk for strlen (A 0x1B)
+NOTIFY_TOP_RENDER_STRING_RAM: Final = 0x800E5B50     # renderString, 9 args (o32: 5 on the stack)
+NOTIFY_TOP_FRAME: Final = 0x28                   # 0x10 home + 0x14 stack args + ra @ 0x24
+
+
+def _build_notify_top_words(y_top: int, x_mode: str, x_base: int, x_right: int) -> tuple[tuple[int, ...],
+                                                                                          tuple[int, ...]]:
+    """Assemble ``renderMapNameAp`` -- the (F1, F2) word tuples.
+
+    Registers: at = 1, v0 = 2, v1 = 3, a0..a3 = 4..7, sp = 29, ra = 31. Every branch / jump
+    delay slot below is deliberate; the only load (``lw ra``) is followed by ``addiu sp``
+    before ``jr ra`` consumes it.
+    """
+
+    def addiu(rt: int, rs: int, imm: int) -> int:
+        return 0x24000000 | (rs << 21) | (rt << 16) | (imm & 0xFFFF)
+
+    def mem(op: int, rt: int, rs: int, imm: int) -> int:
+        return op | (rs << 21) | (rt << 16) | (imm & 0xFFFF)
+
+    def shift(fn: int, rd: int, rt: int, sh: int) -> int:
+        return (rt << 16) | (rd << 11) | (sh << 6) | fn
+
+    def reg(fn: int, rd: int, rs: int, rt: int) -> int:
+        return (rs << 21) | (rt << 16) | (rd << 11) | fn
+
+    def jump(op: int, target: int) -> int:
+        return op | ((target >> 2) & 0x03FFFFFF)
+
+    right = x_mode == "right"
+    f1 = (
+        addiu(1, 0, NOTIFY_SCREEN_ID),                          # at = 239
+        0x10000000 | (4 << 21) | (1 << 16) | 3,                 # beq a0, at, +3   (AP path)
+        addiu(29, 29, -NOTIFY_TOP_FRAME),                       #   (delay) open the frame for both paths
+        jump(0x08000000, NOTIFY_TOP_RENDER_MAP_NAME_RAM),       # vanilla banner: j renderMapName
+        addiu(29, 29, NOTIFY_TOP_FRAME),                        #   (delay) close the frame again
+        mem(0xAC000000, 31, 29, 0x24),                          # sw ra, 0x24(sp)
+        0x3C040000 | (NOTIFY_MAILBOX_RAM >> 16),                # lui a0, hi(mailbox)
+        jump(0x0C000000, NOTIFY_TOP_STRLEN_RAM),                # jal strlen
+        addiu(4, 4, NOTIFY_MAILBOX_RAM + NOTIFY_TEXT_OFFSET),   #   (delay) a0 = &mailbox.text
+        addiu(5, 0, x_right + 4 if right else x_base),          # a1 = x constant
+        jump(0x08000000, NOTIFY_TOP_F2_RAM),                    # j F2
+        addiu(3, 0, 12),                                        #   (delay) v1 = row height
+    )
+    f2 = (
+        mem(0xAC000000, 3, 29, 0x10),                           # sw v1, 0x10(sp)    arg 5: h = 12
+        mem(0xAC000000, 0, 29, 0x14),                           # sw zero, 0x14(sp)  arg 6
+        mem(0xAC000000, 0, 29, 0x18),                           #                    arg 7
+        mem(0xAC000000, 0, 29, 0x1C),                           #                    arg 8
+        mem(0xAC000000, 0, 29, 0x20),                           #                    arg 9
+        0 if right else shift(0x02, 4, 2, 1),                   # srl a0, v0, 1      len / 2
+        0 if right else shift(0x00, 4, 4, 3),                   # sll a0, a0, 3      (len / 2) * 8
+        shift(0x00, 7, 2, 3),                                   # sll a3, v0, 3      len * 8
+        addiu(7, 7, 4),                                         # a3 = len * 8 + 4   (w)
+        reg(0x23, 5, 5, 7 if right else 4),                     # subu a1, a1, a3|a0 (x)
+        addiu(6, 0, y_top),                                     # a2 = y
+        jump(0x0C000000, NOTIFY_TOP_RENDER_STRING_RAM),         # jal renderString
+        reg(0x21, 4, 0, 0),                                     #   (delay) a0 = 0
+        mem(0x8C000000, 31, 29, 0x24),                          # lw ra, 0x24(sp)
+        addiu(29, 29, NOTIFY_TOP_FRAME),                        # (load-delay slot, no ra consumer)
+        (31 << 21) | 0x08,                                      # jr ra
+        0,                                                      # nop
+    )
+    return f1, f2
+
+
+NOTIFY_TOP_F1_WORDS, NOTIFY_TOP_F2_WORDS = _build_notify_top_words(
+    NOTIFY_TOP_Y, NOTIFY_TOP_X_MODE, NOTIFY_TOP_X_BASE, NOTIFY_TOP_X_RIGHT,
+)
+# The words the lab validated (net 3 cold boot on ``notification_top.bin``); the builder must
+# reproduce them whenever the parameters are the lab's.
+_NOTIFY_TOP_LAB_PARAMS: Final = (-112, "centre", 12, 148)
+_NOTIFY_TOP_LAB_F1: Final = (
+    0x240100EF, 0x10810003, 0x27BDFFD8, 0x08036496, 0x27BD0028, 0xAFBF0024, 0x3C048009, 0x0C024487,
+    0x24845FC0, 0x2405000C, 0x0802564F, 0x2403000C,
+)
+_NOTIFY_TOP_LAB_F2: Final = (
+    0xAFA30010, 0xAFA00014, 0xAFA00018, 0xAFA0001C, 0xAFA00020, 0x00022042, 0x000420C0, 0x000238C0,
+    0x24E70004, 0x00A42823, 0x2406FF90, 0x0C0396D4, 0x00002021, 0x8FBF0024, 0x27BD0028, 0x03E00008,
+    0x00000000,
+)
+if (NOTIFY_TOP_Y, NOTIFY_TOP_X_MODE, NOTIFY_TOP_X_BASE, NOTIFY_TOP_X_RIGHT) == _NOTIFY_TOP_LAB_PARAMS:
+    assert (NOTIFY_TOP_F1_WORDS, NOTIFY_TOP_F2_WORDS) == (_NOTIFY_TOP_LAB_F1, _NOTIFY_TOP_LAB_F2)
+# Vanilla libgs dead code under the two fragments (pinned from the disc; re-checked by the
+# disc-gated test).
+NOTIFY_TOP_F1_VANILLA_WORDS: Final = (
+    0x00711823, 0x00031880, 0x00721821, 0x8C620000, 0x00000000, 0x02421021, 0xAE820000, 0x8C620008,
+    0x8FA40048, 0x02421021, 0xAC820000, 0x8C620010,
+)
+NOTIFY_TOP_F2_VANILLA_WORDS: Final = (
+    0x00808021, 0xAFB10014, 0x00A08821, 0x02202021, 0x00002821, 0xAFBF0018, 0x0C024497, 0x24060078,
+    0x3C03FDFF, 0x3463FFFF, 0x3C042D03, 0x8E020000, 0x34840709, 0x00431824, 0x106403DC, 0xAE220000,
+    0x0083102B,
+)
+NOTIFY_TOP_HOOK_LUI_RAM: Final = 0x800D8FF8      # addMapNameObject: lui a3, hi(renderMapName)
+NOTIFY_TOP_HOOK_LUI_VANILLA: Final = 0x3C07800E
+NOTIFY_TOP_HOOK_LUI_PATCHED: Final = 0x3C070000 | (NOTIFY_TOP_F1_RAM >> 16)
+NOTIFY_TOP_HOOK_ADDIU_RAM: Final = 0x800D900C    # addiu a3, a3, lo(renderMapName) -- the jal addObject delay slot
+NOTIFY_TOP_HOOK_ADDIU_VANILLA: Final = 0x24E79258
+NOTIFY_TOP_HOOK_ADDIU_PATCHED: Final = 0x24E70000 | (NOTIFY_TOP_F1_RAM & 0xFFFF)
+ROM_NOTIFY_TOP_F1_OFFSET: Final = _slus_ram_to_bin_offset(NOTIFY_TOP_F1_RAM)
+ROM_NOTIFY_TOP_F2_OFFSET: Final = _slus_ram_to_bin_offset(NOTIFY_TOP_F2_RAM)
+ROM_NOTIFY_TOP_HOOK_LUI_OFFSET: Final = _slus_ram_to_bin_offset(NOTIFY_TOP_HOOK_LUI_RAM)
+ROM_NOTIFY_TOP_HOOK_ADDIU_OFFSET: Final = _slus_ram_to_bin_offset(NOTIFY_TOP_HOOK_ADDIU_RAM)
+assert (ROM_NOTIFY_TOP_F1_OFFSET, ROM_NOTIFY_TOP_F2_OFFSET) == (0x14CC0D58, 0x14CC0DC4)
+assert (ROM_NOTIFY_TOP_HOOK_LUI_OFFSET, ROM_NOTIFY_TOP_HOOK_ADDIU_OFFSET) == (0x14D0E3A0, 0x14D0E4E4)
+assert (NOTIFY_TOP_HOOK_LUI_PATCHED, NOTIFY_TOP_HOOK_ADDIU_PATCHED) == (0x3C078009, 0x24E758D0)
+assert len(NOTIFY_TOP_F1_WORDS) == len(NOTIFY_TOP_F1_VANILLA_WORDS) == 12
+assert len(NOTIFY_TOP_F2_WORDS) == len(NOTIFY_TOP_F2_VANILLA_WORDS) == 17
+# Placement: F1 fills the gap between AP_ITEM_DESC_STRING and the first combat trampoline; F2
+# starts right after the third trampoline and ends at the relocated ITEM_DESC_PTR table.
+assert NOTIFY_TOP_F1_RAM >= (0x80000000 | AP_ITEM_DESC_RAM) + len(AP_ITEM_DESC_STRING)
+assert NOTIFY_TOP_F1_RAM + 12 * 4 <= ROM_COMBAT_TR1_RAM
+assert NOTIFY_TOP_F2_RAM == ROM_COMBAT_TR3_RAM + 16
+assert NOTIFY_TOP_F2_RAM + 17 * 4 <= RELOC_ITEM_DESC_PTR_RAM
+assert NOTIFY_TOP_F1_RAM & 0x8000 == 0                         # lui/addiu compose without a sign fix
+assert ((NOTIFY_TOP_HOOK_LUI_PATCHED & 0xFFFF) << 16) + (NOTIFY_TOP_HOOK_ADDIU_PATCHED & 0xFFFF) == NOTIFY_TOP_F1_RAM
+assert NOTIFY_TOP_F1_WORDS[3] == 0x08000000 | ((NOTIFY_TOP_RENDER_MAP_NAME_RAM >> 2) & 0x03FFFFFF)
+assert NOTIFY_TOP_F1_WORDS[7] == 0x0C000000 | ((NOTIFY_TOP_STRLEN_RAM >> 2) & 0x03FFFFFF)
+assert NOTIFY_TOP_F1_WORDS[10] == 0x08000000 | ((NOTIFY_TOP_F2_RAM >> 2) & 0x03FFFFFF)
+assert NOTIFY_TOP_F2_WORDS[11] == 0x0C000000 | ((NOTIFY_TOP_RENDER_STRING_RAM >> 2) & 0x03FFFFFF)
+assert NOTIFY_TOP_F2_WORDS[10] & 0xFFFF == NOTIFY_TOP_Y & 0xFFFF
+for _off, _size in ((ROM_NOTIFY_TOP_F1_OFFSET, 12 * 4), (ROM_NOTIFY_TOP_F2_OFFSET, 17 * 4)):
     assert (_off - 24) % 2352 + _size <= 2048, hex(_off)   # single-sector writes
 del _off, _size

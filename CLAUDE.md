@@ -208,8 +208,9 @@ These come from [docs/style.md](docs/style.md) and the ruff config and override 
   choice. **Decided later the same day**: the entrance shuffle is
   **parked** as a future improvement (the logic rewrite is too large even
   by region; design + data stay in `work/`); the notification banner
-  moves to the **top** of the screen (`dw1-patch` mission, vanilla loading
-  banner untouched); a suspected Lava Cave boulder bypass through the
+  is **shipped at the top of the screen** (`renderMapNameAp` dispatcher in
+  Cave6 — now code-full — vanilla loading banner untouched, three nets); a
+  suspected Lava Cave boulder bypass through the
   Drill Tunnel <-> Mt. Panorama shortcut was retracted (the prompts read
   the vanilla recruit bit; Drimogemon sits behind the boulder). Not
   ported: recruit-identity
