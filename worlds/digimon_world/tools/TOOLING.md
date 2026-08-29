@@ -96,6 +96,28 @@ decompiled C — prepend its bin to PATH so gcc finds `as`).
 
 ## Known quirks
 
+- **Lab facts from the 2026-08-29 patch missions** (Gekomon splice, Ogremon chain guards):
+  - PCSX-Redux with the debugger on **pauses itself on an invalid memory access**; a paused
+    emulator makes every later savestate load look dead (black screen, `TAMER_STATE` 6, CPU parked
+    in `CdReadSync`/`VSync`). Check `execution-flow` (`"running": false`) before blaming a state,
+    and resume *after* loading the next state.
+  - Teleporting the tamer needs BOTH `PositionData.location` (posData + 0x78, authoritative) and
+    `Entity.anim.locX/locZ` (what the renderer/collision read) written in one tick; a second
+    teleport on the same live screen desyncs the walking state (turns, never translates).
+  - NPC talk is collision-based, not proximity-based (`entityCheckCollision` steps the tamer
+    forward and returns the `ENTITY_TABLE` index hit; `TALKED_TO_ENTITY` 0x134C9C names it): move
+    the NPC onto the tamer to drive one specific dialog.
+  - Screen change without walking: `TARGET_MAP` 0x134DE0 + `CURRENT_EXIT` 0x134DAA +
+    `TAMER_STATE` 0x134C91 = 5 (substate 0) runs vanilla `tickChangeMap` — a real disc reload.
+  - Post-battle results are three boxes, each waiting for a CROSS *edge* with
+    `POLLED_INPUT == 0x40` exactly; a driver that stops pressing while `GAME_STATE != 0` stalls in
+    state 2. God-mode states pop the award box on load (`TAMER_STATE` 20); one CROSS dismisses it.
+  - The engine's `setTrigger` store is at pc 0x801065E8 (ra 0x801065D4) — a reusable write-
+    watchpoint anchor for trigger provenance. `NPC_ENTITIES` keeps stale records of earlier
+    screens: "placed" = the `ENTITY_TABLE[slot+2]` pointer is non-NULL.
+  - MAPHEAD.SCN is boot-resident at 0x1B1D30: poke `0x1B1D30 + file offset` BEFORE the screen
+    loads (hub-derived states restore the boot copy). Rotation: `_atan(dz, dx)`, +z = 2048.
+
 - **User-driven (live) sessions, rules from three crashes on 2026-08-28**: no per-frame Lua
   listeners (`dw1_redux_input.lua`) while the user plays, no REST data GETs (`/cpu/ram/raw`,
   `/gpu/vram/raw`), and wrap `PCSX.createSaveState()` in `pauseEmulator()`/`resumeEmulator()`.

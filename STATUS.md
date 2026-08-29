@@ -579,13 +579,14 @@ exit hang (PCSX-Redux only), Gekomon / Whamon / Ogremon (need text).
                      └──────────────────────┘                                                    └──► .apworld
 
   dw_decomp (read) ─► code known for every item ──┐
-                                                  ├──► notifications (design + patch; dialog_columns to test)
-  user savestates ──► runtime validation ─────────┤
-                                                  ├──► enemy-stat scaling (training_gym + user policy)
-  user text ────────► Gekomon / Whamon / Ogremon  │
+                                                  ├──► enemy-stat scaling policy (user; shipped as `progressive`)
+  lab savestates ───► runtime validation ─────────┤
                                                   ├──► fishing locations (fishing.state to exercise FISH_REL)
                                                   │
                                                   └──► digivolution v2 (digivolve_accepted + species_raised)
+
+  (2026-08-29: notifications, Gekomon and the Ogremon / Whamon chain all shipped — no user text is
+  outstanding; the lab captured every state those items needed.)
 ```
 
 Since 2026-08-28 the code side of every RE item is covered by reading dw_decomp; the only shared
@@ -604,7 +605,7 @@ dependency left is the **savestate batch**, and its role changed from "verify ou
 | Savestate queue | `worlds/digimon_world/tools/SAVESTATE_REQUESTS.md` |
 | Decomp ledger + units (gitignored) | `work/dw1_re/decomp/LEDGER.md`, `work/dw1_re/decomp/<unit>/` |
 | Function census (gitignored) | `work/dw1_re/function_census.tsv` |
-| Lab savestates (gitignored) | `work/dw1_re/*.state` (49; `debug_warp.state` is the teleport hub) |
+| Lab savestates (gitignored) | `work/dw1_re/*.state` (~70; `debug_warp.state` is the teleport hub; the `gekomon_*`, `ogre_*`, `ogremon_guards_*` and `notification_top_*` families are 2026-08-29) |
 | Savestate on any screen, unattended | `worlds/digimon_world/tools/dw1_warp_state.py --map <id> --out <name>` |
 | Capture-session log (gitignored) | `work/dw1_re/session_2026-08-28_savestates.md` |
 | BizHawk validation checklist (gitignored) | `work/dw1_re/BIZHAWK_SESSION_CHECKLIST.md` |
