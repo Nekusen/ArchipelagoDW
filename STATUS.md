@@ -212,6 +212,27 @@ message at a time when the flag reads 0, bursts summarised. Residuals: screen-ce
 under speech bubbles; a top-of-screen variant needs new Cave6 space. `IS_SCRIPT_PAUSED`
 (0x80134FF4) turns out to be misnamed: 1 = no script running.
 
+**Same day — the five dead region-gate rows FIXED** (`dw1-patch` agent, three nets; notes
+`work/dw1_re/decomp/gate_fix/NOTES.md`, spec `patches/gate_fix.json`): seven script-class gates
+of the shipped `SCRIPT_GATE_PATCHES` shape — 24 writes, 12 stubs in the slot-tail residue of
+scripts 8 / 18 / 24 / 44 / 66 / 84, no Cave6 space — now enforce the Drill Tunnel mouth
+(MAYO11 S52, Native Forest RA), the Ancient Dino exit strips (TROP06 S68..S73, incl. the
+post-Centarumon walk-out), the Great Canyon bridge exit (GCAN09 S51, Tropical Jungle RA), the
+Mt. Panorama mouth (GIAS00 S51), the Great Canyon mouth (FRZL01 S51), and the two Drill Tunnel
+<-> Mt. Panorama prompt shortcuts (MAYO11 S53 "Let's go thru!", MIHA04B S51 "Go") that
+`regions.py` never modelled. Blocked flows are silent vanilla paths (the strips do nothing, the
+prompts behave like their decline). Live: all seven flows blocked with the RA bit clear and
+crossed with it set over seven new savestates; cold boot on `gate_fix_test.bin`. The five dead
+walk-on rows stay in the table (harmless, annotated). New module-load invariants: no script-gate
+span may contain a `ROM_MAP_ITEM_OFFSETS` site or its `+1` byte (the ground-item shuffle writes
+there after `apply_tokens` — one stub had to move), and gate groups sharing a script stay
+disjoint. Of the two unmodelled vanilla routes, GIAS02 -> FACT05 (iron door) needs trigger 328
+set only inside Factorial Town, itself behind the FT-RA-gated ferry (transitively gated, no
+stub); the DT <-> Mt.P shortcut is gated here. **Follow-up flagged**: that shortcut needs only
+the Drimogemon recruit + the Ogremon state, so it bypasses the Lava Cave boulder in both
+directions when `lava_cave_access` is shuffled — a 12-B second IF on trigger 145 in the same two
+stubs would close it (documented, not built; also not in AP logic, so seeds stay conservative).
+
 **Technique objective, remaining (set 2026-08-28):** the *data* half shipped above; still open
 are the two RE questions in §2.3 / §3.5 — does the element matrix enter `BTL_calculateDamage`,
 and can species technique lists gain slots (`.MMD` animation census) — and the species-list
@@ -261,7 +282,7 @@ savestates are now for.
 | Item | Code source (dw_decomp unless noted) | Savestates required | Effort |
 | --- | --- | --- | --- |
 | **Entrance shuffle by region — DESIGN READY** | `MapWarps` per `.MAP` (walk-on) + script `warpTo` sites; graph and pool in `work/dw1_re/decomp/entrance_shuffle/NOTES.md`; AP side = generic ER (`disconnect_entrance_for_randomization` + `randomize_entrances(coupled=True)`), rules stay bound to the physical mouth, region-lock post-pass after ER. Also found: `changeMap` performs no variant remap (all variant selection is script-side) and two vanilla routes are missing from `regions.py` (GIAS02 §51 -> FACT05 iron door; post-story MAYO11 §53 <-> MIHA04B §51). | Validation is emulator-bound (3-5 days of the estimate). | **User decision**: ~10-14 days (patcher 3-4, logic + tests 3-4, client 0.5-1, validation 3-5). |
-| **Region-locking dead gate rows — BUG (found 2026-08-29 by the entrance-shuffle research)** | Five of the 33 `TRANSITION_GATE_ROWS` (MAYO11 s0, TROP06 s1, GCAN09 s0, GIAS00 s0, FRZL01 s1) sit on warp slots with **zero trigger tiles** in the `.MAP` collision grid (`map_collision.c:13-46`: tile 110+n = walk-on slot n, 51..79 = script section): those departures are tile-fired script exits, so the loop-back gate never sees them. Ancient Dino and Mt. Panorama Region Access are physically unenforced; Native Forest (Drill Tunnel mouth), Tropical Jungle (Great Canyon) and Great Canyon (FRZL01 -> GCAN04) leak on one mouth each. Details `work/dw1_re/decomp/entrance_shuffle/NOTES.md` §2.2 / border table. | One live confirmation per border (`dw1_warp_state.py` to each source screen, walk the mouth with the RA bit clear). | **HIGH**: five script stubs of the shipped `SCRIPT_GATE_PATCHES` shape (script residue >= 200 B in every affected script) — a `dw1-patch` agent job once the lab is free. |
+| ~~**Region-locking dead gate rows**~~ **FIXED 2026-08-29** (seven script-class gates, `_SCRIPT_GATE_FIX_PATCHES` in `addresses.py`, 24 writes validated through the three nets) | See §1.1. Left open by design: the DT <-> Mt.P shortcut's Lava Cave boulder bypass when `lava_cave_access` is shuffled (a 12-B second IF on trigger 145 in stubs S8b / S24 would close it). | `gate_fix_map{7,17,17_cent,23,44,69,88}.state` (vanilla) + `gate_fix_n3_map{69,7}.state` (patched) in `work/dw1_re/`. | LOW: the boulder-bypass stub variant, if the user wants it; and `regions.py` edges for the shortcut (the region-lock pass would AND the RA items onto them). |
 | ~~**In-game check notifications**~~ **SHIPPED 2026-08-29** (`in_game_notifications`) | Not the dialog line-buffer route after all: the area-name banner path (`addMapNameObject` / `renderMapName`, all C) driven from a spliced render callback in Cave6; see §1.1. | `notification_field.state` (banner on screen, patched disc) exists for regressions. | Open only cosmetics: top-of-screen / boxed variant needs ~26 more words of Cave6 (two-fragment placement or a heap-claim extension). |
 | ~~**Enemy-stat scaling by sphere**~~ **SHIPPED 2026-08-28** as `enemy_stats: progressive` | Turned out to be data: every field Digimon is a `.MAP` record (`loadMapDigimon`, Ghidra export) that the battle copies verbatim (`BTL_initializeCombat`); no code hook. | Validated: `enemy_poc_map2.state`, `enemy_poc_battle.state` (edited record fought) | Done in the lab (3 nets). **Open**: the user's BizHawk pass, and whether the default policy (vanilla region budgets re-assigned by sphere depth, one factor per region so bosses stay proportionally tougher) is the balance they want. |
 | ~~**Species technique lists**~~ **SHIPPED 2026-08-29** as `species_technique_lists` (in-place, class- and element-preserving) | Settled by the `.MMD` animation census: lists cannot grow (a model carries animations for exactly its populated slots; only MegaSeadramon / Machinedramon have one spare), so the option re-fills slots in place. The element matrix is a damage multiplier (sum of the defender-specialty cells / 30, read from the BTL / STD assembly) and the partner AI's ranking key. | None. Runtime check in the user's BizHawk pass (a wild Digimon using a swapped technique; brain training / battle learning of a swapped partner technique). | Provenance only: a VERIFIED replay of `BTL_calculateDamage` against the three battle states. |

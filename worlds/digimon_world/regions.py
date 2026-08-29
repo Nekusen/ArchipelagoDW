@@ -223,7 +223,8 @@ _EDGES: Final[tuple[tuple[str, str], ...]] = (
     # wrapper cannot physically enforce Mt. Panorama Region Access on
     # this edge — accepted, logic-only enforcement here (the region-lock
     # pass still ANDs the RA item onto it). Mt. Panorama's walk-on
-    # borders (Gear Savanna GIAS00 s0 and Native Forest MAYO02_2 s1)
+    # borders (Gear Savanna GIAS00 s0 -- a script-tile exit gated by the
+    # 2026-08-29 stub, and Native Forest MAYO02_2 s1 -- a walk-on row)
     # ARE physically gated. See the region-gate section of
     # data/addresses.py and GATE_TABLE caveat #1.
     ("Meramon Tunnel", "Mt. Panorama"),

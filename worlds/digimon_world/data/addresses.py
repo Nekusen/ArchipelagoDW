@@ -9316,10 +9316,10 @@ assert len(ROM_TRANSITION_GATE_WRAPPER_BYTES) == 164, (
 # Region names reference :data:`REGION_ACCESS_TRIGGER_IDS` keys (=
 # ``regions.LOCKABLE_REGIONS`` entries; cross-checked in regions.py).
 TRANSITION_GATE_ROWS: Final[tuple[tuple[int, int, str], ...]] = (
-    (7,   0, "Native Forest"),        # MAYO11    s0 -> MAYO02_2 (Drill border)
+    (7,   0, "Native Forest"),        # MAYO11    s0 -> MAYO02_2 (arrival-only slot; S52 script gate)
     (9,   2, "Tropical Jungle"),      # MAYO08A   s2 -> TROP00
     (11,  0, "Native Forest"),        # TROP00    s0 -> MAYO08A
-    (17,  1, "Ancient Dino Region"),  # TROP06    s1 -> KODA00
+    (17,  1, "Ancient Dino Region"),  # TROP06    s1 -> KODA00 (arrival-only; S68..S73 script gates)
     (18,  0, "Native Forest"),        # MIHA00    s0 -> MAYO02_2 (NF/Mt.P border)
     (22,  1, "Gear Savanna"),         # MIHA04A   s1 -> GIAS00
     (23,  1, "Gear Savanna"),         # MIHA04B   s1 -> GIAS00
@@ -9328,11 +9328,11 @@ TRANSITION_GATE_ROWS: Final[tuple[tuple[int, int, str], ...]] = (
     (36,  1, "Great Canyon"),         # GCAN01    s1 -> GCAN09
     (38,  1, "Freezeland"),           # GCAN03    s1 -> FRZL01
     (39,  1, "Freezeland"),           # GCAN04    s1 -> FRZL01
-    (44,  0, "Tropical Jungle"),      # GCAN09    s0 -> GCAN01
-    (69,  0, "Mt. Panorama"),         # GIAS00    s0 -> MIHA04A
+    (44,  0, "Tropical Jungle"),      # GCAN09    s0 -> GCAN01 (arrival-only; S51 script gate)
+    (69,  0, "Mt. Panorama"),         # GIAS00    s0 -> MIHA04A (arrival-only; S51 script gate)
     (77,  3, "Geko Swamp"),           # GIAS08    s3 -> STIC01
     (79,  0, "Tropical Jungle"),      # KODA00    s0 -> TROP06
-    (88,  1, "Great Canyon"),         # FRZL01    s1 -> GCAN04
+    (88,  1, "Great Canyon"),         # FRZL01    s1 -> GCAN04 (arrival-only; S51 script gate)
     (88,  2, "Great Canyon"),         # FRZL01    s2 -> GCAN03
     (95,  1, "Misty Trees"),          # FRZL08    s1 -> MIST07
     (110, 2, "Drill Tunnel"),         # MAYO01_2  s2 -> MAYO11
@@ -9427,9 +9427,17 @@ _SCRIPT_ARCHIVE_SLOTS: Final[dict[int, int]] = {
     162: 0x73000,   # File City TWNA variants: Whamon ferry dock
     163: 0x75800,   # File City market TWNB variants: west/east gates
     176: 0x84800,   # File City item-shop building interior (screen 216)
+    # 2026-08-29 gate fix (five script-tile borders + the Drill Tunnel <-> Mt. Panorama prompts):
+    8: 0xB800,      # MAYO11 (screen 7): Drill Tunnel mouth S52 + the Let's-go-thru prompt S53
+    18: 0x12000,    # TROP06 (screen 17): Ancient Dino exit strips S68..S73
+    24: 0x17000,    # MIHA04B (screen 23): the Go prompt into the tunnel shortcut S51
+    44: 0x22800,    # GCAN09 (screen 44): bridge exit S51
+    66: 0x30000,    # GIAS00 (screen 69): Mt. Panorama mouth S51
+    84: 0x3C800,    # FRZL01 (screen 88): Great Canyon mouth S51
 }
 _SCRIPT_ARCHIVE_SLOT_SIZES: Final[dict[int, int]] = {
     6: 0x1000, 7: 0x1000, 101: 0x800, 162: 0x2800, 163: 0x2000, 176: 0x1800,
+    8: 0x800, 18: 0x2000, 24: 0x800, 44: 0x800, 66: 0x800, 84: 0x800,
 }
 
 
@@ -9600,6 +9608,117 @@ SCRIPT_GATE_PATCHES: Final[dict[str, tuple[ScriptGatePatch, ...]]] = {
     ),
 }
 
+
+# --- 2026-08-29 gate fix: the five script-tile borders --------------------------
+#
+# The entrance-shuffle research found that five of the walk-on rows above sit
+# on MapWarps slots with no trigger tile: those departures are tile-fired
+# SCRIPT sections, so the loop-back wrapper never sees them. The dw1-patch
+# agent validated seven script-class gates of the shape above through the
+# three nets (``work/dw1_re/decomp/gate_fix/NOTES.md``): every retarget site's
+# vanilla bytes are recorded, every stub sits in its script's slot-tail
+# residue after the ``FF 00`` terminator (resident live on all six scripts),
+# blocked flows take vanilla no-transition paths (the exit strips just do
+# nothing, "Let's go thru!" behaves like "Let's not", "Go" like "Don't go").
+# The two Drill Tunnel <-> Mt. Panorama prompt shortcuts (MAYO11 S53 /
+# MIHA04B S51), which regions.py does not model, are gated here too.
+_SCRIPT_GATE_WALK_TROP_A: Final = bytes.fromhex("4efdc0f950140000")
+_SCRIPT_GATE_WALK_TROP_B: Final = bytes.fromhex("4efd000050140000")
+_SCRIPT_GATE_WALK_TROP_C: Final = bytes.fromhex("4efd400650140000")
+_SCRIPT_GATE_FIX_PATCHES: Final[dict[str, tuple[ScriptGatePatch, ...]]] = {
+    "Native Forest": (
+        ScriptGatePatch(8, 948, _encode_script_jump_to(1248), bytes.fromhex("19000000"),
+                        "Drill Tunnel mouth: MAYO11 S52 head -> stub S8a"),
+        ScriptGatePatch(
+            8, 1248,
+            _encode_script_if_trigger_unset(REGION_ACCESS_TRIGGER_IDS["Native Forest"], 984)
+            + bytes.fromhex("190000006a001800cc031900") + _encode_script_jump_to(960),
+            None, "stub S8a: if !NF-RA -> endSection@984; else vanilla trigger(106) IF + jumpTo 960",
+        ),
+    ),
+    "Ancient Dino Region": (
+        ScriptGatePatch(18, 5642, _encode_script_jump_to(7376), bytes.fromhex("4efdc0f9"),
+                        "TROP06 S68 exit walk head -> stub T68"),
+        ScriptGatePatch(18, 6452, _encode_script_jump_to(7400), bytes.fromhex("4efd0000"),
+                        "TROP06 S69 (post-Centarumon) exit walk head -> stub T69"),
+        ScriptGatePatch(18, 7262, _encode_script_jump_to(7424), bytes.fromhex("4efd4006"),
+                        "TROP06 S70 exit walk head -> stub T70"),
+        ScriptGatePatch(18, 7332, _encode_script_jump_to(7448), bytes.fromhex("4efdc0f9"),
+                        "TROP06 S71 head -> stub T71"),
+        ScriptGatePatch(18, 7346, _encode_script_jump_to(7472), bytes.fromhex("4efd0000"),
+                        "TROP06 S72 head -> stub T72"),
+        ScriptGatePatch(18, 7360, _encode_script_jump_to(7496), bytes.fromhex("4efd4006"),
+                        "TROP06 S73 head -> stub T73"),
+        *(
+            ScriptGatePatch(
+                18, stub,
+                _encode_script_if_trigger_unset(REGION_ACCESS_TRIGGER_IDS["Ancient Dino Region"], end)
+                + walk + _encode_script_jump_to(cont),
+                None, f"stub T{section}: if !ADR-RA -> endSection@{end}; else walk + jumpTo {cont}",
+            )
+            for section, stub, end, cont, walk in (
+                (68, 7376, 5670, 5650, _SCRIPT_GATE_WALK_TROP_A),
+                (69, 7400, 6480, 6460, _SCRIPT_GATE_WALK_TROP_B),
+                (70, 7424, 7290, 7270, _SCRIPT_GATE_WALK_TROP_C),
+                (71, 7448, 7344, 7340, _SCRIPT_GATE_WALK_TROP_A),
+                (72, 7472, 7358, 7354, _SCRIPT_GATE_WALK_TROP_B),
+                (73, 7496, 7372, 7368, _SCRIPT_GATE_WALK_TROP_C),
+            )
+        ),
+    ),
+    "Tropical Jungle": (
+        ScriptGatePatch(44, 360, struct.pack("<H", 416), struct.pack("<H", 366),
+                        "GCAN09 S51 'if trigger(103) == true then 366' target -> stub S44"),
+        ScriptGatePatch(
+            44, 416,
+            _encode_script_if_trigger_unset(REGION_ACCESS_TRIGGER_IDS["Tropical Jungle"], 364)
+            + _encode_script_jump_to(366),
+            None, "stub S44: if !TJ-RA -> endSection@364; else jumpTo the bridge exit @366",
+        ),
+    ),
+    "Mt. Panorama": (
+        ScriptGatePatch(66, 334, _encode_script_jump_to(400), bytes.fromhex("4efdc800"),
+                        "GIAS00 S51 head entityWalkTo -> stub S66"),
+        ScriptGatePatch(
+            66, 400,
+            _encode_script_if_trigger_unset(REGION_ACCESS_TRIGGER_IDS["Mt. Panorama"], 382)
+            + bytes.fromhex("4efdc800a4ed0000") + _encode_script_jump_to(342),
+            None, "stub S66: if !MtP-RA -> endSection@382; else walk + jumpTo 342",
+        ),
+        ScriptGatePatch(8, 1152, struct.pack("<H", 1296), struct.pack("<H", 1218),
+                        "MAYO11 S53 setSelection[0] (Let's go thru!) 1218 -> stub S8b"),
+        ScriptGatePatch(
+            8, 1296,
+            _encode_script_if_trigger_unset(REGION_ACCESS_TRIGGER_IDS["Mt. Panorama"], 1230)
+            + _encode_script_jump_to(1218),
+            None, "stub S8b: if !MtP-RA -> the Let's-not path@1230; else jumpTo 1218",
+        ),
+    ),
+    "Great Canyon": (
+        ScriptGatePatch(84, 696, _encode_script_jump_to(736), bytes.fromhex("4efdb4fb"),
+                        "FRZL01 S51 head entityWalkTo -> stub S84"),
+        ScriptGatePatch(
+            84, 736,
+            _encode_script_if_trigger_unset(REGION_ACCESS_TRIGGER_IDS["Great Canyon"], 724)
+            + bytes.fromhex("4efdb4fb4ceb0000") + _encode_script_jump_to(704),
+            None, "stub S84: if !GC-RA -> endSection@724; else walk + jumpTo 704",
+        ),
+    ),
+    "Drill Tunnel": (
+        ScriptGatePatch(24, 754, struct.pack("<H", 832), struct.pack("<H", 794),
+                        "MIHA04B S51 setSelection[0] (Go) 794 -> stub S24"),
+        ScriptGatePatch(
+            24, 832,
+            _encode_script_if_trigger_unset(REGION_ACCESS_TRIGGER_IDS["Drill Tunnel"], 806)
+            + _encode_script_jump_to(794),
+            None, "stub S24: if !DT-RA -> the Don't-go path@806; else jumpTo 794",
+        ),
+    ),
+}
+for _region, _fix in _SCRIPT_GATE_FIX_PATCHES.items():
+    SCRIPT_GATE_PATCHES[_region] = (*SCRIPT_GATE_PATCHES.get(_region, ()), *_fix)
+del _region, _fix
+
 # Structural invariants: retarget payloads keep their vanilla length, no
 # write leaves its script slot, and no write crosses a 2048-B sector
 # user-data boundary (script tokens are flat single-sector writes).
@@ -9612,7 +9731,26 @@ for _patches in SCRIPT_GATE_PATCHES.values():
         assert _user % 2048 + len(_p.data) <= 2048, (
             f"script-gate write crosses a sector boundary: {_p.note}"
         )
-del _patches, _p, _user
+        # Slot-tail residue is not free just because it is dead bytecode: the
+        # map-item offset table (pattern-harvested) points into it, and the
+        # ground-item shuffle writes ``offset + 1`` after apply_tokens.
+        _span_start = script_vm_to_bin_offset(_p.script, _p.vm_offset)
+        _span_end = _span_start + len(_p.data)
+        for _item_off in ROM_MAP_ITEM_OFFSETS:
+            assert not (_span_start <= _item_off < _span_end or _span_start <= _item_off + 1 < _span_end), (
+                f"script-gate write overlaps map-item site 0x{_item_off:X}: {_p.note}"
+            )
+# Groups may share a script (Native Forest and Mt. Panorama both touch MAYO11): their
+# byte ranges must stay disjoint so any lock combination composes.
+_gate_spans: list[tuple[int, int, str]] = [
+    (script_vm_to_bin_offset(_p.script, _p.vm_offset),
+     script_vm_to_bin_offset(_p.script, _p.vm_offset) + len(_p.data), _p.note)
+    for _patches in SCRIPT_GATE_PATCHES.values() for _p in _patches
+]
+for _i, (_a0, _a1, _na) in enumerate(_gate_spans):
+    for _b0, _b1, _nb in _gate_spans[_i + 1:]:
+        assert _a1 <= _b0 or _b1 <= _a0, (_na, _nb)
+del _patches, _p, _user, _span_start, _span_end, _item_off, _gate_spans, _i, _a0, _a1, _na, _b0, _b1, _nb
 
 
 # --- Region-gate trigger-allocation invariants ------------------------------
