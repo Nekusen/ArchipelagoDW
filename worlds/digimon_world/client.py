@@ -65,41 +65,21 @@ change.
 from __future__ import annotations
 
 import logging
+from collections import deque
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING, ClassVar, NamedTuple
+from typing import TYPE_CHECKING, Any, ClassVar, NamedTuple
 
 from NetUtils import ClientStatus
 
 from . import adapters as _adapters
-
 from .data.addresses import (
     AGUMON_RECRUIT_BIT,
     AP_CHEST_SENTINEL_ITEM_ID,
-    AP_RECRUIT_ITEM_DIGIMON,
-    AUTO_PILOT_ITEM_ID,
-    BEATEN_RAM_BITS,
-    BIRDRA_FLIGHT_GCANYON_RAM_BIT,
-    BIRDRAMON_FLIGHT_RAM_BITS,
-    CARD_BLOCK_BASE,
-    CARD_BLOCK_SIZE,
-    CARD_LOCATION_NIBBLES,
-    COELAMON_RECRUIT_BIT,
-    COELAMON_RECRUIT_LOCATION_RAM_BITS,
-    DWAP_CHEST_RAM_BITS,
-    EASY_MONOCHROMON_MAP_ID,
-    EASY_MONOCHROMON_PROFIT_TARGET,
-    FAST_DRIMOGEMON_DIGGING_STATE_TARGET,
-    FAST_DRIMOGEMON_DRIMO_STATE_TARGET,
-    FISH_LOCATION_INVENTORY_IDS,
-    FISHING_LOCATION_NAMES,
-    FISHING_SCREEN_IDS,
     AP_ITEM_BOUGHT_MERIT_VALUE_BYTES,
+    AP_RECRUIT_ITEM_DIGIMON,
     AP_SHOP_BOUGHT_SENTINEL_RAM,
     AP_SHOP_BOUGHT_VISIBLE_BYTES,
     AP_TRIGGER_ARRAY_BASE,
-    ITEM_PARA_MERIT_VALUE_OFFSET,
-    FAST_DRIMOGEMON_TUNNEL_STATE_TARGET,
-    KEYCHAIN_INVENTORY_PER_ITEM,
     ARENA_CUP_LOCATION_RAM_BITS,
     ARENA_ENFORCER_MAGIC_ADDR,
     ARENA_ENFORCER_MAGIC_VALUE,
@@ -110,19 +90,40 @@ from .data.addresses import (
     ARENA_ENFORCER_SNAPSHOT_SIZE,
     ARENA_ENFORCER_TIER_2_BYTE_OFFSETS,
     ARENA_ENFORCER_TIER_3_BYTE_OFFSETS,
+    AUTO_PILOT_ITEM_ID,
+    BEATEN_RAM_BITS,
+    BIRDRA_FLIGHT_GCANYON_RAM_BIT,
+    BIRDRAMON_FLIGHT_RAM_BITS,
     BOSS_LOCATION_RAM_BITS,
+    CARD_BLOCK_BASE,
+    CARD_BLOCK_SIZE,
+    CARD_LOCATION_NIBBLES,
+    COELAMON_RECRUIT_BIT,
+    COELAMON_RECRUIT_LOCATION_RAM_BITS,
+    DWAP_CHEST_RAM_BITS,
+    EASY_MONOCHROMON_MAP_ID,
+    EASY_MONOCHROMON_PROFIT_TARGET,
+    FAST_DRIMOGEMON_DIGGING_STATE_TARGET,
+    FAST_DRIMOGEMON_DRIMO_STATE_TARGET,
+    FAST_DRIMOGEMON_TUNNEL_STATE_TARGET,
+    FISH_LOCATION_INVENTORY_IDS,
+    FISHING_LOCATION_NAMES,
+    FISHING_SCREEN_IDS,
+    ITEM_PARA_MERIT_VALUE_OFFSET,
+    ITEM_PARA_RELOC_BASE,
+    ITEM_SHOP_LOCATION_RAM_BITS,
+    KEYCHAIN_INVENTORY_PER_ITEM,
     KEYCHAIN_MAX_COPIES,
     KEYITEM_DELIVERY_RAM_BITS,
     KEYITEM_LOCATION_RAM_BITS,
     MERIT_SHOP_DISPATCH,
     MERIT_SHOP_LOCATION_RAM_BITS,
     NANIMON_QUEST_LOCATION_RAM_BITS,
+    NOTIFY_FLAG_IDLE,
+    NOTIFY_FLAG_PENDING,
+    NOTIFY_TEXT_MAX,
+    NOTIFY_TEXT_MAX_CHARS,
     PIXIMON_MANUAL_LOCATION_RAM_BITS,
-    ITEM_PARA_RELOC_BASE,
-    ITEM_SHOP_LOCATION_RAM_BITS,
-    RECYCLE_SHOP_LOCATION_RAM_BITS,
-    ROM_ITEM_TABLE_ENTRY_SIZE,
-    SECRET_SHOP_LOCATION_RAM_BITS,
     RAM_CURRENT_BITS,
     RAM_CURRENT_BRAINS,
     RAM_CURRENT_DEFENSE,
@@ -140,25 +141,30 @@ from .data.addresses import (
     RAM_INVENTORY_STACK_CAP,
     RAM_ITEM_BANK_BASE,
     RAM_ITEM_BANK_SIZE,
+    RAM_MACHINEDRAMON_DEFEATED_BYTE,
+    RAM_MACHINEDRAMON_DEFEATED_MASK,
     RAM_MAX_HP,
     RAM_MAX_MP,
     RAM_MERAMON_TUNNEL_DIGGING_STATE,
     RAM_MERAMON_TUNNEL_DRIMO_STATE,
-    RAM_MACHINEDRAMON_DEFEATED_BYTE,
-    RAM_MACHINEDRAMON_DEFEATED_MASK,
     RAM_MERAMON_TUNNEL_STATE,
     RAM_MONOCHROME_PROFIT,
+    RAM_NOTIFY_FLAG,
+    RAM_NOTIFY_TEXT,
     RAM_PROSPERITY_POINTS,
     RAM_STAT_CAP,
     RAM_STAT_CAP_FLAG,
     RAM_STAT_GAIN_MULT,
     RAM_TROPICAL_JUNGLE_BRIDGE_FIXED,
     RECRUIT_RAM_BITS,
+    RECYCLE_SHOP_LOCATION_RAM_BITS,
     REGION_ACCESS_RAM_BITS,
-    tech_mastery_bits,
+    ROM_ITEM_TABLE_ENTRY_SIZE,
+    SECRET_SHOP_LOCATION_RAM_BITS,
     STAT_CAP_FLAG_TARGET,
     STAT_CAP_TARGET,
     VENDING_LOCATION_RAM_BITS,
+    tech_mastery_bits,
 )
 from .items import (
     ITEM_ID_BASE,
@@ -1054,6 +1060,88 @@ ITEMS_RECEIVED_COUNTER: tuple[int, int] | None = (
 # =============================================================================
 
 
+# =============================================================================
+# In-game notifications (mailbox contract: data/addresses.py, notification section)
+# =============================================================================
+
+#: Characters the menu renderer has a glyph for; anything else draws a fallback box.
+NOTIFY_ALLOWED_CHARS: frozenset[str] = frozenset(
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 !'+,-.:;=?"
+)
+#: Advance width in pixels per character class (``drawString``, VERIFIED unit).
+_NOTIFY_WIDE = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZ+-=")
+_NOTIFY_NARROW_6 = frozenset("fj")
+_NOTIFY_NARROW_4 = frozenset("il ")
+_NOTIFY_PUNCT_5 = frozenset("!',.:;")
+NOTIFY_PEN_LIMIT = 244
+NOTIFY_MAX_PENDING = 6
+
+
+def notification_width(text: str) -> int:
+    width = 0
+    for char in text:
+        if char in _NOTIFY_WIDE:
+            width += 12
+        elif char in _NOTIFY_NARROW_6:
+            width += 6
+        elif char in _NOTIFY_NARROW_4:
+            width += 4
+        elif char in _NOTIFY_PUNCT_5:
+            width += 5
+        else:
+            width += 8
+    return width
+
+
+def notification_fits(text: str) -> bool:
+    """``renderMapName`` composites ``len * 8 + 4`` px and the rasteriser drops glyphs past the
+    244-px pen: the text must fit both."""
+
+    return notification_width(text) <= min(NOTIFY_PEN_LIMIT, len(text) * 8 + 4)
+
+
+def sanitize_notification(text: str) -> str:
+    """Reduce ``text`` to the renderable set, collapse blanks and trim it until it fits the
+    banner (<= :data:`NOTIFY_TEXT_MAX_CHARS` characters and the width rule)."""
+
+    cleaned = " ".join("".join(c if c in NOTIFY_ALLOWED_CHARS else " " for c in text).split())
+    while cleaned and (len(cleaned) > NOTIFY_TEXT_MAX_CHARS or not notification_fits(cleaned)):
+        cleaned = cleaned[:-1].rstrip()
+    return cleaned
+
+
+class NotificationQueue:
+    """Messages waiting for the in-game banner: one at a time, bounded, overflow summarised."""
+
+    def __init__(self) -> None:
+        self._pending: deque[str] = deque()
+        self._overflow = 0
+
+    def push(self, text: str) -> None:
+        text = sanitize_notification(text)
+        if not text:
+            return
+        if len(self._pending) >= NOTIFY_MAX_PENDING:
+            self._overflow += 1
+        else:
+            self._pending.append(text)
+
+    def pop(self) -> str | None:
+        if self._pending:
+            return self._pending.popleft()
+        if self._overflow:
+            count, self._overflow = self._overflow, 0
+            return sanitize_notification(f"...and {count} more")
+        return None
+
+    def clear(self) -> None:
+        self._pending.clear()
+        self._overflow = 0
+
+    def __len__(self) -> int:
+        return len(self._pending) + (1 if self._overflow else 0)
+
+
 class DigimonWorldClient:
     """Unified DW1 client (BizHawk + Duckstation auto-detect).
 
@@ -1084,9 +1172,18 @@ class DigimonWorldClient:
         a patcher-written RAM region)."""
 
     def on_package(self, ctx: "DigimonWorldClientContext", cmd: str, args: dict) -> None:
-        """Optional hook for inbound server packets. v1 doesn't need
-        any per-packet handling beyond what
-        :meth:`DigimonWorldClientContext.on_package` already does."""
+        """Inbound server packets: queue a "Sent: <item>" banner for every item this
+        player finds for another world (``PrintJSON`` / ``ItemSend``)."""
+
+        if cmd != "PrintJSON" or args.get("type") != "ItemSend" or not self._in_game_notifications:
+            return
+        item = args.get("item")
+        receiving = args.get("receiving")
+        if item is None or receiving is None or getattr(item, "player", None) != ctx.slot or receiving == ctx.slot:
+            return
+        lookup = getattr(ctx.item_names, "lookup_in_slot", None)
+        name = lookup(item.item, receiving) if lookup is not None else ctx.item_names.lookup_in_game(item.item)
+        self._notifications.push(f"Sent: {name}")
 
     def __init__(self) -> None:
         # Cache for AP-side lookups; populated lazily on first watcher
@@ -1126,6 +1223,10 @@ class DigimonWorldClient:
         # none is present and a slot is free. ``None`` = slot_data not
         # yet received; treated as off (also the option default).
         self._infinite_auto_pilot: bool | None = None
+        # In-game notifications: the ROM hook + mailbox exist only when the
+        # option shipped them (slot_data); until it lands nothing is queued.
+        self._in_game_notifications: bool | None = None
+        self._notifications = NotificationQueue()
         # Goal selection from the user's yaml. 0 = machinedramon (fires
         # when DW1's post-Machinedramon ``setTrigger 50`` flips), 1 =
         # prosperity (fires when in-game prosperity meets the
@@ -1277,6 +1378,8 @@ class DigimonWorldClient:
             self._fishing_locations = bool(
                 ctx.slot_data.get("fishing_locations", 0),
             )
+        if self._in_game_notifications is None and ctx.slot_data is not None:
+            self._in_game_notifications = bool(ctx.slot_data.get("in_game_notifications", 0))
         if self._locked_regions is None and ctx.slot_data is not None:
             # Default empty — pre-region-gate seeds have no ROM gates,
             # so nothing composes with Region Access and no RA bit is
@@ -1324,10 +1427,49 @@ class DigimonWorldClient:
             if self._god_mode:
                 await self._enforce_god_mode(ctx)
             await self._check_goal(ctx)
+            await self._push_notifications(ctx)
         except bizhawk.RequestFailedError:
             # Lua connector failed to respond; exit the handler and
             # let the BizHawk framework reconnect on the next tick.
             return
+
+    def _notify_received(self, ctx: DigimonWorldClientContext, item: Any, item_name: str) -> None:
+        """Queue a "Got: <item>" banner (with the sender when it fits) for a delivered item."""
+
+        if not self._in_game_notifications:
+            return
+        text = f"Got: {item_name}"
+        sender = getattr(item, "player", None)
+        if sender is not None and sender != ctx.slot:
+            names = getattr(ctx, "player_names", None) or {}
+            sender_name = names.get(sender) if isinstance(names, dict) else None
+            if sender_name:
+                longer = f"{text} from {sender_name}"
+                if sanitize_notification(longer) == longer:
+                    text = longer
+        self._notifications.push(text)
+
+    async def _push_notifications(self, ctx: DigimonWorldClientContext) -> None:
+        """Hand the next queued message to the mailbox once the banner is idle (flag 0).
+
+        Flag 1 means the previous message is still owed (deferred by a menu / dialog /
+        battle) and 2+ that it is on screen; neither is overwritten.
+        """
+
+        if not self._in_game_notifications or not self._notifications:
+            return
+        flag = (await bizhawk.read(ctx.bizhawk_ctx, [(RAM_NOTIFY_FLAG, 1, DOMAIN_MAIN_RAM)]))[0]
+        if len(flag) != 1 or flag[0] != NOTIFY_FLAG_IDLE:
+            return
+        text = self._notifications.pop()
+        if text is None:
+            return
+        payload = text.encode("ascii", "replace")[:NOTIFY_TEXT_MAX]
+        buffer = payload + bytes(NOTIFY_TEXT_MAX + 1 - len(payload))
+        await bizhawk.write(ctx.bizhawk_ctx, [
+            (RAM_NOTIFY_TEXT, list(buffer), DOMAIN_MAIN_RAM),          # text first ...
+            (RAM_NOTIFY_FLAG, [NOTIFY_FLAG_PENDING], DOMAIN_MAIN_RAM),  # ... then the flag
+        ])
 
     async def _wipe_chest_sentinels(self, ctx: DigimonWorldClientContext) -> None:
         """Remove any AP chest-sentinel items
@@ -2748,6 +2890,7 @@ class DigimonWorldClient:
         write_list = await deliverer(ctx)
         write_list.extend(counter_advance)
         await bizhawk.write(ctx.bizhawk_ctx, write_list)
+        self._notify_received(ctx, next_item, item_name)
 
     async def _check_goal(self, ctx: DigimonWorldClientContext) -> None:
         """Fire ``StatusUpdate(GoalComplete)`` for the configured goal.

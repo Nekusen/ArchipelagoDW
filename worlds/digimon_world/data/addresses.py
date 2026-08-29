@@ -7275,8 +7275,11 @@ def _slus_ram_to_bin_offset(ram_addr: int) -> int:
 #     - EXT_ITEM_PARA seed block 0x80096800..0x80096BC0 (960 B = 30
 #       slots, ALWAYS-ON zero-fill + opt-in shop entries; reuses the
 #       footprint of the retired Cave6 ITEM_PARA ext segment)
-#     Remaining free: 0x80096650..0x800966C4 (116 B, formerly the
-#     retired merit row/deduct teleport wrappers),
+#     - AP notification mailbox 0x80095FBC..0x80096000 (68 B, opt-in
+#       `in_game_notifications`, fills the former 70-B gap) and its
+#       render callback 0x80096650..0x800966C0 (112 B, the former
+#       116-B free range; see the notification section at the bottom)
+#     Remaining free: 0x800966C0..0x800966C4 (4 B),
 #     0x800967F0..0x80096800 (16 B) and 0x80096BC0..0x80096BCC (12 B).
 #
 # Recycle-shop usage adds 1472 bytes inside Cave6, well within the
@@ -11113,3 +11116,82 @@ BGM_RESET: Final = 0xFF
 #: MAPHEAD sites whose ``setPStat 245`` mode is >= 2 play a forced (font, variant): the byte is inert.
 BGM_MODE_DAY_NIGHT: Final = 0
 BGM_MODE_DAY_ONLY: Final = 1
+
+
+# =============================================================================
+# In-game AP notifications (mailbox + render callback in Cave6)
+# =============================================================================
+#
+# Lab-validated 2026-08-29 through the three PATCH_PROCESS nets (dw1-patch
+# agent; ``work/dw1_re/decomp/notifications/NOTES.md``): the client writes a
+# short ASCII message into a RAM mailbox and the game shows it, centred on
+# screen for 150 frames, through its own area-name banner path --
+# ``addMapNameObject(239)`` draws ``MAP_NAME_PTR[MAP_ENTRIES[239].loadingName]``
+# and registers the ``renderMapName`` object; ``removeObject`` takes it down.
+# Screen 239 is an all-zero ``MAP_ENTRIES`` row and ``MAP_NAME_PTR[66]`` an
+# unused duplicate pointer, so ``loadingName = 66`` + ``MAP_NAME_PTR[66] =
+# &mailbox.text`` route the message through vanilla code. A 28-word leaf
+# callback replaces the empty render callback of the file-read-queue world
+# object (``initializeFileReadQueue``'s ``lui``/``addiu`` pair -- the same site
+# the standalone's custom tick hook used, never written by rom.py otherwise)
+# and runs every draw loop: flag 1 (pending) + tamer idle on the field
+# (``GAME_STATE == 0 && TAMER_STATE == 0 && IS_SCRIPT_PAUSED == 1``) -> add the
+# banner, flag = 2 + 150; each frame counts down; a menu / dialog / battle /
+# warp / pickup while showing removes the banner and re-arms flag 1 (the
+# message is shown again once idle); expiry clears the flag to 0.
+#
+# Client contract (``client.NotificationQueue``): write only when the flag
+# reads 0 -- text first (<= 63 ASCII bytes, NUL-terminated, renderable set
+# ``A-Z a-z 0-9 space ! ' + , - . : ; = ?``, mixed case, <= 26 characters so
+# the ``len*8+4`` composite width holds), then flag = 1. Flag 1 is "still
+# owed", never free.
+
+NOTIFY_CALLBACK_RAM: Final = 0x80096650          # Cave6, 28 words (was the 116-B free range; 4 B spare)
+NOTIFY_CALLBACK_WORDS: Final[tuple[int, ...]] = (
+    0x3C088009, 0x91095FBC, 0x938A93DE, 0x938B9165, 0x938E94C8, 0x11200014, 0x014B5025, 0x39CE0001,
+    0x014E5025, 0x2D210002, 0x10200005, 0x240C0098, 0x1540000D, 0x240400EF, 0x080363EC, 0xA10C5FBC,
+    0x000A682B, 0x2529FFFF, 0x240500EF, 0x15400004, 0x24040FA1, 0x2D210003, 0x10200003, 0xA1095FBC,
+    0x08028C02, 0xA10D5FBC, 0x03E00008, 0x00000000,
+)
+NOTIFY_MAILBOX_RAM: Final = 0x80095FBC           # Cave6, 68 B: u8 flag @+0, 3 reserved, char text[64] @+4
+NOTIFY_MAILBOX_SIZE: Final = 68
+NOTIFY_TEXT_OFFSET: Final = 4
+NOTIFY_TEXT_MAX: Final = 63                      # bytes before the NUL
+NOTIFY_TEXT_MAX_CHARS: Final = 26                # the renderer's practical width cap (mixed case)
+NOTIFY_DURATION_FRAMES: Final = 150              # immediate in word 11 (0x240C0098 = 152 = 2 + 150)
+RAM_NOTIFY_FLAG: Final = NOTIFY_MAILBOX_RAM & 0x1FFFFF          # physical 0x00095FBC (client side)
+RAM_NOTIFY_TEXT: Final = RAM_NOTIFY_FLAG + NOTIFY_TEXT_OFFSET   # physical 0x00095FC0
+NOTIFY_FLAG_IDLE: Final = 0
+NOTIFY_FLAG_PENDING: Final = 1
+NOTIFY_HOOK_LUI_RAM: Final = 0x800E36DC          # initializeFileReadQueue: lui a3, hi(render cb)
+NOTIFY_HOOK_LUI_VANILLA: Final = 0x3C07800E
+NOTIFY_HOOK_LUI_PATCHED: Final = 0x3C078009
+NOTIFY_HOOK_ADDIU_RAM: Final = 0x800E36F0        # addiu a3, a3, lo(render cb) in the jal addObject delay slot
+NOTIFY_HOOK_ADDIU_VANILLA: Final = 0x24E7370C
+NOTIFY_HOOK_ADDIU_PATCHED: Final = 0x24E76650
+NOTIFY_MAP_NAME_SLOT: Final = 66
+NOTIFY_MAP_NAME_PTR_RAM: Final = 0x801292C4      # MAP_NAME_PTR[66]
+NOTIFY_MAP_NAME_PTR_VANILLA: Final = 0x80128D44  # duplicate of slot 28, unused by every screen
+NOTIFY_SCREEN_ID: Final = 239                    # an all-zero MAP_ENTRIES row
+NOTIFY_LOADING_NAME_RAM: Final = 0x8012A1D3      # MAP_ENTRIES[239].loadingName (vanilla 0)
+ROM_NOTIFY_CALLBACK_OFFSET: Final = _slus_ram_to_bin_offset(NOTIFY_CALLBACK_RAM)
+ROM_NOTIFY_MAILBOX_OFFSET: Final = _slus_ram_to_bin_offset(NOTIFY_MAILBOX_RAM)
+ROM_NOTIFY_HOOK_LUI_OFFSET: Final = _slus_ram_to_bin_offset(NOTIFY_HOOK_LUI_RAM)
+ROM_NOTIFY_HOOK_ADDIU_OFFSET: Final = _slus_ram_to_bin_offset(NOTIFY_HOOK_ADDIU_RAM)
+ROM_NOTIFY_MAP_NAME_PTR_OFFSET: Final = _slus_ram_to_bin_offset(NOTIFY_MAP_NAME_PTR_RAM)
+ROM_NOTIFY_LOADING_NAME_OFFSET: Final = _slus_ram_to_bin_offset(NOTIFY_LOADING_NAME_RAM)
+assert (ROM_NOTIFY_CALLBACK_OFFSET, ROM_NOTIFY_MAILBOX_OFFSET) == (0x14CC1C08, 0x14CC1444)
+assert (ROM_NOTIFY_HOOK_LUI_OFFSET, ROM_NOTIFY_HOOK_ADDIU_OFFSET) == (0x14D1A374, 0x14D1A388)
+assert ROM_NOTIFY_HOOK_ADDIU_OFFSET == ROM_CUSTOM_TICK_HOOK_OFFSET
+assert (ROM_NOTIFY_MAP_NAME_PTR_OFFSET, ROM_NOTIFY_LOADING_NAME_OFFSET) == (0x14D6A59C, 0x14D6B70B)
+assert NOTIFY_CALLBACK_WORDS[0] == 0x3C080000 | (NOTIFY_MAILBOX_RAM >> 16)
+assert NOTIFY_CALLBACK_WORDS[1] & 0xFFFF == NOTIFY_MAILBOX_RAM & 0xFFFF
+assert NOTIFY_CALLBACK_WORDS[11] & 0xFFFF == NOTIFY_DURATION_FRAMES + 2
+assert NOTIFY_HOOK_ADDIU_PATCHED & 0xFFFF == NOTIFY_CALLBACK_RAM & 0xFFFF
+assert NOTIFY_CALLBACK_RAM + len(NOTIFY_CALLBACK_WORDS) * 4 <= 0x800966C4     # transition-gate wrapper follows
+assert NOTIFY_MAILBOX_RAM + NOTIFY_MAILBOX_SIZE <= 0x80096000                # merit AP desc strings follow
+assert NOTIFY_MAILBOX_RAM >= 0x80095F80 + 58                                   # after the icon-id table
+for _off, _size in ((ROM_NOTIFY_CALLBACK_OFFSET, len(NOTIFY_CALLBACK_WORDS) * 4),
+                    (ROM_NOTIFY_MAILBOX_OFFSET, NOTIFY_MAILBOX_SIZE)):
+    assert (_off - 24) % 2352 + _size <= 2048, hex(_off)   # single-sector writes
+del _off, _size

@@ -1491,6 +1491,18 @@ class BgmShuffle(Choice):
     default = option_off
 
 
+class InGameNotifications(DefaultOnToggle):
+    """Show Archipelago events in the game: an item received from the
+    multiworld ("Got: Meat") or one you found for another player ("Sent:
+    Master Sword") appears as a short banner in the middle of the screen while
+    you walk around, the way area names do. Messages are deferred — never lost —
+    while a menu, a dialog, a battle or a screen change is in progress, and
+    shown one at a time.
+    """
+
+    display_name = "In-Game Notifications"
+
+
 class FixDVChipText(DefaultOnToggle):
     """Correct the three DV chip descriptions to say what the chips actually do
     (DV Chip E boosts HP and MP, not Offense and Speed). Text only. Mirrors the
@@ -1580,6 +1592,7 @@ class DigimonWorldOptions(PerGameCommonOptions):
     unrig_slots: UnrigSlots
     learn_move_and_command: LearnMoveAndCommand
     fix_dv_chip_text: FixDVChipText
+    in_game_notifications: InGameNotifications
     god_mode: GodMode
 
 
@@ -1623,7 +1636,7 @@ option_groups: list[OptionGroup] = [
             SpawnRateBoost, StatGainMultiplier, CombatStatMultiplier,
             CardTradeMultiplier,
             QuestItemsDroppable, IncreaseLearnChance, BrainTrainingTierOne,
-            UnrigSlots, LearnMoveAndCommand, FixDVChipText,
+            UnrigSlots, LearnMoveAndCommand, FixDVChipText, InGameNotifications,
         ],
     ),
     OptionGroup("Testing", [GodMode]),

@@ -21,8 +21,8 @@ project moved out of "build the world" and into **feature expansion + polish + v
 | --- | --- |
 | World version | 0.6.0 (`minimum_ap_version` 0.6.7) |
 | Locations / items | 279 / 217 |
-| YAML options | 79, in 5 option groups |
-| World test suite | **1124 passed**, 4 skipped, 10532 subtests, ~18 s with `-n auto` (one class is disc-gated: it re-checks vanilla bytes when `Digimon World (USA).bin` sits at the repo root) |
+| YAML options | 80, in 5 option groups |
+| World test suite | **1140 passed**, 4 skipped, 10532 subtests, ~18 s with `-n auto` (one class is disc-gated: it re-checks vanilla bytes when `Digimon World (USA).bin` sits at the repo root) |
 | Lint | `ruff` at a 323-finding baseline (303 pre-existing + the two census tools' CLI prints, T201, like the other lab tools) |
 | Commits ahead of `main` | 107 |
 | Decomp coverage | **31 / 1120** SLUS game functions verified — 2.8 % by count, **14.5 % of static call sites** |
@@ -195,6 +195,23 @@ shipped:
   fix = five script stubs of the shipped `SCRIPT_GATE_PATCHES` shape; and two vanilla routes are
   missing from `regions.py` (GIAS02 -> FACT05 iron door, post-story MAYO11 <-> MIHA04B shortcut).
 
+**Same day — in-game AP notifications shipped** (`in_game_notifications`, default on; `dw1-patch`
+agent through the three nets plus negative tests, `work/dw1_re/decomp/notifications/NOTES.md`).
+Mechanism: the client writes a message into a 68-byte RAM mailbox in Cave6 (flag + 64-byte text)
+and a 28-word render callback spliced into the empty render slot of the file-read-queue world
+object (the site the standalone's custom tick hook used, `initializeFileReadQueue`'s
+`lui`/`addiu` pair) shows it through the game's own area-name banner — `addMapNameObject(239)`
+with `MAP_ENTRIES[239].loadingName = 66` and `MAP_NAME_PTR[66] = &mailbox.text` — for 150 frames,
+only while the tamer is idle on the field (`GAME_STATE == 0 && TAMER_STATE == 0 &&
+IS_SCRIPT_PAUSED == 1`); a menu, dialog, battle, warp or pickup removes the banner and re-arms
+the flag so the message is shown again later. The "Woah!" pickup box was investigated first and
+rejected (a blocking three-line UI flow, ~70 words). Client side (`client.NotificationQueue`):
+"Got: <item> [from <player>]" on every delivered item, "Sent: <item>" on every `ItemSend` this
+player finds for another world, sanitised to the renderer's glyph set / 26-char width rule, one
+message at a time when the flag reads 0, bursts summarised. Residuals: screen-centre position
+under speech bubbles; a top-of-screen variant needs new Cave6 space. `IS_SCRIPT_PAUSED`
+(0x80134FF4) turns out to be misnamed: 1 = no script running.
+
 **Technique objective, remaining (set 2026-08-28):** the *data* half shipped above; still open
 are the two RE questions in §2.3 / §3.5 — does the element matrix enter `BTL_calculateDamage`,
 and can species technique lists gain slots (`.MMD` animation census) — and the species-list
@@ -245,7 +262,7 @@ savestates are now for.
 | --- | --- | --- | --- |
 | **Entrance shuffle by region — DESIGN READY** | `MapWarps` per `.MAP` (walk-on) + script `warpTo` sites; graph and pool in `work/dw1_re/decomp/entrance_shuffle/NOTES.md`; AP side = generic ER (`disconnect_entrance_for_randomization` + `randomize_entrances(coupled=True)`), rules stay bound to the physical mouth, region-lock post-pass after ER. Also found: `changeMap` performs no variant remap (all variant selection is script-side) and two vanilla routes are missing from `regions.py` (GIAS02 §51 -> FACT05 iron door; post-story MAYO11 §53 <-> MIHA04B §51). | Validation is emulator-bound (3-5 days of the estimate). | **User decision**: ~10-14 days (patcher 3-4, logic + tests 3-4, client 0.5-1, validation 3-5). |
 | **Region-locking dead gate rows — BUG (found 2026-08-29 by the entrance-shuffle research)** | Five of the 33 `TRANSITION_GATE_ROWS` (MAYO11 s0, TROP06 s1, GCAN09 s0, GIAS00 s0, FRZL01 s1) sit on warp slots with **zero trigger tiles** in the `.MAP` collision grid (`map_collision.c:13-46`: tile 110+n = walk-on slot n, 51..79 = script section): those departures are tile-fired script exits, so the loop-back gate never sees them. Ancient Dino and Mt. Panorama Region Access are physically unenforced; Native Forest (Drill Tunnel mouth), Tropical Jungle (Great Canyon) and Great Canyon (FRZL01 -> GCAN04) leak on one mouth each. Details `work/dw1_re/decomp/entrance_shuffle/NOTES.md` §2.2 / border table. | One live confirmation per border (`dw1_warp_state.py` to each source screen, walk the mouth with the RA bit clear). | **HIGH**: five script stubs of the shipped `SCRIPT_GATE_PATCHES` shape (script residue >= 200 B in every affected script) — a `dw1-patch` agent job once the lab is free. |
-| **In-game check notifications** | Dialog page/box driver `MAIN_func_800FF0FC` and renderer `drawString2` in `src/main/script_common.c` — **in C, nothing left to decompile**. | `dialog_columns.state` — now for *testing* an injected string that uses the tab/column codes, not for understanding them | **MEDIUM → LOW-MEDIUM**: design + one patch. Low-risk route is a line-buffer substitution at `0x801BE174 + row*0x40`, not a renderer hook. |
+| ~~**In-game check notifications**~~ **SHIPPED 2026-08-29** (`in_game_notifications`) | Not the dialog line-buffer route after all: the area-name banner path (`addMapNameObject` / `renderMapName`, all C) driven from a spliced render callback in Cave6; see §1.1. | `notification_field.state` (banner on screen, patched disc) exists for regressions. | Open only cosmetics: top-of-screen / boxed variant needs ~26 more words of Cave6 (two-fragment placement or a heap-claim extension). |
 | ~~**Enemy-stat scaling by sphere**~~ **SHIPPED 2026-08-28** as `enemy_stats: progressive` | Turned out to be data: every field Digimon is a `.MAP` record (`loadMapDigimon`, Ghidra export) that the battle copies verbatim (`BTL_initializeCombat`); no code hook. | Validated: `enemy_poc_map2.state`, `enemy_poc_battle.state` (edited record fought) | Done in the lab (3 nets). **Open**: the user's BizHawk pass, and whether the default policy (vanilla region budgets re-assigned by sphere depth, one factor per region so bosses stay proportionally tougher) is the balance they want. |
 | ~~**Species technique lists**~~ **SHIPPED 2026-08-29** as `species_technique_lists` (in-place, class- and element-preserving) | Settled by the `.MMD` animation census: lists cannot grow (a model carries animations for exactly its populated slots; only MegaSeadramon / Machinedramon have one spare), so the option re-fills slots in place. The element matrix is a damage multiplier (sum of the defender-specialty cells / 30, read from the BTL / STD assembly) and the partner AI's ranking key. | None. Runtime check in the user's BizHawk pass (a wild Digimon using a swapped technique; brain training / battle learning of a swapped partner technique). | Provenance only: a VERIFIED replay of `BTL_calculateDamage` against the three battle states. |
 | ~~**Digivolution randomization**~~ **SHIPPED 2026-08-29** (`digivolution_randomization` + obtain-all / requirements / special) | Tree `EVO_PATHS_DATA[62]` (`EvolutionPath{from[5], to[6]}`, 0x8012B66C, walked by `evolution.c:60-230`; Fresh -> In-Training hard-coded in `getFreshEvolutionTarget`), requirements `EVO_REQ_DATA[63]` (`evl.h:47-62`, scored by `calculateRequirementScore` `evolution.c:303-411`), gains `EVO_GAINS_DATA[66]` (applied in `EVL_applyEvolution` 0x80063350, ASM-only — only Devimon's row is rewritten), special evolutions = SLUS immediates in `handleSpecialEvolutions` (`evolution.c:231-300`) + script bytes (`ROM_SPECIAL_EVO`). Pure data; no AP-logic change — the option warns that the three partner-gated areas become luck without `type_lock_unlocks`. | None. Runtime validation pending in the user's BizHawk pass (a natural digivolution under random requirements, a death digivolution, the suit). | Open follow-up only: `EVL_applyEvolution` decomp if the gains table is ever randomized beyond Devimon. |

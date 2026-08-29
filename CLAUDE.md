@@ -199,7 +199,10 @@ These come from [docs/style.md](docs/style.md) and the ruff config and override 
   `partner_raising` (`raising.py`), `bgm_shuffle` (`music.py`), 18
   `screen_region` fixes, and a **region-level entrance-shuffle design**
   awaiting the user's go (STATUS §2.3) that also exposed **five dead
-  region-gate rows** (script-tile exits; fix pending, HIGH). Not ported: recruit-identity
+  region-gate rows** (script-tile exits; fix pending, HIGH). **In-game AP
+  notifications shipped** (`in_game_notifications`: Cave6 mailbox + render
+  callback on the game's area-name banner, three nets; client
+  `NotificationQueue`). Not ported: recruit-identity
   shuffle, intro hash, happyVending, jukebox truncation, forced starter.
   Table audit corrected one claim: the element matrix is read by the
   **partner's** auto-battle AI, not the enemy AI. Remaining technique

@@ -125,6 +125,12 @@ from .data.addresses import (
     MERIT_SHOP_VANILLA_ENTRIES,
     MOVE_DATA_PATCH_SPAN,
     MOVE_DATA_RECORD_SIZE,
+    NOTIFY_CALLBACK_WORDS,
+    NOTIFY_HOOK_ADDIU_PATCHED,
+    NOTIFY_HOOK_LUI_PATCHED,
+    NOTIFY_MAILBOX_RAM,
+    NOTIFY_MAILBOX_SIZE,
+    NOTIFY_MAP_NAME_SLOT,
     RAINBOWHORN_ITEM_ID,
     RAINBOWHORN_NEW_CLUT_INDEX,
     RAINBOWHORN_TILE_BIN_OFFSETS,
@@ -261,6 +267,12 @@ from .data.addresses import (
     ROM_MERIT_SHOP_WRAPPER_BYTES,
     ROM_MERIT_SHOP_WRAPPER_OFFSET,
     ROM_MOVE_DATA_OFFSET,
+    ROM_NOTIFY_CALLBACK_OFFSET,
+    ROM_NOTIFY_HOOK_ADDIU_OFFSET,
+    ROM_NOTIFY_HOOK_LUI_OFFSET,
+    ROM_NOTIFY_LOADING_NAME_OFFSET,
+    ROM_NOTIFY_MAILBOX_OFFSET,
+    ROM_NOTIFY_MAP_NAME_PTR_OFFSET,
     ROM_OGREMON_SOFTLOCK_FORMAT,
     ROM_OGREMON_SOFTLOCK_OFFSETS,
     ROM_OGREMON_SOFTLOCK_VALUE,
@@ -2767,6 +2779,26 @@ def _write_bgm_tokens(patch: DigimonWorldProcedurePatch, plan: BgmPlan) -> None:
         patch.write_token(APTokenTypes.WRITE, maphead_bin_offset(site.vm + 1), bytes([font]))
 
 
+def _write_notification_tokens(patch: DigimonWorldProcedurePatch) -> None:
+    """In-game AP notifications — six writes, all inside single sectors (see the notification
+    section of ``data/addresses.py``; lab-validated through the three nets 2026-08-29):
+
+    * the 28-word render callback and the zero-filled mailbox in Cave6;
+    * the ``lui`` / ``addiu`` pair of ``initializeFileReadQueue`` that installs the callback;
+    * ``MAP_NAME_PTR[66] = &mailbox.text`` and ``MAP_ENTRIES[239].loadingName = 66`` so the
+      game's own area-name banner draws the mailbox text.
+    """
+
+    patch.write_token(APTokenTypes.WRITE, ROM_NOTIFY_CALLBACK_OFFSET,
+                      b"".join(struct.pack("<I", word) for word in NOTIFY_CALLBACK_WORDS))
+    patch.write_token(APTokenTypes.WRITE, ROM_NOTIFY_MAILBOX_OFFSET, bytes(NOTIFY_MAILBOX_SIZE))
+    patch.write_token(APTokenTypes.WRITE, ROM_NOTIFY_HOOK_LUI_OFFSET, struct.pack("<I", NOTIFY_HOOK_LUI_PATCHED))
+    patch.write_token(APTokenTypes.WRITE, ROM_NOTIFY_HOOK_ADDIU_OFFSET, struct.pack("<I", NOTIFY_HOOK_ADDIU_PATCHED))
+    patch.write_token(APTokenTypes.WRITE, ROM_NOTIFY_MAP_NAME_PTR_OFFSET,
+                      struct.pack("<I", NOTIFY_MAILBOX_RAM + 4))
+    patch.write_token(APTokenTypes.WRITE, ROM_NOTIFY_LOADING_NAME_OFFSET, bytes([NOTIFY_MAP_NAME_SLOT]))
+
+
 def _write_gift_tokens(patch: DigimonWorldProcedurePatch, plan: GiftPlan) -> None:
     """NPC gift randomization — script-byte writes.
 
@@ -3126,6 +3158,10 @@ def write_patch(world: DigimonWorldWorld, output_directory: str) -> None:
                 patch, world, replace=shop_modes.merit == SHOP_MODE_REPLACE,
             )
 
+    # In-game AP notifications (mailbox + render callback in Cave6; the
+    # client writes the mailbox only when slot_data says the hook is in).
+    if options.in_game_notifications:
+        _write_notification_tokens(patch)
     # The standalone's QoL patches — after every table writer above so the
     # quest-item ``dropable`` bytes land on top of any full-entry ITEM_PARA
     # token (token order = insertion order).
