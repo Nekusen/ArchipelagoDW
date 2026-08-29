@@ -216,8 +216,13 @@ These come from [docs/style.md](docs/style.md) and the ruff config and override 
   the vanilla recruit bit; Drimogemon sits behind the boulder). **Gekomon location shipped**
   (recruit set, always on, no item — Gekomon is bundled into Progressive
   Arena — rule Progressive Arena ×1; an 8-byte Script 135 §8 splice sets
-  trigger 780). Ogremon-chain softlock research (Drill Tunnel fight first
-  hangs; standalone fix semantics) in `work/dw1_re/decomp/ogremon_chain/`.
+  trigger 780). **Ogremon chain**: the standalone's "Ogremon softlock" write
+  we shipped was mis-targeted and *caused* the Drill Tunnel hang (it moved
+  TUNN02's model-load gate off trigger 150 while the cutscene kept it) —
+  retired; the four MAPHEAD-load / script-cutscene gate pairs are pinned
+  (`OGREMON_CHAIN_GATE_PAIRS`). Guards G1 (Nanimon gate → 175) and G2
+  (Drimogemon's fight kept until won) await the lab
+  (`work/dw1_re/decomp/ogremon_chain/NOTES.md`).
   Not
   ported: recruit-identity
   shuffle, intro hash, happyVending, jukebox truncation, forced starter.

@@ -22,9 +22,9 @@ project moved out of "build the world" and into **feature expansion + polish + v
 | World version | 0.6.0 (`minimum_ap_version` 0.6.7) |
 | Locations / items | 280 / 217 |
 | YAML options | 80, in 5 option groups |
-| World test suite | **1158 passed**, 4 skipped, 10801 subtests, ~18 s with `-n auto` (one class is disc-gated: it re-checks vanilla bytes when `Digimon World (USA).bin` sits at the repo root) |
+| World test suite | **1161 passed**, 4 skipped, 10878 subtests, ~18 s with `-n auto` (one class is disc-gated: it re-checks vanilla bytes when `Digimon World (USA).bin` sits at the repo root) |
 | Lint | `ruff` at a 322-finding baseline (303 pre-existing + the two census tools' CLI prints, T201, like the other lab tools) |
-| Commits ahead of `main` | 115 |
+| Commits ahead of `main` | 116 |
 | Decomp coverage | **31 / 1120** SLUS game functions verified — 2.8 % by count, **14.5 % of static call sites** |
 
 ### 1.1 What is shipped
@@ -252,6 +252,36 @@ endSection; terminator`; 0xFE/0xFF are the same VM opcode, so moving the termina
 `GEKOMON_*` in `addresses.py`, `_write_gekomon_tokens` (always on), `client.LOCATION_RAM_BITS`,
 `test_gekomon.py`; real-disc round trip green. Trigger 780 claimed (781..783 are the last free bits).
 
+**Same day — the Ogremon / Whamon quest chain: a shipped patch retired** (user text on the
+softlocks received; static research agent, `work/dw1_re/decomp/ogremon_chain/NOTES.md`, every
+claim checked on the disc or in dw_decomp). The chain, with corrected numbering: B1 canyon-road
+ambush (GCAN08 — *not* the fortress as `rules.py` says), B2 Ogremon's Room (OGRE03, sets 175/176),
+B3 Secret Beach Cave (OGRE11, sets 150; "Whamon joins" sets 224), B4 Drill Tunnel hub (TUNN02,
+sets 234); vanilla forces B2 < B3 only through Whamon appearing at the shore and B3 < B4 through
+150. **The standalone's "Ogremon softlock" write, shipped unconditionally since Phase 4, is the
+cause of the Drill Tunnel hang the user described, not a cure**: both of its offsets are the two
+copies of MAPHEAD.SCN Section_25 byte 2482 — the trigger-150 operand of TUNN02's bandit
+*model-load* gate (`150 AND !234`) — and writing 235 (Shellmon recruited) there desynchronises
+the models from the cutscene gate in Script 26 §51, which still reads 150: with the cave battle
+done and Shellmon not recruited (the vanilla order without Shellmon, or the AP ferry order) the
+bandit cutscene runs against absent entities and the game stops responding; since the Mt.
+Panorama shortcut is closed in that state, the left half of the map is cut off too (Shellmon is
+not in logic → a possibly unbeatable seed). The standalone's comments describe the *Nanimon* gate
+of Section_48 — the other `96 00` word of the same disc sector; the write was mis-targeted
+upstream. **Retired (G0)**: `_write_softlock_fix_tokens` no longer emits it; the constants stay
+for the record; `OGREMON_CHAIN_GATE_PAIRS` pins the four MAPHEAD-load / script-cutscene gate
+pairs (`test_ogremon_chain` on the disc, `test_patcher` against every emitted token) so no future
+write can desynchronise them again. With vanilla bytes every battle order works (B2 before B1,
+B1 late, B3 before B2 via the *Whamon Recruit* item, B4 before B2). Two hazards remain for the
+lab: **G1** — Nanimon co-present with the bandits in OGRE03 when B3 precedes B2 (AP-only; the
+proposed guard moves the Nanimon gate from 150 to 175, MAPHEAD Section_48 vm 3684 → 0x140B7ECC,
+which also closes a region-locking logic gap on "Nanimon Quest: Ogre Fortress"); **G2** —
+Ogremon recruited before Drimogemon's berserk fight makes the Drimogemon recruit unobtainable
+(Script 28 §5 skips the fight once 234 is set and never sets 140, which Script 29 §51 needs; the
+2-byte guard reads 140 instead of 234 at Script 28 vm 34 = 0x13FF293A). Both go through the
+three nets with the savestates in §4 (SS1 reproduces the hang with the retired bytes as the
+regression control).
+
 **Same day — the five dead region-gate rows FIXED** (`dw1-patch` agent, three nets; notes
 `work/dw1_re/decomp/gate_fix/NOTES.md`, spec `patches/gate_fix.json`): seven script-class gates
 of the shipped `SCRIPT_GATE_PATCHES` shape — 24 writes, 12 stubs in the slot-tail residue of
@@ -302,7 +332,7 @@ Grouped by **what blocks each item**, because that is what decides the order.
 | --- | --- | --- |
 | **BizHawk validation session** | One play session on the real client against `work/dw1_re/BIZHAWK_SESSION_CHECKLIST.md` — now also the 2026-08-29 options (technique data, drops, gifts, QoL patches, digivolution, species lists, raising, music, notifications, the five re-gated borders). | Closes the August batches. May generate corrective work. |
 | **Savestate batch** | The states in [SAVESTATE_REQUESTS.md](worlds/digimon_world/tools/SAVESTATE_REQUESTS.md) — see §4. **First sitting done 2026-08-28** (6 states incl. the `debug_warp` teleport hub); Medium rows remain | Patch validation in the real game (fishing, training, post-game heap margin) |
-| **Ogremon quest softlocks** | Text received 2026-08-29: (a) room 2 after room 3 (the shipped standalone patch); (b) NEW — the Drill Tunnel Ogremon fight reached first: the cutscene fires, the models are absent, the game hangs; (c) unknown: battle 1 after battle 3; (d) what the standalone fix really does. A static research agent is mapping the whole chain (`work/dw1_re/decomp/ogremon_chain/`). | Guard patches follow the research; the user's BizHawk pass verifies. |
+| **Ogremon chain guards G1 / G2** | Lab validation of the two remaining guards (see §1.1): G1 Nanimon gate 150 → 175 (needs SS2 to confirm the co-presence hazard), G2 Drimogemon fight kept available until won (SS4). The retired write (G0) is already out of the build. | Closes the user's reported Ogremon softlocks; the BizHawk pass verifies. |
 | **Logic review** | The user's own pass over `rules.py` | — |
 
 ### 2.2 Ready now — no RE, no user input
@@ -333,7 +363,7 @@ savestates are now for.
 | **Fishing locations (expansion)** | `src/fish/` (95 % in C). The 6 `FISH_REL` ITEM_PARA readers our relocation patched can now be read in C. | `fishing.state` — **still needed**: the relocation's FISH_REL readers have never been *exercised*; the lab has no fishing state | MEDIUM |
 | **Digivolution (v2 scope)** | `calculateRequirementScore`, `getNumMasteredMoves`, `hasDigimonRaised` in `src/main/evolution.c` / `script_common.c`; requirement table `EVO_REQ_DATA` @ 0x8012ABEC | `digivolve_accepted.state`, `species_raised.state` — for validating an AP digivolution item, not for RE | MEDIUM. The "ever raised" flag (trigger 512+form) can **veto** a digivolution whose stat requirements are met — an AP digivolution item must account for it. |
 | **Post-game heap margin** | None — measurement only | `mt_infinity.state`, `back_dimension.state` | LOW. The 8 KB ITEM_PARA claim sits 0x408 bytes above the glyph ring; late-game allocations unmeasured. |
-| ~~**Gekomon**~~ **SHIPPED 2026-08-29** (location only, recruit set) / **Ogremon chain** | Gekomon: Script 135 §8 (see §1.1). Ogremon / Whamon: static chain research in flight — every battle's read/set triggers, MAPHEAD model loads, the standalone fix's exact semantics, the out-of-order matrix. | `gekomon_talk.state` (§4). Ogremon: to be requested by the research. | Gekomon: done pending the lab's three nets. Ogremon: MEDIUM (guards = script-gate IFs). |
+| ~~**Gekomon**~~ **SHIPPED 2026-08-29** (location only, recruit set) / **Ogremon chain — research DONE, G0 shipped** | Gekomon: Script 135 §8 (§1.1). Ogremon / Whamon: chain mapped (`work/dw1_re/decomp/ogremon_chain/NOTES.md`); the shipped standalone write retired (G0), gate pairs pinned; guards G1 (MAPHEAD Section_48 vm 3684 → 175) and G2 (Script 28 vm 34 → 140) designed. | `gekomon_talk.state` (§4); SS1 `ogre_tunn02_after_sbc`, SS2 `ogre_ogre03_nanimon`, SS3 `ogre_ogre11_ferry_first`, SS4 `ogre_tunn04_after_ogremon` (NOTES §5). | Gekomon: done pending the lab's three nets. G1 / G2: one `dw1-patch` mission (three nets). |
 | **Recruit-bit readers in overlays** (found 2026-08-28) | `src/trn/trn_reward.c:637,643` — Kabuterimon/Kuwagamon (triggers 219/251) grant the ×6/×5 training bonus; `src/dget/dget.c:308-357` — tournament entry counts recruits over triggers 200..310. Both read the **vanilla** bits, so an AP-delivered recruit shows the gym NPC but does not grant the bonus, and cup entry follows the vanilla count. | `training_gym.state`, `arena_lobby.state` (exists) | **Decided and done 2026-08-28**: TRN **shipped** (always-on `TRN_GYM_BONUS_WORD_PATCHES`: the two `addiu` immediates in `TRN_REL.BIN` now read 739 / 771; three nets incl. 7 real sessions + an 84/84 mode sweep, `work/dw1_re/decomp/trn_gym_bonus/`); DGET **no** (cup tiers stay attached to Progressive Arena only, which the client's arena enforcer already guarantees — the vanilla count reader stays). |
 
 ### 2.4 v2 location sources (from PLAN.md §Phase 7, still unscheduled)
@@ -350,6 +380,11 @@ and locations.
 - **Trigger-bit budget is nearly exhausted**: 781..783 are the last audited-free bits (780 went to
   the Gekomon location on 2026-08-29); ids ≥ 800 overlap the pstat array and are off limits. Any new
   flag needs a claim decision first.
+- **The standalone's softlock patches are not all sound**: its "Ogremon softlock" write was mis-targeted
+  (retired 2026-08-29, §1.1); the remaining four (rotation, entityMoveTo, Toy Town, Leomon cave) are still
+  taken on trust from the standalone and have never been individually re-derived. `rules.py` also numbers
+  the chain wrongly ("Battles 1+2 at Ogre Fortress": B1 is the canyon road) — comment-level, no logic
+  impact.
 - **Cave6 is code-full** (2026-08-29): 4 + 12 + 12 B left after the top-banner renderer; any new
   resident code must be claimed from the heap (the ITEM_PARA claim word, `0x80113AB4`).
 - The `>=800-is-pstat` audit's *method* (static constant-caller census) under-counted the pstat
@@ -499,6 +534,7 @@ that.
 | ✅ `machinedramon.state` (captured 2026-08-28) | Ending path, trigger 50 | Goal robustness | Medium |
 | `card_trade.state` | Card-value path live | Card multiplier (shipped on static analysis + one live check) | Medium |
 | `gekomon_talk.state` | Gekomon's §8 dialog with the splice (bit 780 set / not set by trigger 205) | Gekomon location (shipped 2026-08-29) | Medium (validation; captured by the patch mission) |
+| `ogre_tunn02_after_sbc.state`, `ogre_ogre03_nanimon.state`, `ogre_ogre11_ferry_first.state`, `ogre_tunn04_after_ogremon.state` | The Ogremon chain out of order: the retired write's hang as the regression control (SS1), Nanimon co-presence (SS2, decides G1), the AP ferry order (SS3), Ogremon before Drimogemon (SS4, G2) | Ogremon chain guards G1 / G2 | **High** (validation; user-reported softlocks) |
 | `species_raised.state` | `hasDigimonRaised` → VERIFIED | — (the flag's semantics are C-confirmed) | Low (provenance) |
 | `script_vm_cold_start.state` | `callScriptSection` → VERIFIED | — (all 43 stores C-confirmed) | Low (provenance) |
 | `long_text.state`, `numeric_ui.state` | `renderCharacter` / `convertAsciiToJis` corners | — (C-confirmed) | Low (provenance) |

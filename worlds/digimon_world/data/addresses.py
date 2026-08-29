@@ -2263,7 +2263,10 @@ ROM_FIX_LEOMON_CAVE_NANIMON_SOFTLOCK_OFFSETS: Final = (
     0x140317F6, 0x140318BA, 0x140321C8, 0x1403228C,
 )
 
-ROM_OGREMON2_NANIMON_SOFTLOCK_OFFSETS: Final = (0x13FD689A, 0x140B7A1A)
+# (``ROM_OGREMON2_NANIMON_SOFTLOCK_OFFSETS`` = (0x13FD689A, 0x140B7A1A) used to
+# duplicate ``ROM_OGREMON_SOFTLOCK_OFFSETS`` here; both name the standalone's
+# mis-targeted "Ogremon softlock" write, RETIRED 2026-08-29 — see the
+# "Ogremon / Whamon quest chain" section.)
 
 # Recruit-spawn rate offsets, addressed per Digimon. Patch values live in
 # the patcher's payload.
@@ -3012,7 +3015,11 @@ SHUFFLEABLE_RECRUITS: Final[frozenset[str]] = frozenset(ROM_RECRUIT_TRIGGERS.key
 # stuck if the encounter is fired out of expected sequence. We unblock
 # them by applying the standalone's softlock-fix MIPS patches (see
 # ``ROM_FIX_*`` constants below) — once those land, all four are
-# shuffleable.
+# shuffleable. Correction 2026-08-29 (``work/dw1_re/decomp/ogremon_chain/
+# NOTES.md``): Ogremon needs NO patch to be shuffleable — his recruit bit
+# is vanilla-set by the tunnel cutscene and only city reads are
+# redirected — and the standalone's "Ogremon softlock" write actually
+# *caused* a hang; it is retired (see the quest-chain section).
 SOFTLOCK_RISK_RECRUITS: Final[frozenset[str]] = frozenset({
     "Whamon",
     "Drimogemon",
@@ -3137,6 +3144,18 @@ ROM_FIX_LEO_CAVE_OFFSETS: Final = (
     0x140317F6, 0x140318BA, 0x140321C8, 0x1403228C,
 )
 
+# RETIRED 2026-08-29 — no longer written by the patcher (constants kept for
+# the record; ``test_patcher`` asserts they stay unwritten). Both offsets are
+# the two copies of MAPHEAD.SCN Section_25 byte 2482 (the DG.SCN archive copy
+# that ``getScript(0)`` never reads, and the boot-resident MAPHEAD.SCN copy):
+# the trigger-150 operand of TUNN02's bandit *model-load* gate
+# (``150 AND !234``). Writing 235 (Shellmon recruited) there desynchronises
+# the models from the cutscene gate in Script 26 §51 (still ``150 AND !234``):
+# with the Secret Beach Cave battle done and Shellmon not recruited, the
+# bandit cutscene runs against absent entities and the game stops
+# responding — the Drill Tunnel hang the user reported. The standalone's
+# comments describe the *Nanimon* gate of Section_48 (the other ``96 00`` word
+# of that disc sector); the write was mis-targeted upstream.
 ROM_OGREMON_SOFTLOCK_FORMAT: Final = "<H"
 ROM_OGREMON_SOFTLOCK_VALUE: Final = 235
 ROM_OGREMON_SOFTLOCK_OFFSETS: Final = (0x13FD689A, 0x140B7A1A)
@@ -9446,11 +9465,18 @@ _SCRIPT_ARCHIVE_SLOTS: Final[dict[int, int]] = {
     66: 0x30000,    # GIAS00 (screen 69): Mt. Panorama mouth S51
     84: 0x3C800,    # FRZL01 (screen 88): Great Canyon mouth S51
     135: 0x5F000,   # GKYO02 (screen 141, Volume Villa interior): Gekomon's arena dialog §8
+    # Ogremon / Whamon quest chain (gate-consistency sites, 2026-08-29):
+    26: 0x18000,    # TUNN02 (screen 25, Drill Tunnel hub): bandit cutscene S51
+    28: 0x19800,    # TUNN04 (screen 27): Drimogemon's berserk fight S5
+    48: 0x24800,    # OGRE03 (screen 48, Ogremon's Room): fortress cutscene S52 / S53
+    130: 0x5B800,   # FRZL16 (screen 135, Freezeland shore): Whamon ride S51
+    137: 0x61800,   # OGRE11 (screen 143, Secret Beach Cave): Ogremon battle S51
 }
 _SCRIPT_ARCHIVE_SLOT_SIZES: Final[dict[int, int]] = {
     6: 0x1000, 7: 0x1000, 101: 0x800, 162: 0x2800, 163: 0x2000, 176: 0x1800,
     8: 0x800, 18: 0x2000, 24: 0x800, 44: 0x800, 66: 0x800, 84: 0x800,
     135: 0x1800,
+    26: 0x1000, 28: 0x800, 48: 0x800, 130: 0x1000, 137: 0x800,
 }
 
 
@@ -11595,3 +11621,70 @@ assert NOTIFY_TOP_F2_WORDS[10] & 0xFFFF == NOTIFY_TOP_Y & 0xFFFF
 for _off, _size in ((ROM_NOTIFY_TOP_F1_OFFSET, 12 * 4), (ROM_NOTIFY_TOP_F2_OFFSET, 17 * 4)):
     assert (_off - 24) % 2352 + _size <= 2048, hex(_off)   # single-sector writes
 del _off, _size
+
+
+# =============================================================================
+# Ogremon / Whamon quest chain — gate consistency (2026-08-29)
+# =============================================================================
+#
+# Static research (``work/dw1_re/decomp/ogremon_chain/NOTES.md``, every byte
+# checked on the disc): the chain is B1 canyon-road ambush (GCAN08) -> B2
+# Ogremon's Room (OGRE03, sets 175/176) -> B3 Secret Beach Cave (OGRE11, sets
+# 150; "Whamon joins" sets 224) -> B4 Drill Tunnel hub (TUNN02, sets 234);
+# Drimogemon's berserk fight (TUNN04, sets 140) is independent. Every fight
+# screen loads its story models through a MAPHEAD.SCN ``if trigger(...)`` gate
+# and runs the cutscene through a script gate on the SAME triggers; the two
+# must stay in step, because no trigger says "models loaded" — a cutscene that
+# fires while its models are absent stops the game (the shipped, now retired,
+# "Ogremon softlock" write did exactly that to TUNN02). The pairs below pin
+# the vanilla *condition* bytes (IF header + modes + trigger ids, up to the
+# ``18 00`` "then") of each gate; ``test_ogremon_chain`` checks them on the
+# disc and ``test_patcher`` checks that no emitted token lands inside them.
+# Trigger-id sets are compared rather than raw bytes: the FRZL16 pair states
+# ``175 AND !224`` in opposite operand orders.
+
+MAPHEAD_LOAD_GATE_TUNN02: Final = maphead_bin_offset(2478)     # Section_25: bandits iff 150 AND !234
+MAPHEAD_LOAD_GATE_OGRE11: Final = maphead_bin_offset(7822)     # Section_143: Ogremon iff 150
+MAPHEAD_LOAD_GATE_OGRE03: Final = maphead_bin_offset(3638)     # Section_48: fortress cast iff 175
+MAPHEAD_LOAD_GATE_FRZL16: Final = maphead_bin_offset(7452)     # Section_135: Whamon iff 175 AND !224
+SCRIPT_GATE_TUNN02_S51: Final = script_vm_to_bin_offset(26, 520)
+SCRIPT_GATE_OGRE11_S51: Final = script_vm_to_bin_offset(137, 26)
+SCRIPT_GATE_OGRE03_S52: Final = script_vm_to_bin_offset(48, 356)
+SCRIPT_GATE_OGRE03_S53: Final = script_vm_to_bin_offset(48, 1378)
+SCRIPT_GATE_FRZL16_S51: Final = script_vm_to_bin_offset(130, 154)
+# (label, .bin offset, vanilla condition bytes, trigger ids the condition reads)
+OGREMON_CHAIN_GATE_PAIRS: Final[tuple[tuple[tuple[str, int, bytes, frozenset[int]], ...], ...]] = (
+    (
+        ("MAPHEAD Section_25 TUNN02 load", MAPHEAD_LOAD_GATE_TUNN02, bytes.fromhex("1900010096004000EA00"),
+         frozenset({150, 234})),
+        ("Script 26 S51 TUNN02 cutscene", SCRIPT_GATE_TUNN02_S51, bytes.fromhex("1900010096004000EA00"),
+         frozenset({150, 234})),
+    ),
+    (
+        ("MAPHEAD Section_143 OGRE11 load", MAPHEAD_LOAD_GATE_OGRE11, bytes.fromhex("190001009600"), frozenset({150})),
+        ("Script 137 S51 OGRE11 battle", SCRIPT_GATE_OGRE11_S51, bytes.fromhex("190001009600"), frozenset({150})),
+    ),
+    (
+        ("MAPHEAD Section_48 OGRE03 load", MAPHEAD_LOAD_GATE_OGRE03, bytes.fromhex("19000100AF00"), frozenset({175})),
+        ("Script 48 S52 OGRE03 cutscene", SCRIPT_GATE_OGRE03_S52, bytes.fromhex("19000100AF00"), frozenset({175})),
+        ("Script 48 S53 OGRE03 walk-in", SCRIPT_GATE_OGRE03_S53, bytes.fromhex("19000100AF00"), frozenset({175})),
+    ),
+    (
+        ("MAPHEAD Section_135 FRZL16 load", MAPHEAD_LOAD_GATE_FRZL16, bytes.fromhex("19000000AF008100E000"),
+         frozenset({175, 224})),
+        ("Script 130 S51 FRZL16 shore", SCRIPT_GATE_FRZL16_S51, bytes.fromhex("19000000E0004100AF00"),
+         frozenset({175, 224})),
+    ),
+)
+assert (MAPHEAD_LOAD_GATE_TUNN02, SCRIPT_GATE_TUNN02_S51) == (0x140B7A16, 0x13FF0F90)
+assert (MAPHEAD_LOAD_GATE_OGRE11, SCRIPT_GATE_OGRE11_S51) == (0x140B9156, 0x14045432)
+assert (MAPHEAD_LOAD_GATE_OGRE03, SCRIPT_GATE_OGRE03_S52, SCRIPT_GATE_OGRE03_S53) == (0x140B7E9E, 0x13FFF49C,
+                                                                                       0x13FFF89A)
+assert (MAPHEAD_LOAD_GATE_FRZL16, SCRIPT_GATE_FRZL16_S51) == (0x140B8FE4, 0x1403E672)
+for _group in OGREMON_CHAIN_GATE_PAIRS:
+    assert len({_ids for _, _, _, _ids in _group}) == 1, _group[0][0]          # one condition per group
+    for _, _off, _cond, _ in _group:
+        assert 24 <= _off % 2352 <= 2072 - len(_cond), hex(_off)           # inside one sector's user data
+# The retired "Ogremon softlock" write sits inside the TUNN02 load gate — the reason it hung the game.
+assert MAPHEAD_LOAD_GATE_TUNN02 < ROM_OGREMON_SOFTLOCK_OFFSETS[1] < MAPHEAD_LOAD_GATE_TUNN02 + 10
+del _group, _off, _cond

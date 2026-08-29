@@ -283,9 +283,6 @@ from .data.addresses import (
     ROM_NOTIFY_TOP_F2_OFFSET,
     ROM_NOTIFY_TOP_HOOK_ADDIU_OFFSET,
     ROM_NOTIFY_TOP_HOOK_LUI_OFFSET,
-    ROM_OGREMON_SOFTLOCK_FORMAT,
-    ROM_OGREMON_SOFTLOCK_OFFSETS,
-    ROM_OGREMON_SOFTLOCK_VALUE,
     ROM_OLD_FISHROD_REMAP_OFFSETS,
     ROM_OLD_FISHROD_REMAP_VALUE,
     ROM_PIXIMON_MANUAL_GIVEITEM_OFFSETS,
@@ -1229,12 +1226,21 @@ def _write_istriggerset_wrapper_tokens(patch: DigimonWorldProcedurePatch) -> Non
 def _write_softlock_fix_tokens(patch: DigimonWorldProcedurePatch) -> None:
     """Emit the standalone's softlock fix patches.
 
-    Five small ROM patches that prevent specific encounter-order
-    softlocks involving Whamon, Drimogemon, Ogremon, and Nanimon.
-    Source:
+    Four small ROM patches (rotation x2, entityMoveTo x2, Toy Town x2,
+    Leomon cave / Nanimon x8) that prevent specific encounter-order
+    softlocks. Source:
     ``references/digimon_world_randomizer/digimon/data.py:715-733``.
-    Applying them unconditionally lets all four Digimon participate in
-    the AP location pool.
+    Applied unconditionally.
+
+    The standalone's fifth write — its "Ogremon softlock" fix,
+    ``ROM_OGREMON_SOFTLOCK_*`` — was **retired 2026-08-29**: it re-targets
+    the MAPHEAD *model-load* gate of the Drill Tunnel hub (TUNN02,
+    ``150 AND !234`` -> ``235 AND !234``) while the cutscene gate in
+    Script 26 §51 keeps reading 150, so whenever the Secret Beach Cave
+    battle is done and Shellmon is not recruited the bandit cutscene runs
+    against absent models and the game stops responding — the Drill
+    Tunnel hang the user reported. The vanilla bytes are consistent and
+    are what we want (``work/dw1_re/decomp/ogremon_chain/NOTES.md``).
     """
 
     fix_rotation = struct.pack(ROM_FIX_ROTATION_FORMAT, ROM_FIX_ROTATION_VALUE)
@@ -1252,10 +1258,9 @@ def _write_softlock_fix_tokens(patch: DigimonWorldProcedurePatch) -> None:
     fix_leo_cave = struct.pack(ROM_FIX_LEO_CAVE_FORMAT, ROM_FIX_LEO_CAVE_VALUE)
     for offset in ROM_FIX_LEO_CAVE_OFFSETS:
         patch.write_token(APTokenTypes.WRITE, offset, fix_leo_cave)
-
-    fix_ogremon = struct.pack(ROM_OGREMON_SOFTLOCK_FORMAT, ROM_OGREMON_SOFTLOCK_VALUE)
-    for offset in ROM_OGREMON_SOFTLOCK_OFFSETS:
-        patch.write_token(APTokenTypes.WRITE, offset, fix_ogremon)
+    # The standalone's fifth write ("Ogremon softlock", ``ROM_OGREMON_SOFTLOCK_*``) is
+    # deliberately NOT emitted since 2026-08-29 — see ``_write_softlock_fix_tokens``'s
+    # docstring and the "Ogremon / Whamon quest chain" section of ``data/addresses.py``.
 
 
 def _write_lava_cave_gate_tokens(patch: DigimonWorldProcedurePatch) -> None:

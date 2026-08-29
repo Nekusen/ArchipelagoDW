@@ -127,10 +127,12 @@ class TestGenerateOutput(DigimonWorldTestBase):
           patch at the vanilla setTrigger entry (replaces first 2 instrs
           with ``j wrapper`` + ``nop``).
         * 1 PP-calc patch WRITE (44 bytes).
-        * 5 softlock-fix bands: ROM_FIX_ROTATION (2 bytes total),
+        * 4 softlock-fix bands: ROM_FIX_ROTATION (2 bytes total),
           ROM_FIX_MOVE_TO (2*4 = 8 bytes), ROM_FIX_TOY_TOWN
-          (2*4 = 8 bytes), ROM_FIX_LEO_CAVE (8*1 byte),
-          ROM_OGREMON_SOFTLOCK (2*2 = 4 bytes).
+          (2*4 = 8 bytes), ROM_FIX_LEO_CAVE (8*1 byte). The standalone's
+          fifth, ROM_OGREMON_SOFTLOCK, is retired (2026-08-29) and must
+          NOT be written — nor may any token land inside the quest chain's
+          MAPHEAD / script gate pairs.
         * Per-chest item byte writes + chestGiveItem wrapper +
           chest-pickup ``jal`` redirect (Phase 5 piece A).
 
@@ -142,6 +144,7 @@ class TestGenerateOutput(DigimonWorldTestBase):
         import struct
 
         from ..data.addresses import (
+            OGREMON_CHAIN_GATE_PAIRS,
             ROM_FIX_LEO_CAVE_OFFSETS,
             ROM_FIX_LEO_CAVE_VALUE,
             ROM_FIX_MOVE_TO_OFFSETS,
@@ -151,7 +154,6 @@ class TestGenerateOutput(DigimonWorldTestBase):
             ROM_FIX_TOY_TOWN_OFFSETS,
             ROM_FIX_TOY_TOWN_VALUE,
             ROM_OGREMON_SOFTLOCK_OFFSETS,
-            ROM_OGREMON_SOFTLOCK_VALUE,
             ROM_PP_CALC_PATCH_OFFSET,
             ROM_SETTRIGGER_PATCH_FORMAT,
             ROM_SETTRIGGER_PATCH_OFFSET,
@@ -230,9 +232,16 @@ class TestGenerateOutput(DigimonWorldTestBase):
         leo_cave_bytes = struct.pack("B", ROM_FIX_LEO_CAVE_VALUE)
         for off in ROM_FIX_LEO_CAVE_OFFSETS:
             self.assertIn((off, leo_cave_bytes), observed)
-        ogremon_bytes = struct.pack("<H", ROM_OGREMON_SOFTLOCK_VALUE)
+        # The standalone's "Ogremon softlock" write is retired (it re-targeted
+        # TUNN02's model-load gate and hung the bandit cutscene); nothing may
+        # write it, and no token may land inside any quest-chain gate pair.
         for off in ROM_OGREMON_SOFTLOCK_OFFSETS:
-            self.assertIn((off, ogremon_bytes), observed)
+            self.assertNotIn(off, observed_offsets)
+        for group in OGREMON_CHAIN_GATE_PAIRS:
+            for _label, gate_off, cond, _ids in group:
+                for off, data in observed:
+                    self.assertTrue(off + len(data) <= gate_off or off >= gate_off + len(cond),
+                                    f"token at {off:#x} overlaps gate {_label}")
 
         # Chest-item replacement tokens.
         # WorldTestBase.setUp does NOT run fill, so every chest's
