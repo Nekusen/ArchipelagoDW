@@ -204,9 +204,12 @@ These come from [docs/style.md](docs/style.md) and the ruff config and override 
   notifications shipped** (`in_game_notifications`: Cave6 mailbox + render
   callback on the game's area-name banner, three nets; client
   `NotificationQueue`). **Pending the user's decision** (STATUS §2.1):
-  entrance shuffle go / no-go, the Lava Cave boulder bypass through the
-  Drill Tunnel <-> Mt. Panorama shortcut, notification cosmetics, and the
-  BizHawk validation pass. Not ported: recruit-identity
+  entrance shuffle go / no-go (the user leans towards adding the Drill
+  Tunnel <-> Mt. Panorama shortcut to the pool), notification cosmetics
+  (the user prefers top-of-screen, wants to see it first), and the BizHawk
+  validation pass. A suspected Lava Cave boulder bypass through that
+  shortcut was retracted: the prompts read the vanilla recruit bit and
+  Drimogemon sits behind the boulder. Not ported: recruit-identity
   shuffle, intro hash, happyVending, jukebox truncation, forced starter.
   Table audit corrected one claim: the element matrix is read by the
   **partner's** auto-battle AI, not the enemy AI. Remaining technique
