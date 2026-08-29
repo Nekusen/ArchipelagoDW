@@ -203,7 +203,10 @@ These come from [docs/style.md](docs/style.md) and the ruff config and override 
   script-class gates (`_SCRIPT_GATE_FIX_PATCHES`, three nets). **In-game AP
   notifications shipped** (`in_game_notifications`: Cave6 mailbox + render
   callback on the game's area-name banner, three nets; client
-  `NotificationQueue`). Not ported: recruit-identity
+  `NotificationQueue`). **Pending the user's decision** (STATUS §2.1):
+  entrance shuffle go / no-go, the Lava Cave boulder bypass through the
+  Drill Tunnel <-> Mt. Panorama shortcut, notification cosmetics, and the
+  BizHawk validation pass. Not ported: recruit-identity
   shuffle, intro hash, happyVending, jukebox truncation, forced starter.
   Table audit corrected one claim: the element matrix is read by the
   **partner's** auto-battle AI, not the enemy AI. Remaining technique

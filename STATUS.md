@@ -23,8 +23,8 @@ project moved out of "build the world" and into **feature expansion + polish + v
 | Locations / items | 279 / 217 |
 | YAML options | 80, in 5 option groups |
 | World test suite | **1140 passed**, 4 skipped, 10532 subtests, ~18 s with `-n auto` (one class is disc-gated: it re-checks vanilla bytes when `Digimon World (USA).bin` sits at the repo root) |
-| Lint | `ruff` at a 323-finding baseline (303 pre-existing + the two census tools' CLI prints, T201, like the other lab tools) |
-| Commits ahead of `main` | 107 |
+| Lint | `ruff` at a 322-finding baseline (303 pre-existing + the two census tools' CLI prints, T201, like the other lab tools) |
+| Commits ahead of `main` | 110 |
 | Decomp coverage | **31 / 1120** SLUS game functions verified — 2.8 % by count, **14.5 % of static call sites** |
 
 ### 1.1 What is shipped
@@ -257,7 +257,10 @@ Grouped by **what blocks each item**, because that is what decides the order.
 
 | Item | What is needed | Why it matters |
 | --- | --- | --- |
-| **BizHawk validation session** | One play session on the real client against the checklist (region gates, four shops, ITEM_PARA residuals, card ×8, Piximon; late-game heap margin as a separate save) | Closes the August batch. May generate corrective work. |
+| **Entrance shuffle by region — go / no-go** | A decision on the design in `work/dw1_re/decomp/entrance_shuffle/NOTES.md` (§2.3 row): v1 pool = 15 two-way mouth pairs on 13 field borders, coupled, AP generic ER; ferries / flights / Mt. Infinity / Back Dimension / town doors excluded. ~10-14 days (patcher 3-4, logic + tests 3-4, client 0.5-1, validation 3-5). | The one big feature left; everything else the user asked for on 2026-08-29 shipped. |
+| **Drill Tunnel <-> Mt. Panorama shortcut vs the Lava Cave boulder** | Yes / no on a 12-B second IF (trigger 145) in stubs S8b / S24 so the prompt shortcut cannot bypass a shuffled `lava_cave_access`; and whether to add the shortcut edges to `regions.py`. | Today the bypass is possible in-game but never required by logic (seeds stay conservative). |
+| **Notification banner cosmetics** | Accept the screen-centre position (under partner speech bubbles) or fund a top-of-screen / boxed variant (~26 more words of Cave6: two-fragment placement or a heap-claim extension). | Purely visual. |
+| **BizHawk validation session** | One play session on the real client against `work/dw1_re/BIZHAWK_SESSION_CHECKLIST.md` — now also the 2026-08-29 options (technique data, drops, gifts, QoL patches, digivolution, species lists, raising, music, notifications, the five re-gated borders). | Closes the August batches. May generate corrective work. |
 | **Savestate batch** | The states in [SAVESTATE_REQUESTS.md](worlds/digimon_world/tools/SAVESTATE_REQUESTS.md) — see §4. **First sitting done 2026-08-28** (6 states incl. the `debug_warp` teleport hub); Medium rows remain | Patch validation in the real game (fishing, training, post-game heap margin) |
 | **Gekomon recruit** | The vanilla recruit method, as text | New recruit; needs bit/visibility RE afterwards |
 | **Whamon / Ogremon quest softlocks** | Reproduction recipes, as text | Script state-machine RE + guard patches |

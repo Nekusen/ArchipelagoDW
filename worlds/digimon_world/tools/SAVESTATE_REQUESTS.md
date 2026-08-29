@@ -42,6 +42,8 @@ harness can then drive the event itself.
 | `back_dimension.state` | Back Dimension (map 226 MGEN11) | God mode; trigger 50 (game beaten) SET |
 | `trn_check.state` / `trn_check_loaded.state` | Green Gym (screen 112) before / after the gym script loads TRN_REL.BIN -- unattended, via warp hub | Captured on `work\dw1_re\trn_gym_bonus.bin`; used for net 3 of the gym-bonus patch (the overlay is script-loaded, so `training_gym.state` alone cannot prove a disc patch). |
 | `enemy_poc_battle.state` / `enemy_poc_icemon_battle.state` | Field battle just started (MAYO03 Goburimon with edited stats / MAYO01 substituted Icemon) -- unattended, via warp + tamer teleport | Captured on `work\dw1_re\enemy_poc.bin` (data-only patch). Cover the **enemy-stat scaling** validation path: `INITIAL_COMBAT_STATS` row 1 holds the patched record. `post_battle_learn` is still open (needs a fight one blow from a technique learn). |
+| `notification_field.state` | Field, banner on screen -- unattended, on `work\dw1_re\notification.bin` | The in-game notification hook (`in_game_notifications`): mailbox + render callback resident. |
+| `gate_fix_map{7,17,17_cent,23,44,69,88}.state` / `gate_fix_n3_map{69,7}.state` | One per re-gated border (vanilla disc; the `_cent` one is TROP06 after Centarumon's cutscene) / two on `gate_fix_test.bin` -- unattended via the warp hub (`--poke 0x1BA66E:<exit>` picks the landing exit) | The five script-tile region gates and the two tunnel-shortcut prompts, blocked / unlocked. |
 
 Session rules learned the hard way (three emulator crashes): during a user-driven session use
 **no per-frame Lua listeners** (`dw1_redux_input.lua`), **no REST data GETs** (`peek`/screenshot
@@ -72,7 +74,7 @@ column:
 | Low (provenance) | `script_vm_cold_start.state` | Before the first script of a screen runs. | `callScriptSection`'s 43 replay-invisible stores are all C-confirmed with exact widths (`script_engine.c:95-120`). Only needed for provenance, or to test a script-start hook if one is ever designed. |
 | Medium (patch validation) | `dialog_columns.state` | A dialog using the tab/skip control codes (multi-column stat readout, arena board). | The seven control codes are C-confirmed (`script_common.c:2601-2701`). The state is now for **testing an injected notification string** that uses them — the in-game notifications feature. |
 
-**Technique-data objective (next, set 2026-08-28)** needs no new state: `BTL_calculateDamage`
+**Technique-data objective (2026-08-28; shipped 2026-08-29 as data)** needed no new state: `BTL_calculateDamage`
 vectors come from `enemy_poc_battle.state`, `enemy_poc_icemon_battle.state` and
 `battle_pending.state` (battles in progress); the `.MMD` animation census is a static read of
 the disc.
