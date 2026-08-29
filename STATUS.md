@@ -403,9 +403,7 @@ and locations.
 - **The standalone's softlock patches are not all sound**: its "Ogremon softlock" write was mis-targeted
   (retired 2026-08-29, §1.1); the remaining four (rotation, entityMoveTo, Toy Town, Leomon cave) are still
   taken on trust from the standalone and have never been individually re-derived (the Leomon-cave one
-  now has a known mechanism: Nanimon's 29-entry animation table + `startAnimation` without bounds check). `rules.py` also numbers
-  the chain wrongly ("Battles 1+2 at Ogre Fortress": B1 is the canyon road) — comment-level, no logic
-  impact.
+  now has a known mechanism: Nanimon's 29-entry animation table + `startAnimation` without bounds check). (`rules.py`'s chain comments carry the corrected battle numbering since `5dfe51da`.)
 - **Cave6 is code-full** (2026-08-29): 4 + 12 + 12 B left after the top-banner renderer; any new
   resident code must be claimed from the heap (the ITEM_PARA claim word, `0x80113AB4`).
 - The `>=800-is-pstat` audit's *method* (static constant-caller census) under-counted the pstat
