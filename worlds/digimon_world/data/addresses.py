@@ -7287,7 +7287,11 @@ def _slus_ram_to_bin_offset(ram_addr: int) -> int:
 #                            (68 B, opt-in; was the retired v1 recycle
 #                            giveItem wrapper slot 0x80095940..0x8009597C
 #                            plus its edges)
-#   0x80095980..0x80095D80  RELOC_ITEM_DESC_PTR (1024 B, opt-in) <- this section
+#   0x80095980..0x80095C68  RELOC_ITEM_DESC_PTR entries 0..185 (744 B written,
+#                            opt-in; the region is reserved to 0x80095D80) <- this section
+#   0x80095C68..0x80095CD8  notification render callback (112 B, opt-in
+#                            `in_game_notifications`; the table's never-indexed tail)
+#   0x80095CD8..0x80095D80  168 B free (table tail)
 #   0x80095D80..0x80095F40  AP_DESC_STRINGS (448 B, opt-in)       <-
 #   0x80095F40..0x80096BCC  tail, claimed piecemeal by later features:
 #     - setItemTexture icon-id wrapper 0x80095F40..0x80095F80 (64 B,
@@ -7300,7 +7304,10 @@ def _slus_ram_to_bin_offset(ram_addr: int) -> int:
 #     - ITEM_PARA boot seed hook 0x800965BC..0x80096650 (148 B,
 #       ALWAYS-ON — see the "ITEM_PARA 256-slot relocation" section;
 #       occupies the space of the retired merit scan/name teleport
-#       wrappers)
+#       wrappers) — or the EXTENDED 55-word hook up to 0x80096698
+#       (220 B) when shopsanity needs the second seed block. Nothing may
+#       be placed in 0x80096650..0x80096698 (that mistake hung the boot
+#       on 2026-08-29).
 #     - transition-gate wrapper + table 0x800966C4..0x800967F0
 #       (region-gate section at the bottom of this file), then
 #       SHOP_AP_CONFIG 0x800967F0..0x800967F4 (4 B) and 12 B spare
@@ -7310,14 +7317,16 @@ def _slus_ram_to_bin_offset(ram_addr: int) -> int:
 #       footprint of the retired Cave6 ITEM_PARA ext segment)
 #     - AP notification mailbox 0x80095FBC..0x80096000 (68 B, opt-in
 #       `in_game_notifications`, fills the former 70-B gap) and its
-#       render callback 0x80096650..0x800966C0 (112 B, the former
-#       116-B free range) and the top-banner renderer fragments at
-#       0x800958D0 / 0x8009593C listed above (see the notification
+#       render callback 0x80095C68..0x80095CD8 (112 B, the relocated
+#       desc-ptr table's never-indexed tail — moved out of
+#       0x80096650 on 2026-08-29) and the top-banner renderer fragments
+#       at 0x800958D0 / 0x8009593C listed above (see the notification
 #       section at the bottom)
-#     Remaining free: 0x800966C0..0x800966C4 (4 B),
-#     0x800967F4..0x80096800 (12 B) and 0x80096BC0..0x80096BCC (12 B) —
-#     no code-sized range is left; the next feature that needs code goes
-#     through the heap-claim word (0x80113AB4, ITEM_PARA section).
+#     Remaining free: 0x80095CD8..0x80095D80 (168 B, desc-ptr tail),
+#     0x80096698..0x800966C4 (44 B), 0x800967F4..0x80096800 (12 B) and
+#     0x80096BC0..0x80096BCC (12 B); anything larger goes through the
+#     heap-claim word (0x80113AB4, ITEM_PARA section). `test_cave6` asserts
+#     every occupant above pairwise disjoint (EXT hook included).
 #
 # Recycle-shop usage adds 1472 bytes inside Cave6, well within the
 # remaining headroom. An assertion at the bottom of this block enforces
@@ -10066,6 +10075,17 @@ SHOP_AP_STAGING2_SIZE: Final = (
     SHOP_AP_STAGING2_SLOT_COUNT * ROM_ITEM_TABLE_ENTRY_SIZE                  # 896
 )
 SHOP_AP_STAGING2_BIN_OFFSET: Final = _slus_ram_to_bin_offset(SHOP_AP_STAGING2_RAM)
+
+# The relocated ITEM_DESC_PTR table only ever holds entries for slots 0..185
+# (vanilla 0..127, recycle 128..134, merit 135..148, item + secret 149..185 —
+# the second staging block ends at slot 185). ``rom.relocate_item_desc_ptr``
+# writes exactly this many entries; the 280-B tail of the 1024-B table
+# (entries 186..255, 0x80095C68..0x80095D80) is never indexed and hosts the
+# in-game notification render callback since 2026-08-29 (see the notification
+# section at the end of this file).
+RELOC_ITEM_DESC_PTR_WRITTEN_ENTRIES: Final = SHOP_AP_STAGING2_SLOT_LAST + 1      # 186
+assert RELOC_ITEM_DESC_PTR_WRITTEN_ENTRIES == 186
+assert RELOC_ITEM_DESC_PTR_WRITTEN_ENTRIES <= RELOC_ITEM_DESC_PTR_ENTRIES
 assert SHOP_AP_STAGING2_BIN_OFFSET == 0x14D53ED4, hex(SHOP_AP_STAGING2_BIN_OFFSET)
 assert SHOP_AP_STAGING2_SLOT_BASE == EXT_ITEM_PARA_SEED_SLOT_LAST + 1
 assert SHOP_AP_STAGING2_SLOT_LAST == SECRET_SHOP_AP_ITEM_IDS[-1]
@@ -11400,7 +11420,18 @@ BGM_MODE_DAY_ONLY: Final = 1
 # the ``len*8+4`` composite width holds), then flag = 1. Flag 1 is "still
 # owed", never free.
 
-NOTIFY_CALLBACK_RAM: Final = 0x80096650          # Cave6, 28 words (was the 116-B free range; 4 B spare)
+# Callback placement — MOVED 2026-08-29 (evening). It first sat at 0x80096650,
+# "the 116-B free range after the ITEM_PARA boot seed hook" — true only for the
+# 37-word hook. With shopsanity beyond 30 ext rows the patcher emits the
+# EXTENDED 55-word hook (``ITEM_PARA_BOOT_HOOK_EXT_BYTES``, 0x800965BC..
+# 0x80096698), so the callback overwrote the hook's loops 4/5 and epilogue and
+# the game hung at boot (the user's first multi-game test seed). The callback
+# now lives in the never-indexed tail of the relocated ITEM_DESC_PTR table
+# (entries 186..255 — ``RELOC_ITEM_DESC_PTR_WRITTEN_ENTRIES``), 112 of 280 B.
+# The words are position-independent (relative branches, absolute ``j`` to
+# game code only). ``test_cave6`` keeps every Cave6 occupant pairwise disjoint,
+# the EXT hook included.
+NOTIFY_CALLBACK_RAM: Final = 0x80095C68          # Cave6, 28 words: tail of the relocated ITEM_DESC_PTR table
 NOTIFY_CALLBACK_WORDS: Final[tuple[int, ...]] = (
     0x3C088009, 0x91095FBC, 0x938A93DE, 0x938B9165, 0x938E94C8, 0x11200014, 0x014B5025, 0x39CE0001,
     0x014E5025, 0x2D210002, 0x10200005, 0x240C0098, 0x1540000D, 0x240400EF, 0x080363EC, 0xA10C5FBC,
@@ -11417,12 +11448,19 @@ RAM_NOTIFY_FLAG: Final = NOTIFY_MAILBOX_RAM & 0x1FFFFF          # physical 0x000
 RAM_NOTIFY_TEXT: Final = RAM_NOTIFY_FLAG + NOTIFY_TEXT_OFFSET   # physical 0x00095FC0
 NOTIFY_FLAG_IDLE: Final = 0
 NOTIFY_FLAG_PENDING: Final = 1
+# "Game is running" markers for the client (physical addresses): the first
+# instruction of ``isTriggerSet`` (0x8010643C: ``addiu sp, sp, -32``) proves
+# the SLUS image is resident, and a non-zero first word of the boot-resident
+# MAPHEAD.SCN copy (0x801B1D30) proves the game's own init ran past the boot
+# hooks. Until both hold the client polls and writes nothing (2026-08-29).
+RAM_GAME_ALIVE_SLUS_MARKER: Final[tuple[int, bytes]] = (0x0010643C, bytes((0xE0, 0xFF, 0xBD, 0x27)))
+RAM_GAME_ALIVE_MAPHEAD: Final = 0x001B1D30
 NOTIFY_HOOK_LUI_RAM: Final = 0x800E36DC          # initializeFileReadQueue: lui a3, hi(render cb)
 NOTIFY_HOOK_LUI_VANILLA: Final = 0x3C07800E
 NOTIFY_HOOK_LUI_PATCHED: Final = 0x3C078009
 NOTIFY_HOOK_ADDIU_RAM: Final = 0x800E36F0        # addiu a3, a3, lo(render cb) in the jal addObject delay slot
 NOTIFY_HOOK_ADDIU_VANILLA: Final = 0x24E7370C
-NOTIFY_HOOK_ADDIU_PATCHED: Final = 0x24E76650
+NOTIFY_HOOK_ADDIU_PATCHED: Final = 0x24E70000 | (NOTIFY_CALLBACK_RAM & 0xFFFF)   # 0x24E75C68
 NOTIFY_MAP_NAME_SLOT: Final = 66
 NOTIFY_MAP_NAME_PTR_RAM: Final = 0x801292C4      # MAP_NAME_PTR[66]
 NOTIFY_MAP_NAME_PTR_VANILLA: Final = 0x80128D44  # duplicate of slot 28, unused by every screen
@@ -11434,7 +11472,7 @@ ROM_NOTIFY_HOOK_LUI_OFFSET: Final = _slus_ram_to_bin_offset(NOTIFY_HOOK_LUI_RAM)
 ROM_NOTIFY_HOOK_ADDIU_OFFSET: Final = _slus_ram_to_bin_offset(NOTIFY_HOOK_ADDIU_RAM)
 ROM_NOTIFY_MAP_NAME_PTR_OFFSET: Final = _slus_ram_to_bin_offset(NOTIFY_MAP_NAME_PTR_RAM)
 ROM_NOTIFY_LOADING_NAME_OFFSET: Final = _slus_ram_to_bin_offset(NOTIFY_LOADING_NAME_RAM)
-assert (ROM_NOTIFY_CALLBACK_OFFSET, ROM_NOTIFY_MAILBOX_OFFSET) == (0x14CC1C08, 0x14CC1444)
+assert (ROM_NOTIFY_CALLBACK_OFFSET, ROM_NOTIFY_MAILBOX_OFFSET) == (0x14CC10F0, 0x14CC1444)
 assert (ROM_NOTIFY_HOOK_LUI_OFFSET, ROM_NOTIFY_HOOK_ADDIU_OFFSET) == (0x14D1A374, 0x14D1A388)
 assert ROM_NOTIFY_HOOK_ADDIU_OFFSET == ROM_CUSTOM_TICK_HOOK_OFFSET
 assert (ROM_NOTIFY_MAP_NAME_PTR_OFFSET, ROM_NOTIFY_LOADING_NAME_OFFSET) == (0x14D6A59C, 0x14D6B70B)
@@ -11442,7 +11480,12 @@ assert NOTIFY_CALLBACK_WORDS[0] == 0x3C080000 | (NOTIFY_MAILBOX_RAM >> 16)
 assert NOTIFY_CALLBACK_WORDS[1] & 0xFFFF == NOTIFY_MAILBOX_RAM & 0xFFFF
 assert NOTIFY_CALLBACK_WORDS[11] & 0xFFFF == NOTIFY_DURATION_FRAMES + 2
 assert NOTIFY_HOOK_ADDIU_PATCHED & 0xFFFF == NOTIFY_CALLBACK_RAM & 0xFFFF
-assert NOTIFY_CALLBACK_RAM + len(NOTIFY_CALLBACK_WORDS) * 4 <= 0x800966C4     # transition-gate wrapper follows
+assert NOTIFY_CALLBACK_RAM == RELOC_ITEM_DESC_PTR_RAM + RELOC_ITEM_DESC_PTR_WRITTEN_ENTRIES * 4   # entry 186
+assert NOTIFY_CALLBACK_RAM + len(NOTIFY_CALLBACK_WORDS) * 4 <= AP_DESC_STRINGS_RAM               # table tail only
+assert NOTIFY_HOOK_ADDIU_PATCHED == 0x24E75C68 and NOTIFY_CALLBACK_RAM & 0x8000 == 0
+# Never again inside the boot seed hook's EXTENDED footprint.
+assert (NOTIFY_CALLBACK_RAM + len(NOTIFY_CALLBACK_WORDS) * 4 <= ITEM_PARA_BOOT_HOOK_RAM
+        or NOTIFY_CALLBACK_RAM >= ITEM_PARA_BOOT_HOOK_RAM + len(ITEM_PARA_BOOT_HOOK_EXT_BYTES))
 assert NOTIFY_MAILBOX_RAM + NOTIFY_MAILBOX_SIZE <= 0x80096000                # merit AP desc strings follow
 assert NOTIFY_MAILBOX_RAM >= 0x80095F80 + 58                                   # after the icon-id table
 for _off, _size in ((ROM_NOTIFY_CALLBACK_OFFSET, len(NOTIFY_CALLBACK_WORDS) * 4),

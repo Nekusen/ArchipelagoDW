@@ -22,9 +22,9 @@ project moved out of "build the world" and into **feature expansion + polish + v
 | World version | 0.6.0 (`minimum_ap_version` 0.6.7) |
 | Locations / items | 280 / 217 |
 | YAML options | 80, in 5 option groups |
-| World test suite | **1163 passed**, 4 skipped, 10878 subtests, ~18 s with `-n auto` (one class is disc-gated: it re-checks vanilla bytes when `Digimon World (USA).bin` sits at the repo root) |
+| World test suite | **1168 passed**, 4 skipped, 10878 subtests, ~18 s with `-n auto` (one class is disc-gated: it re-checks vanilla bytes when `Digimon World (USA).bin` sits at the repo root) |
 | Lint | `ruff` at a 321-finding baseline (303 pre-existing + the two census tools' CLI prints, T201, like the other lab tools) |
-| Commits ahead of `main` | 118 |
+| Commits ahead of `main` | 121 |
 | Decomp coverage | **31 / 1120** SLUS game functions verified — 2.8 % by count, **14.5 % of static call sites** |
 
 ### 1.1 What is shipped
@@ -252,6 +252,28 @@ endSection; terminator`; 0xFE/0xFF are the same VM opcode, so moving the termina
 `GEKOMON_*` in `addresses.py`, `_write_gekomon_tokens` (always on), `client.LOCATION_RAM_BITS`,
 `test_gekomon.py`; real-disc round trip green. Trigger 780 claimed (781..783 are the last free bits).
 
+**Same day, evening — first multi-game test: a boot hang, fixed.** The user's first real seed
+(shopsanity on three shops, region locking, enemy randomization, music) **did not leave the
+PlayStation logo** on DuckStation nor BizHawk, and the BizHawk client sent 172 of 188 checks on
+connect. Lab diagnosis on the user's own `patched.bin` (byte-identical to a local application
+of the same `.apdw1`; headers and EDC of all 435 changed sectors valid; every write inside a
+known file): the SLUS loaded, but the CPU sat in a loop at `0x800965E0..0x80096604` — inside the
+ITEM_PARA boot seed hook — and the boot-resident MAPHEAD copy never loaded. Cause: with more
+than 30 ext shop rows the patcher emits the **EXTENDED 55-word hook** (`0x800965BC..0x80096698`),
+and the notification render callback shipped the day before was placed at `0x80096650` on the
+strength of the Cave6 layout comment, which only knew the 37-word hook — the callback overwrote
+the hook's loops 4/5 and epilogue. Seeds with ≤ 30 ext rows (all my round trips) were
+unaffected, which is why byte-level checks never caught it. **Fix**: the callback now lives in
+the never-indexed tail of the relocated ITEM_DESC_PTR table (`0x80095C68`, entries 186..255;
+`relocate_item_desc_ptr` writes 186 entries only), the `initializeFileReadQueue` addiu follows,
+and `test_cave6` asserts every Cave6 occupant pairwise disjoint with the *largest* variant of each
+(extended hook, full gate table) — the invariant that was missing. Validated: the user's seed,
+repaired (tokens re-pointed) and re-patched, boots in the lab (SLUS + MAPHEAD resident, main loop
+alive); the relocated callback shows a banner on the field state (flag 152 → 0). **Second fix,
+client**: the watcher now polls nothing until `_game_alive` sees the SLUS prologue word and a
+non-zero MAPHEAD copy — a disc stuck at the BIOS leaves emulator-initialised RAM, which the old
+client read as 172 set location bits. Lessons recorded in §2.5.
+
 **Same day — the Ogremon / Whamon quest chain: a shipped patch retired** (user text on the
 softlocks received; static research agent, `work/dw1_re/decomp/ogremon_chain/NOTES.md`, every
 claim checked on the disc or in dw_decomp). The chain, with corrected numbering: B1 canyon-road
@@ -403,7 +425,8 @@ and locations.
 - **The standalone's softlock patches are not all sound**: its "Ogremon softlock" write was mis-targeted
   (retired 2026-08-29, §1.1); the remaining four (rotation, entityMoveTo, Toy Town, Leomon cave) are still
   taken on trust from the standalone and have never been individually re-derived (the Leomon-cave one
-  now has a known mechanism: Nanimon's 29-entry animation table + `startAnimation` without bounds check). (`rules.py`'s chain comments carry the corrected battle numbering since `5dfe51da`.)
+  now has a known mechanism: Nanimon's 29-entry animation table + `startAnimation` without bounds check).
+- **Release-blocking lesson (2026-08-29 evening)**: byte-level round trips of `patch.patch()` output are not enough — the real APProcedurePatch output must be **booted** (PCSX-Redux liveness probe: SLUS prologue word at 0x10643C, MAPHEAD copy at 0x1B1D30, a varying pc) with a **shopsanity-heavy** seed before an apworld goes out, and every Cave6 placement must go through `test_cave6`'s registry, never a layout comment. (`rules.py`'s chain comments carry the corrected battle numbering since `5dfe51da`.)
 - **Cave6 is code-full** (2026-08-29): 4 + 12 + 12 B left after the top-banner renderer; any new
   resident code must be claimed from the heap (the ITEM_PARA claim word, `0x80113AB4`).
 - The `>=800-is-pstat` audit's *method* (static constant-caller census) under-counted the pstat

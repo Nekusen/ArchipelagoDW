@@ -131,6 +131,8 @@ from .data.addresses import (
     RAM_CURRENT_OFFENSE,
     RAM_CURRENT_SPEED,
     RAM_DRIMOGEMON_FIGHT_BIT,
+    RAM_GAME_ALIVE_MAPHEAD,
+    RAM_GAME_ALIVE_SLUS_MARKER,
     RAM_GREAT_CANYON_BRIDGE_UNLOCKED,
     RAM_INVENTORY_DEFAULT_SIZE,
     RAM_INVENTORY_EMPTY_SLOT_ID,
@@ -1225,6 +1227,9 @@ class DigimonWorldClient:
         # default to "on" once slot_data arrives because the world's
         # default for the underlying option is :class:`DefaultOnToggle`.
         self._fast_drimogemon: bool | None = None
+        # Last verdict of :meth:`_game_alive` (None = never checked); the
+        # watcher touches nothing until the SLUS + its boot tables are resident.
+        self._game_alive_state: bool | None = None
         self._easy_monochromon: bool | None = None
         # Stat-gain multiplier (1..10). 1 = vanilla rate, no enforcer
         # writes. Driven by slot_data.
@@ -1410,6 +1415,12 @@ class DigimonWorldClient:
             )
 
         try:
+            # Nothing is read as game state until the game is actually
+            # running: a disc that never left the BIOS (2026-08-29: a patch
+            # that hung at boot) leaves RAM as whatever the emulator
+            # initialised it to, and polling that sent 172 phantom checks.
+            if not await self._game_alive(ctx):
+                return
             # Run the arena enforcer FIRST -- it snapshots/restores
             # recruit-block bytes and toggles the
             # ``_arena_recruit_snapshot`` flag that ``_check_locations``
@@ -2170,6 +2181,34 @@ class DigimonWorldClient:
             ctx.bizhawk_ctx,
             [(byte_addr, [current[0] | bit_mask], DOMAIN_MAIN_RAM)],
         )
+
+    async def _game_alive(self, ctx: DigimonWorldClientContext) -> bool:
+        """True once SLUS-01032 is resident and has loaded its boot tables.
+
+        Two cheap reads: the first instruction of ``isTriggerSet`` (the SLUS image is
+        in RAM) and the first word of the boot-resident MAPHEAD.SCN copy (the game's
+        own init has run — a disc that hangs in an early boot hook never gets there).
+        Logged once per transition so a stuck boot is visible in the client window.
+        """
+
+        marker_addr, marker = RAM_GAME_ALIVE_SLUS_MARKER
+        try:
+            slus, maphead = await bizhawk.read(ctx.bizhawk_ctx, [
+                (marker_addr, len(marker), DOMAIN_MAIN_RAM),
+                (RAM_GAME_ALIVE_MAPHEAD, 4, DOMAIN_MAIN_RAM),
+            ])
+        except bizhawk.RequestFailedError:
+            return False
+        alive = slus == marker and maphead != b"\x00\x00\x00\x00"
+        if alive != self._game_alive_state:
+            self._game_alive_state = alive
+            if alive:
+                logger.info("Digimon World is running; syncing.")
+            else:
+                logger.warning("Digimon World is not running yet (BIOS / boot screen) — nothing is synced "
+                               "until the game loads. If the patched disc never leaves the PlayStation "
+                               "logo, report it: the patch is broken, not your save.")
+        return alive
 
     async def _enforce_fast_drimogemon(self, ctx: DigimonWorldClientContext) -> None:
         """Collapse Drimogemon's 10-day dig wait to "already dug" state.

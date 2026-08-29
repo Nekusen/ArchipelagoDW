@@ -285,6 +285,29 @@ class TestClientContract(unittest.TestCase):
         self.assertIsNone(client._notifications.pop())
 
 
+class TestGameAliveGuard(unittest.TestCase):
+    """The watcher polls nothing until the SLUS is resident and its boot tables are loaded — a disc
+    stuck at the BIOS must not turn emulator-initialised RAM into phantom checks (2026-08-29)."""
+
+    def test_verdicts(self) -> None:
+        from ..data.addresses import RAM_GAME_ALIVE_MAPHEAD, RAM_GAME_ALIVE_SLUS_MARKER
+        marker_addr, marker = RAM_GAME_ALIVE_SLUS_MARKER
+        cases = [
+            ({marker_addr: b"\x00\x00\x00\x00", RAM_GAME_ALIVE_MAPHEAD: b"\x00\x00\x00\x00"}, False),  # BIOS
+            ({marker_addr: marker, RAM_GAME_ALIVE_MAPHEAD: b"\x00\x00\x00\x00"}, False),              # boot hook hang
+            ({marker_addr: b"\xff\xff\xff\xff", RAM_GAME_ALIVE_MAPHEAD: b"\x68\x04\x00\x00"}, False),  # junk RAM
+            ({marker_addr: marker, RAM_GAME_ALIVE_MAPHEAD: b"\x68\x04\x00\x00"}, True),               # running
+        ]
+        for memory, expected in cases:
+            client = DigimonWorldClient()
+
+            async def fake_read(_ctx: Any, requests: list[Any], _m: dict[int, bytes] = memory) -> list[bytes]:
+                return [_m[addr] for addr, _size, _dom in requests]
+
+            with mock.patch.object(client_module.bizhawk, "read", fake_read):
+                self.assertEqual(_run(client._game_alive(_Ctx())), expected, memory)
+
+
 class TestNotificationOption(DigimonWorldTestBase):
     options: ClassVar[dict[str, Any]] = {}
 

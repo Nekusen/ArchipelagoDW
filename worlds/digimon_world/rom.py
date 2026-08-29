@@ -657,7 +657,8 @@ class DigimonWorldPatchExtension(APPatchExtension):
         shopsanity wrappers overwrite the vanilla desc-ptr .bin region,
         so reading the pristine source is mandatory now, not just
         simpler). Writes them as slots 0..127 of the relocated
-        256-entry table at :data:`RELOC_ITEM_DESC_PTR_BIN_OFFSET`.
+        table at :data:`RELOC_ITEM_DESC_PTR_BIN_OFFSET` (only its first
+        :data:`RELOC_ITEM_DESC_PTR_WRITTEN_ENTRIES` = 186 entries are written).
         Slots 128..134 are overwritten with kuseg pointers into the 7
         recycle-shop AP description strings (region
         :data:`AP_DESC_STRINGS_RAM`); slots 135..148 with kuseg
@@ -666,7 +667,8 @@ class DigimonWorldPatchExtension(APPatchExtension):
         secret shop, shopsanity) with the always-on generic
         "Item from the multiworld" string pointer (no Cave6 space is
         left for 37 more per-slot strings — the lab shipped the same
-        generic-pointer decision). Slots 186..255 stay zero.
+        generic-pointer decision). Entries 186..255 are NOT written: that
+        tail hosts the notification render callback (2026-08-29).
 
         If a given shop's option is off, ``apply_tokens`` will not have
         written description bytes into that region — but the slots'
@@ -687,7 +689,7 @@ class DigimonWorldPatchExtension(APPatchExtension):
             MERIT_SHOP_AP_ITEM_ID_COUNT,
             RECYCLE_SHOP_AP_ITEM_ID_COUNT,
             RELOC_ITEM_DESC_PTR_BIN_OFFSET,
-            RELOC_ITEM_DESC_PTR_SIZE,
+            RELOC_ITEM_DESC_PTR_WRITTEN_ENTRIES,
             VANILLA_ITEM_DESC_PTR_BIN_OFFSET,
             VANILLA_ITEM_DESC_PTR_ENTRIES,
             read_user_data_bytes,
@@ -701,7 +703,10 @@ class DigimonWorldPatchExtension(APPatchExtension):
             VANILLA_ITEM_DESC_PTR_ENTRIES * 4,
         )
 
-        table = bytearray(RELOC_ITEM_DESC_PTR_SIZE)
+        # Entries 0..185 only: the tail of the 1024-B region (entries 186..255)
+        # is never indexed and hosts the notification render callback, which
+        # apply_tokens wrote before this procedure runs (2026-08-29).
+        table = bytearray(RELOC_ITEM_DESC_PTR_WRITTEN_ENTRIES * 4)
         table[:len(vanilla_bytes)] = vanilla_bytes
 
         # Recycle-shop AP slots: 128..134 → AP_DESC_STRINGS_RAM region.

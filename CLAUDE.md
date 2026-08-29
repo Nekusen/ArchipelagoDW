@@ -224,7 +224,13 @@ These come from [docs/style.md](docs/style.md) and the ruff config and override 
   the room faults `startAnimation`) and G2 (Drimogemon's fight kept until
   won) shipped always-on after three nets; `fast_drimogemon` now keys on
   trigger 140 (0x1BE130 is the last battle's outcome word, not
-  Drimogemon's) (`work/dw1_re/decomp/ogremon_chain/NOTES.md`).
+  Drimogemon's) (`work/dw1_re/decomp/ogremon_chain/NOTES.md`). **Evening:
+  the first multi-game seed hung at boot** — the notification callback had
+  been placed inside the EXTENDED ITEM_PARA boot hook's footprint (only
+  emitted with > 30 shopsanity rows); moved to the desc-ptr table tail
+  (0x80095C68), `test_cave6` registry added, and the client now waits for
+  `_game_alive` before polling (172 phantom checks). Rule: boot-test the
+  real `patch.patch()` output with a shopsanity-heavy seed before shipping.
   Not
   ported: recruit-identity
   shuffle, intro hash, happyVending, jukebox truncation, forced starter.
