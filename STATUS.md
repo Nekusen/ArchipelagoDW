@@ -363,7 +363,7 @@ Grouped by **what blocks each item**, because that is what decides the order.
 | **WebWorld** | No `WebWorld` subclass exists. `option_groups` is defined in `options.py` but wired to nothing; presets absent. |
 | **Region-locking option integration** | Today a randomized locked set cannot be combined with a starting region except by hand. Needs a proper option plus the sphere-0-empty guard (`custom` + Native Forest locked = unfillable). |
 | **Card-shop duplicate fix (optional QoL)** | One-word ROM patch at `0x800FC3DC` (`0x02301021` → `0x02231021`). Address-targeted only — the same word appears twice more in the function. |
-| **Packaging** | `.apworld` rebuild via the Launcher's "Build APWorlds" once the above land. |
+| **Packaging** | `.apworld` rebuild via the Launcher's "Build APWorlds" once the above land. A test build (2026-08-29, `python Launcher.py "Build APWorlds" -- "Digimon World" --skip_open_folder`) surfaced the first install-only bug: the client components carried a `script_name`, so an installed apworld — which has no `DigimonWorldClient.py` at the AP root — lost `.apdw1` from the "Open Patch" filter (`Launcher.open_patch` keeps a suffix only when `script_name` is None or the script exists). Fixed: both clients register with `func` alone, like the other apworld-shipped clients. |
 
 ### 2.3 Needs RE — with its requirements
 

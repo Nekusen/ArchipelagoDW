@@ -107,9 +107,15 @@ def _patch_only(*args: str) -> None:
 # ---------------------------------------------------------------------------
 
 
+# No ``script_name`` on either client (2026-08-29): the Launcher's "Open Patch"
+# only lists a client's suffixes when ``script_name`` is None or the named
+# root script / frozen exe exists (``Launcher.open_patch`` -> ``get_exe``).
+# ``DigimonWorldClient.py`` exists only in this source tree, so an installed
+# ``.apworld`` lost ``.apdw1`` from the file filter (user report). With
+# ``func`` alone the Launcher runs the client in-process through
+# ``run_component``, exactly like the other apworld-shipped clients.
 bizhawk_client_component = Component(
     "Digimon World Client (BizHawk)",
-    "DigimonWorldClient",
     component_type=Type.CLIENT,
     func=_launch_bizhawk_client,
     file_identifier=SuffixIdentifier(".apdw1"),
@@ -118,7 +124,6 @@ bizhawk_client_component = Component(
 
 duckstation_client_component = Component(
     "Digimon World Client (Duckstation)",
-    "DigimonWorldClientDuckstation",
     component_type=Type.CLIENT,
     func=_launch_duckstation_client,
     # No file_identifier on purpose: Open Patch picks the first
