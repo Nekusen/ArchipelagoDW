@@ -198,18 +198,21 @@ These come from [docs/style.md](docs/style.md) and the ruff config and override 
   census proved lists can only be re-filled in place — `technique_lists.py`),
   `partner_raising` (`raising.py`), `bgm_shuffle` (`music.py`), 18
   `screen_region` fixes, and a **region-level entrance-shuffle design**
-  awaiting the user's go (STATUS §2.3) that also exposed **five dead
+  (parked by the user the same day, STATUS §2.3) that also exposed **five dead
   region-gate rows** (script-tile exits) — **fixed the same day** with seven
   script-class gates (`_SCRIPT_GATE_FIX_PATCHES`, three nets). **In-game AP
   notifications shipped** (`in_game_notifications`: Cave6 mailbox + render
   callback on the game's area-name banner, three nets; client
   `NotificationQueue`). **Pending the user's decision** (STATUS §2.1):
-  entrance shuffle go / no-go (the user leans towards adding the Drill
-  Tunnel <-> Mt. Panorama shortcut to the pool), notification cosmetics
-  (the user prefers top-of-screen, wants to see it first), and the BizHawk
-  validation pass. A suspected Lava Cave boulder bypass through that
-  shortcut was retracted: the prompts read the vanilla recruit bit and
-  Drimogemon sits behind the boulder. Not ported: recruit-identity
+  the BizHawk validation pass and the top-centre vs top-right banner
+  choice. **Decided later the same day**: the entrance shuffle is
+  **parked** as a future improvement (the logic rewrite is too large even
+  by region; design + data stay in `work/`); the notification banner
+  moves to the **top** of the screen (`dw1-patch` mission, vanilla loading
+  banner untouched); a suspected Lava Cave boulder bypass through the
+  Drill Tunnel <-> Mt. Panorama shortcut was retracted (the prompts read
+  the vanilla recruit bit; Drimogemon sits behind the boulder). Not
+  ported: recruit-identity
   shuffle, intro hash, happyVending, jukebox truncation, forced starter.
   Table audit corrected one claim: the element matrix is read by the
   **partner's** auto-battle AI, not the enemy AI. Remaining technique
