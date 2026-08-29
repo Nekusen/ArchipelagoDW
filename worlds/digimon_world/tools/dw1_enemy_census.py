@@ -146,6 +146,55 @@ EVO_GAINS_DATA = 0x8012B2D0   # weight, discipline, happiness, battles, techs), 
 NUM_EVO_PATHS, NUM_EVO_REQS, NUM_EVO_GAINS = 62, 63, 66   # EvoStatsGains[66]: 6 x i16 gains + i16 target
 
 
+RAISE_DATA = 0x801225BC       # RaiseData[66] x 28 B: i8 hungerTimes[8], u8 energyCap, energyThreshold, energyUsage,
+NUM_RAISE_DATA = 66           # pad, i16 poopTimer, i16 unk2, u8 poopSize, favoriteFood, i8 sleepCycle, u8 favoredRegion,
+JUKEBOX_TABLE = 0x801303B8    # trainingType, defaultWeight, i16 viewX, viewY, viewZ
+JUKEBOX_NAMES = 0x8012FEC8    # 63 x (u8 font, u8 variant) + 63 char* names
+NUM_JUKEBOX_ROWS = 63
+OP_SET_PSTAT = 0x1E           # 1E 00 F5 mm   setPStat 245 mode   (always right before ...)
+OP_PLAY_BGM = 0x5D            # 5D ff         playBGM font        (... the BGM opcode)
+PSTAT_BGM_MODE = 0xF5
+
+
+def load_raise_data(slus: bytes) -> list[tuple[int, ...]]:
+    """The 66 partner raising rows, decoded (22 values: 8 meal hours then the 14 scalar fields)."""
+    rows = []
+    for i in range(NUM_RAISE_DATA):
+        rec = slus_bytes(slus, RAISE_DATA + i * 28, 28)
+        rows.append(struct.unpack("<8bBBBxhhBBbBBBhhh", rec))
+    return rows
+
+
+def load_bgm_tracks(slus: bytes) -> list[tuple[int, int, str]]:
+    """The jukebox table: ``(font, variant, name)`` for each of its 63 rows."""
+    out = []
+    for i in range(NUM_JUKEBOX_ROWS):
+        font, variant = slus_bytes(slus, JUKEBOX_TABLE + i * 2, 2)
+        ptr = struct.unpack_from("<I", slus_bytes(slus, JUKEBOX_NAMES + i * 4, 4))[0]
+        out.append((font, variant, cstr(slus, ptr)))
+    return out
+
+
+def parse_maphead_bgm_sites(maphead: bytes) -> list[tuple[int, int, int, int]]:
+    """Every ``setPStat 245 mode; playBGM font`` pair in MAPHEAD.SCN: ``(section, vm, font, mode)``
+    with ``vm`` the in-file offset of the ``5D`` opcode (the font byte is at ``vm + 1``)."""
+    table_end = struct.unpack_from("<H", maphead, 0)[0]
+    entries = [struct.unpack_from("<HH", maphead, 2 + 4 * i) for i in range((table_end - 4) // 4)]
+    bounds = sorted({off for _, off in entries} | {len(maphead)})
+    sites = []
+    for section, off in entries:
+        end = bounds[bounds.index(off) + 1]
+        pos = off
+        while pos + 5 < end:
+            if (maphead[pos] == OP_SET_PSTAT and maphead[pos + 1] == 0 and maphead[pos + 2] == PSTAT_BGM_MODE
+                    and maphead[pos + 4] == OP_PLAY_BGM):
+                sites.append((section, pos + 4, maphead[pos + 5], maphead[pos + 3]))
+                pos += 6
+                continue
+            pos += 1
+    return sites
+
+
 def load_evo_tables(slus: bytes) -> tuple[list[tuple[int, ...]], list[tuple[int, ...]], list[tuple[int, ...]]]:
     """The three digivolution tables as raw rows."""
     paths = [struct.unpack("<11b", slus_bytes(slus, EVO_PATHS_DATA + i * 11, 11)) for i in range(NUM_EVO_PATHS)]
@@ -303,11 +352,13 @@ def check_dump(sites: list[tuple[int, int, int, int, int]]) -> int:
 def emit_python(path: str, digimon: list[dict], models: dict[int, int], rows: list[dict],
                 sites: list[tuple[int, int, int, int, int]], moves: list[dict], items: list[dict],
                 matrix: list[list[int]],
-                evo: tuple[list[tuple[int, ...]], list[tuple[int, ...]], list[tuple[int, ...]]]) -> None:
+                evo: tuple[list[tuple[int, ...]], list[tuple[int, ...]], list[tuple[int, ...]]],
+                raise_rows: list[tuple[int, ...]], bgm_tracks: list[tuple[int, int, str]],
+                bgm_sites: list[tuple[int, int, int, int]]) -> None:
     lines = [
         '"""Field-Digimon data for Digimon World 1 (SLUS-01032) -- GENERATED, do not edit by hand.',
         "",
-        "Produced by ``tools/dw1_enemy_census.py --emit-python`` from the vanilla disc.  Nine tables:",
+        "Produced by ``tools/dw1_enemy_census.py --emit-python`` from the vanilla disc.  Twelve tables:",
         "",
         "* :data:`MOVES` -- one row per ``MOVE_DATA`` technique (122): ``(id, name, power, mp_cost, element,",
         "  status, accuracy, status_chance, range, iframes, distance, unk3, unk4, unk5)`` -- the whole 16-byte",
@@ -333,6 +384,13 @@ def emit_python(path: str, digimon: list[dict], models: dict[int, int], rows: li
         "  (``calculateRequirementScore``).",
         "* :data:`EVO_GAINS` -- ``EVO_GAINS_DATA[66]``: row ``species id`` = ``(hp, mp, off, def, spd, brain,",
         "  target)`` stat gains on digivolving into the species (``target`` == the row's id).",
+        "* :data:`RAISE_DATA` -- ``RAISE_DATA[66]``: row ``species id`` = ``(hunger x8, energy_cap,",
+        "  energy_threshold, energy_usage, poop_timer, unk2, poop_size, favorite_food, sleep_cycle,",
+        "  favored_region, training_type, default_weight, view_x, view_y, view_z)`` -- the partner raising",
+        "  parameters (``include/dw/partner.h``).",
+        "* :data:`BGM_TRACKS` -- the jukebox table: ``(font, variant, name)`` x 63.",
+        "* :data:`BGM_SITES` -- every ``setPStat 245 mode; playBGM font`` pair of MAPHEAD.SCN:",
+        "  ``(section, vm, font, mode)``; the font byte sits at ``vm + 1`` (``maphead_bin_offset``).",
         "* :data:`FIELD_RECORDS` -- one row per Digimon record in a screen's ``.MAP`` file (989):",
         "  ``(map, slot, bin_off, type, hp, mp, cur_hp, cur_mp, off, def, spd, brn, bits, m0..m3, p0..p3, script)``.",
         "  ``bin_off`` is the flat Mode2/2352 .bin offset of the record's first byte; field offsets are",
@@ -376,11 +434,20 @@ def emit_python(path: str, digimon: list[dict], models: dict[int, int], rows: li
     lines.extend(f"    ({', '.join(str(v) for v in row)})," for row in matrix)
     lines.append(")")
     lines.append("")
-    for name, table in zip(("EVO_PATHS", "EVO_REQUIREMENTS", "EVO_GAINS"), evo, strict=True):
+    for name, table in zip(("EVO_PATHS", "EVO_REQUIREMENTS", "EVO_GAINS", "RAISE_DATA"), (*evo, raise_rows),
+                           strict=True):
         lines.append(f"{name}: Final[tuple[tuple[int, ...], ...]] = (")
         lines.extend(f"    ({', '.join(str(v) for v in row)})," for row in table)
         lines.append(")")
         lines.append("")
+    lines.append("BGM_TRACKS: Final[tuple[tuple[int, int, str], ...]] = (")
+    lines.extend(f"    ({font}, {variant}, {json.dumps(name)})," for font, variant, name in bgm_tracks)
+    lines.append(")")
+    lines.append("")
+    lines.append("BGM_SITES: Final[tuple[tuple[int, int, int, int], ...]] = (")
+    lines.extend(f"    ({s[0]}, {s[1]}, {s[2]}, {s[3]})," for s in bgm_sites)
+    lines.append(")")
+    lines.append("")
     lines.append("FIELD_RECORDS: Final[tuple[tuple[int, ...], ...]] = (")
     for r in rows:
         stats = ", ".join(str(r[k]) for k in STAT_NAMES)
@@ -485,8 +552,11 @@ def main() -> int:
                 code = cstr(slus, ptr)
                 entry = files.get(f"/CHDAT/MMD{d['id'] // 30}/{code}.MMD")
                 models[d["id"]] = ((entry[1] + 0x7FF) & ~0x7FF) if entry else 0
+            bgm_sites = parse_maphead_bgm_sites(maphead)
+            print(f"{len(bgm_sites)} MAPHEAD BGM sites across {len({s[0] for s in bgm_sites})} sections")
             emit_python(args.emit_python, digimon, models, rows, sites, load_move_data(slus),
-                        load_item_data(slus), load_element_matrix(slus), load_evo_tables(slus))
+                        load_item_data(slus), load_element_matrix(slus), load_evo_tables(slus),
+                        load_raise_data(slus), load_bgm_tracks(slus), bgm_sites)
             print(f"wrote {args.emit_python}")
     if args.map is not None:
         for r in rows:

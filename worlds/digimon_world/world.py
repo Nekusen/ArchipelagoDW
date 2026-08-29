@@ -37,6 +37,7 @@ from . import (
     regions,
     rom,
     rules,
+    technique_lists,
     techniques,
 )
 from .options import DigimonWorldOptions
@@ -99,6 +100,7 @@ class DigimonWorldWorld(World):
         # Static SLUS-table rewrites that need no placement: resolved here so
         # post_fill's enemy scaling can read the technique powers this seed ships.
         self.technique_plan = techniques.build_technique_plan(self)
+        self.list_plan = technique_lists.build_list_plan(self)
         self.drop_plan = drops.build_drop_plan(self)
         self.gift_plan = gifts.build_gift_plan(self)
         self.evolution_plan = evolutions.build_evolution_plan(self)
@@ -184,6 +186,7 @@ class DigimonWorldWorld(World):
     #: :meth:`generate_early` (static SLUS tables) and consumed by
     #: :func:`rom.write_patch`; the enemy planner reads the technique powers.
     technique_plan: techniques.TechniquePlan = techniques.EMPTY_PLAN
+    list_plan: technique_lists.ListPlan = technique_lists.EMPTY_PLAN
     drop_plan: drops.DropPlan = drops.EMPTY_PLAN
     gift_plan: gifts.GiftPlan = gifts.EMPTY_PLAN
     evolution_plan: evolutions.EvolutionPlan = evolutions.EMPTY_PLAN
@@ -233,6 +236,12 @@ class DigimonWorldWorld(World):
                 spoiler_handle.write(
                     f"  {techniques.MOVE_NAMES[tech_id]}: {techniques.describe_values(values)}"
                     f"  (vanilla {techniques.describe_values(techniques.VANILLA_VALUES[tech_id])})\n"
+                )
+        if self.list_plan.lists:
+            spoiler_handle.write(f"\n\nSpecies technique lists ({name}):\n")
+            for species_id, moves in sorted(self.list_plan.lists.items()):
+                spoiler_handle.write(
+                    f"  {enemies.SPECIES_BY_ID[species_id].name}: {technique_lists.describe_list(moves)}\n"
                 )
         if plan.matrix is not None:
             spoiler_handle.write(f"\n\nType effectiveness ({name}), technique element x target specialty:\n")

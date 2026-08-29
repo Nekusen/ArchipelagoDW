@@ -11059,3 +11059,57 @@ assert (ROM_EVO_TO_FROM.count, ROM_EVO_REQUIREMENTS.count, ROM_EVO_STAT_GAINS.co
 ROM_SPECIAL_EVO_TOY_TOWN_GATE_OFFSET: Final = 0x140479ED
 assert ROM_SPECIAL_EVO_TOY_TOWN_GATE_OFFSET in ROM_SPECIAL_EVO[0][0]
 assert ROM_UNLOCK_TOY_TOWN_OFFSETS[0] <= ROM_SPECIAL_EVO_TOY_TOWN_GATE_OFFSET < ROM_UNLOCK_TOY_TOWN_OFFSETS[0] + 4
+
+#: ``DigimonPara.moves[16]`` -- the species technique list -- inside the 52-byte record.
+DIGIMON_DATA_MOVES_OFFSET: Final = 35
+DIGIMON_DATA_MOVES_COUNT: Final = 16
+assert DIGIMON_DATA_MOVES_OFFSET + DIGIMON_DATA_MOVES_COUNT < DIGIMON_DATA_RECORD_SIZE
+
+
+# =============================================================================
+# Partner raising parameters (RAISE_DATA) and the per-screen BGM opcodes
+# =============================================================================
+#
+# ``RaiseData[66]`` (dw_decomp ``include/dw/partner.h:6-22``, 28 B, row =
+# species id) is read at use time from the SLUS table (birth, digivolution,
+# every wake-up), never cached in the save. Field readers were pinned on
+# 2026-08-29 (``work/dw1_re/decomp/raise_bgm/NOTES.md``): ``favoriteFood`` is
+# an ITEM_PARA food id compared for equality, ``sleepCycle`` indexes the
+# 8-row sleep-schedule table right after the block (0..5 Rookie+, 6/7 the
+# babies -- never >= 8), ``favoredRegion`` is compared with the .MAP liked /
+# disliked lists (ids 0..8 on disc), ``trainingType`` 0..3 picks the +-10 %
+# training multipliers (anything else = -20 % everywhere), ``defaultWeight``
+# is the birth / digivolution weight. The table crosses one sector boundary
+# (row 20), so writes go through :func:`iter_user_data_chunks`.
+#
+# The per-screen music is the ``5D font`` opcode (``playBGM``) that every
+# MAPHEAD.SCN screen section issues right after ``1E 00 F5 mode`` (``setPStat
+# 245``): the byte IS the font id (1..33; 0 / 34..254 = silence, 255 = reset),
+# ``handleMusicOverride`` picks the day / night variant for modes 0 / 1 and
+# overrides both font and variant for modes 2..10 (byte inert there).
+# ``loadMusicFont`` streams the font from ``FAALL.VHB`` on every change, so
+# nothing has to be resident. The 63-row jukebox table maps (font, variant)
+# to a name.
+
+RAM_RAISE_DATA: Final = 0x001225BC
+RAISE_DATA_ROW_SIZE: Final = 28
+RAISE_DATA_ROW_COUNT: Final = 66
+RAISE_DATA_FAVORITE_FOOD_OFFSET: Final = 17   # u8 ITEM_PARA id (0 = none, babies)
+RAISE_DATA_SLEEP_CYCLE_OFFSET: Final = 18     # i8 sleep-schedule row
+RAISE_DATA_FAVORED_REGION_OFFSET: Final = 19  # u8 region id 0..8
+RAISE_DATA_TRAINING_TYPE_OFFSET: Final = 20   # u8 0..3 (4 = penalty)
+RAISE_DATA_DEFAULT_WEIGHT_OFFSET: Final = 21  # u8
+#: The five contiguous bytes the ``partner_raising`` option rewrites.
+RAISE_DATA_PATCH_SPAN: Final = (RAISE_DATA_FAVORITE_FOOD_OFFSET, RAISE_DATA_DEFAULT_WEIGHT_OFFSET + 1)
+ROM_RAISE_DATA_OFFSET: Final = _slus_ram_to_bin_offset(0x80000000 | RAM_RAISE_DATA)
+assert ROM_RAISE_DATA_OFFSET == 0x14D627F4, hex(ROM_RAISE_DATA_OFFSET)
+RAM_SLEEP_SCHEDULE_TABLE: Final = 0x00122CF4  # 8 rows x 6 B right after RAISE_DATA; never written
+assert RAM_RAISE_DATA + RAISE_DATA_ROW_SIZE * RAISE_DATA_ROW_COUNT == RAM_SLEEP_SCHEDULE_TABLE
+
+MAPHEAD_OP_PLAY_BGM: Final = 0x5D
+BGM_FONT_MIN: Final = 1
+BGM_FONT_MAX: Final = 33
+BGM_RESET: Final = 0xFF
+#: MAPHEAD sites whose ``setPStat 245`` mode is >= 2 play a forced (font, variant): the byte is inert.
+BGM_MODE_DAY_NIGHT: Final = 0
+BGM_MODE_DAY_ONLY: Final = 1

@@ -51,6 +51,7 @@ techniques of every fighter record.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from itertools import pairwise
 from random import Random
 from typing import TYPE_CHECKING, Final, NamedTuple
@@ -162,10 +163,10 @@ class FieldRecord(NamedTuple):
         """
         return len(self.tech_powers())
 
-    def tech_powers(self, species: Species | None = None,
-                    powers: dict[int, int] = VANILLA_POWERS) -> tuple[int, ...]:
+    def tech_powers(self, species: Species | None = None, powers: dict[int, int] = VANILLA_POWERS,
+                    species_table: Mapping[int, Species] | None = None) -> tuple[int, ...]:
         """Power of each technique the record uses, in slot order."""
-        species = species or SPECIES_BY_ID[self.type]
+        species = species or (species_table or SPECIES_BY_ID)[self.type]
         return tuple(
             species.slot_power(move - ANIM_MOVE_BASE, powers) for move in self.moves
             if move != NO_MOVE and 0 <= move - ANIM_MOVE_BASE < 16 and species.moves[move - ANIM_MOVE_BASE] != 0xFF
@@ -291,15 +292,27 @@ _PREFIX_REGIONS: Final[dict[str, str]] = {
     "TWNB": "File City",
     "ROOM": "File City",
 }
+#: Aligned 2026-08-29 with the lab's region map (``work/dw1_re/dw1_gate_table_build.py``
+#: ``REGION_OF``, the map the shipped region gates were validated against): the Drill Tunnel
+#: screens (MAYO11 entrance, TUNN07/08 and their story variants, TUNN03_2) are Drill Tunnel,
+#: TUNN09/10 are Meramon Tunnel, DGHA01 and GCAN01 are the Tropical Jungle side of their
+#: borders, CHKA01 is the mansion's side of the Back Dimension portal, TRAI00 is the Green Gym
+#: (File City), GOMI is the Gear Savanna annex, and the ending / opening rooms are File City.
 _SCREEN_REGION_OVERRIDES: Final[dict[int, str]] = {
     6: "Greatlake", 8: "Greatlake",                       # the two fishing screens
-    30: "Meramon Tunnel", 31: "Meramon Tunnel", 33: "Meramon Tunnel",
-    122: "Meramon Tunnel", 123: "Meramon Tunnel", 124: "Meramon Tunnel",
-    125: "Meramon Tunnel", 126: "Meramon Tunnel",
+    7: "Drill Tunnel",                                    # MAYO11: the tunnel mouth
+    30: "Drill Tunnel", 31: "Drill Tunnel", 122: "Drill Tunnel", 123: "Drill Tunnel",
+    124: "Drill Tunnel", 125: "Drill Tunnel", 126: "Drill Tunnel",
+    32: "Meramon Tunnel", 33: "Meramon Tunnel",
+    34: "Tropical Jungle", 36: "Tropical Jungle",
+    66: "Grey Lord's Mansion",
+    112: "File City",                                     # TRAI00: the Green Gym
     142: "Secret Beach Cave", 143: "Secret Beach Cave",
+    164: "Gear Savanna", 165: "Gear Savanna",             # GOMI: Trash Mountain annex
     225: "Tower",                                         # MGEN99: the Machinedramon summit
     226: "Back Dimension", 227: "Back Dimension", 228: "Back Dimension",
     229: "Back Dimension", 230: "Back Dimension", 231: "Back Dimension",
+    236: "File City", 237: "File City", 238: "File City",  # ending / opening rooms
 }
 
 
@@ -357,8 +370,10 @@ class Targets(NamedTuple):
     tech_level: float | None      # power the techniques are re-picked around (None: keep)
 
 
-def _metrics(records: list[FieldRecord], powers: dict[int, int]) -> WildMetrics:
-    tech_powers = [p for record in records for p in record.tech_powers(powers=powers) if p > 0]
+def _metrics(records: list[FieldRecord], powers: dict[int, int],
+             species_table: Mapping[int, Species] | None = None) -> WildMetrics:
+    tech_powers = [p for record in records
+                   for p in record.tech_powers(powers=powers, species_table=species_table) if p > 0]
     return WildMetrics(
         sum(r.budget for r in records) / len(records),
         sum(tech_powers) / len(tech_powers) if tech_powers else None,
@@ -370,22 +385,24 @@ def _wild_records() -> list[FieldRecord]:
             and screen_region(r.map) is not None]
 
 
-def region_wild_metrics(powers: dict[int, int] = VANILLA_POWERS) -> dict[str, WildMetrics]:
+def region_wild_metrics(powers: dict[int, int] = VANILLA_POWERS,
+                        species_table: Mapping[int, Species] | None = None) -> dict[str, WildMetrics]:
     """Vanilla wild-record metrics per region (regions with at least one wild record)."""
 
     groups: dict[str, list[FieldRecord]] = {}
     for record in _wild_records():
         groups.setdefault(screen_region(record.map), []).append(record)   # type: ignore[arg-type]
-    return {region: _metrics(records, powers) for region, records in groups.items()}
+    return {region: _metrics(records, powers, species_table) for region, records in groups.items()}
 
 
-def screen_wild_metrics(powers: dict[int, int] = VANILLA_POWERS) -> dict[int, WildMetrics]:
+def screen_wild_metrics(powers: dict[int, int] = VANILLA_POWERS,
+                        species_table: Mapping[int, Species] | None = None) -> dict[int, WildMetrics]:
     """Vanilla wild-record metrics per screen (screens with at least one wild record)."""
 
     groups: dict[int, list[FieldRecord]] = {}
     for record in _wild_records():
         groups.setdefault(record.map, []).append(record)
-    return {map_id: _metrics(records, powers) for map_id, records in groups.items()}
+    return {map_id: _metrics(records, powers, species_table) for map_id, records in groups.items()}
 
 
 def region_wild_budgets() -> dict[str, float]:
@@ -406,6 +423,7 @@ def _blend(vanilla: float, assigned: float, strength: int) -> float:
 
 def plan_region_targets(
     region_depths: dict[str, int], strength: int, powers: dict[int, int] = VANILLA_POWERS,
+    species_table: Mapping[int, Species] | None = None,
 ) -> dict[str, Targets]:
     """Progressive: vanilla difficulty distribution re-assigned by logical depth.
 
@@ -415,7 +433,7 @@ def plan_region_targets(
     ``strength`` (0..100) blends both towards vanilla.
     """
 
-    metrics = region_wild_metrics(powers)
+    metrics = region_wild_metrics(powers, species_table)
     regions = [region for region in metrics if region in region_depths]
     if len(regions) < 2 or strength <= 0:
         return {}
@@ -435,10 +453,12 @@ def plan_region_targets(
     return targets
 
 
-def plan_full_random_targets(rng: Random, powers: dict[int, int] = VANILLA_POWERS) -> dict[int, Targets]:
+def plan_full_random_targets(
+    rng: Random, powers: dict[int, int] = VANILLA_POWERS, species_table: Mapping[int, Species] | None = None,
+) -> dict[int, Targets]:
     """Full random: every screen borrows the difficulty of a random vanilla screen."""
 
-    metrics = screen_wild_metrics(powers)
+    metrics = screen_wild_metrics(powers, species_table)
     donors = sorted(metrics)
     targets: dict[int, Targets] = {}
     for map_id in sorted(metrics):
@@ -568,10 +588,11 @@ def plan_weight_overrides(
 
 def plan_move_overrides(
     mode: int, rng: Random, final_species: dict[tuple[int, int], int], screen_targets: dict[int, Targets],
-    powers: dict[int, int] = VANILLA_POWERS,
+    powers: dict[int, int] = VANILLA_POWERS, species_table: Mapping[int, Species] | None = None,
 ) -> dict[tuple[int, int], tuple[tuple[int, ...], tuple[int, ...]]]:
     """Movesets for every fighter record whose species or whose screen's technique level changed."""
 
+    table = species_table or SPECIES_BY_ID
     overrides: dict[tuple[int, int], tuple[tuple[int, ...], tuple[int, ...]]] = {}
     for record in RECORDS:
         key = (record.map, record.slot)
@@ -582,7 +603,7 @@ def plan_move_overrides(
                     and _combat_screen(record.map) and classify_record(record) != CLASS_NPC):
                 overrides[key] = ((NO_MOVE,) * 4, record.prio)
             continue
-        species = SPECIES_BY_ID[final_species.get(key, record.type)]
+        species = table[final_species.get(key, record.type)]
         swapped = species.id != record.type
         target = screen_targets.get(record.map)
         level = target.tech_level if target is not None else None
@@ -592,7 +613,7 @@ def plan_move_overrides(
         elif mode == STATS_PROGRESSIVE and level is not None:
             moves = pick_moves_by_level(species, count, level, powers)
         elif swapped:
-            moves = pick_moves_equivalent(record, SPECIES_BY_ID[record.type], species, powers)
+            moves = pick_moves_equivalent(record, table[record.type], species, powers)
         else:
             continue
         if swapped or moves != record.moves:
@@ -683,8 +704,10 @@ def build_enemy_plan(world: DigimonWorldWorld) -> EnemyPlan:
     if mode == STATS_VANILLA and not randomization and not weights:
         return EMPTY_PLAN
     rng = world.random
-    # a seed that randomizes MOVE_DATA scales enemies by the powers it ships, not the vanilla ones
+    # a seed that randomizes MOVE_DATA scales enemies by the powers it ships, not the vanilla
+    # ones, and one that shuffles the species lists picks techniques from the shuffled lists
     powers = world.technique_plan.powers
+    species_table = world.list_plan.species_table
 
     substitutions: dict[tuple[int, int], int] = {}
     final_species: dict[tuple[int, int], int] = {}
@@ -699,13 +722,14 @@ def build_enemy_plan(world: DigimonWorldWorld) -> EnemyPlan:
     screen_targets: dict[int, Targets] = {}
     if mode == STATS_PROGRESSIVE:
         region_depths = compute_region_depths(world)
-        region_targets = plan_region_targets(region_depths, int(options.enemy_stats_strength.value), powers)
+        region_targets = plan_region_targets(region_depths, int(options.enemy_stats_strength.value), powers,
+                                             species_table)
         screen_targets = screen_targets_from_regions(region_targets)
     elif mode == STATS_FULL_RANDOM:
-        screen_targets = plan_full_random_targets(rng, powers)
+        screen_targets = plan_full_random_targets(rng, powers, species_table)
 
     stat_overrides = plan_stat_overrides(screen_targets)
-    move_overrides = plan_move_overrides(mode, rng, final_species, screen_targets, powers)
+    move_overrides = plan_move_overrides(mode, rng, final_species, screen_targets, powers, species_table)
     if weights:
         move_overrides = plan_weight_overrides(rng, move_overrides)
     return EnemyPlan(stat_overrides, substitutions, move_overrides, region_depths, region_targets,

@@ -1239,6 +1239,20 @@ class TechniqueEffectChance(DefaultOnToggle):
     display_name = "Technique Data: Status Chance"
 
 
+class SpeciesTechniqueLists(Toggle):
+    """Randomize which techniques each species can use and learn: every populated
+    slot of every species' 16-slot technique list is re-drawn among the
+    techniques of the same class (normal / enemy finisher / bubble) and the same
+    element, without repeats. Lists never grow (a model only carries animations
+    for its vanilla slots) and keep their element mix, so the partner can still
+    learn every technique in its list from battle and brain training. Wild Digimon
+    use whatever now sits in their slots; ``enemy_stats`` reads the shuffled lists.
+    Independent of ``technique_data`` (the techniques' own numbers).
+    """
+
+    display_name = "Species Technique Lists"
+
+
 class TypeEffectiveness(Toggle):
     """Randomize the 7x7 element affinity matrix (Fire / Battle / Air / Nature / Ice /
     Mech / Filth): every cell becomes one of the vanilla values 2, 5, 10, 15 or 20.
@@ -1510,6 +1524,7 @@ class DigimonWorldOptions(PerGameCommonOptions):
     technique_accuracy: TechniqueAccuracy
     technique_effect: TechniqueEffect
     technique_effect_chance: TechniqueEffectChance
+    species_technique_lists: SpeciesTechniqueLists
     type_effectiveness: TypeEffectiveness
     enemy_drop_items: EnemyDropItems
     enemy_drop_rates: EnemyDropRates
@@ -1547,7 +1562,7 @@ option_groups: list[OptionGroup] = [
             EnemyStats, EnemyStatsStrength,
             EnemyRandomization, EnemyRandomizationTier, EnemyTechniqueWeights,
             TechniqueData, TechniquePower, TechniqueMPCost, TechniqueAccuracy,
-            TechniqueEffect, TechniqueEffectChance, TypeEffectiveness,
+            TechniqueEffect, TechniqueEffectChance, SpeciesTechniqueLists, TypeEffectiveness,
             EnemyDropItems, EnemyDropRates, EnemyDropsMatchValue, EnemyDropsValueCutoff,
             TechGifts, TokomonGifts, TokomonGiftsConsumableOnly,
             DigivolutionRandomization, DigivolutionObtainAll, DigivolutionRequirements,
