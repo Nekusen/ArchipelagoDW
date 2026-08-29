@@ -1,6 +1,6 @@
 # Digimon World 1 (PS1) APWorld — Project Status and Roadmap
 
-**Snapshot date: 2026-08-28.** Branch `digimon-world-ps1`, `world_version 0.6.0`.
+**Snapshot date: 2026-08-29.** Branch `digimon-world-ps1`, `world_version 0.6.0`.
 
 This is the live status document. [PLAN.md](PLAN.md) is the historical exploration record and
 [CLAUDE.md](CLAUDE.md) carries the working conventions; neither is updated for day-to-day state —
@@ -24,7 +24,7 @@ project moved out of "build the world" and into **feature expansion + polish + v
 | YAML options | 79, in 5 option groups |
 | World test suite | **1124 passed**, 4 skipped, 10532 subtests, ~18 s with `-n auto` (one class is disc-gated: it re-checks vanilla bytes when `Digimon World (USA).bin` sits at the repo root) |
 | Lint | `ruff` at a 323-finding baseline (303 pre-existing + the two census tools' CLI prints, T201, like the other lab tools) |
-| Commits ahead of `main` | 100 |
+| Commits ahead of `main` | 107 |
 | Decomp coverage | **31 / 1120** SLUS game functions verified — 2.8 % by count, **14.5 % of static call sites** |
 
 ### 1.1 What is shipped
