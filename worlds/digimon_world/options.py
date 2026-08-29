@@ -1457,6 +1457,40 @@ class SpecialDigivolutions(Toggle):
     display_name = "Digivolution: Special Digivolutions"
 
 
+class PartnerRaising(Toggle):
+    """Randomize every Rookie, Champion and Ultimate species' raising parameters:
+    favourite food (any food item), sleep schedule (one of the six normal
+    schedules), home region (the biome that cheers the partner up), training
+    aptitude (which stats train 10 % better or worse) and birth weight (inside the
+    level's vanilla band). Meals, energy and toilet timing — the care-mistake
+    economy — are never touched. The spoiler lists every species' new profile.
+    """
+
+    display_name = "Partner Raising Parameters"
+
+
+class BgmShuffle(Choice):
+    """Randomize the background music of the field and town screens.
+
+    * ``off`` — vanilla music.
+    * ``areas`` — every vanilla theme is replaced by one other theme everywhere it
+      played (the one-theme-per-area feel is kept).
+    * ``screens`` — every screen draws its own theme.
+    * ``chaos`` — like ``screens``, and the looping battle themes join the draw.
+
+    Day / night pairs follow the theme; scripted music overrides (bosses, Toy Town,
+    Mt. Infinity, the arena jingles) stay vanilla. Pure data rewrite of the screen
+    scripts — the game streams whichever theme is asked for.
+    """
+
+    display_name = "Music Shuffle"
+    option_off = 0
+    option_areas = 1
+    option_screens = 2
+    option_chaos = 3
+    default = option_off
+
+
 class FixDVChipText(DefaultOnToggle):
     """Correct the three DV chip descriptions to say what the chips actually do
     (DV Chip E boosts HP and MP, not Offense and Speed). Text only. Mirrors the
@@ -1538,6 +1572,8 @@ class DigimonWorldOptions(PerGameCommonOptions):
     digivolution_requirements: DigivolutionRequirements
     special_digivolutions: SpecialDigivolutions
     digivolution_stat_gains: DigivolutionStatGains
+    partner_raising: PartnerRaising
+    bgm_shuffle: BgmShuffle
     quest_items_droppable: QuestItemsDroppable
     increase_learn_chance: IncreaseLearnChance
     brain_training_tier_one: BrainTrainingTierOne
@@ -1567,6 +1603,7 @@ option_groups: list[OptionGroup] = [
             TechGifts, TokomonGifts, TokomonGiftsConsumableOnly,
             DigivolutionRandomization, DigivolutionObtainAll, DigivolutionRequirements,
             SpecialDigivolutions, DigivolutionStatGains,
+            PartnerRaising, BgmShuffle,
         ],
     ),
     OptionGroup(

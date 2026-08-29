@@ -34,6 +34,8 @@ from . import (
     gifts,
     items,
     locations,
+    music,
+    raising,
     regions,
     rom,
     rules,
@@ -104,6 +106,8 @@ class DigimonWorldWorld(World):
         self.drop_plan = drops.build_drop_plan(self)
         self.gift_plan = gifts.build_gift_plan(self)
         self.evolution_plan = evolutions.build_evolution_plan(self)
+        self.raise_plan = raising.build_raise_plan(self)
+        self.bgm_plan = music.build_bgm_plan(self)
 
     def create_regions(self) -> None:
         regions.create_and_connect_regions(self)
@@ -190,6 +194,8 @@ class DigimonWorldWorld(World):
     drop_plan: drops.DropPlan = drops.EMPTY_PLAN
     gift_plan: gifts.GiftPlan = gifts.EMPTY_PLAN
     evolution_plan: evolutions.EvolutionPlan = evolutions.EMPTY_PLAN
+    raise_plan: raising.RaisePlan = raising.EMPTY_PLAN
+    bgm_plan: music.BgmPlan = music.EMPTY_PLAN
 
     def post_fill(self) -> None:
         self.enemy_plan = enemies.build_enemy_plan(self)
@@ -200,6 +206,14 @@ class DigimonWorldWorld(World):
         self._write_drop_spoiler(spoiler_handle, name)
         self._write_gift_spoiler(spoiler_handle, name)
         self._write_evolution_spoiler(spoiler_handle, name)
+        if not self.raise_plan.empty:
+            spoiler_handle.write(f"\n\nPartner raising ({name}):\n")
+            for species, row in sorted(self.raise_plan.overrides.items()):
+                spoiler_handle.write(f"  {raising.species_name(species)}: {raising.describe_row(row)}\n")
+        if not self.bgm_plan.empty:
+            spoiler_handle.write(f"\n\nMusic ({name}):\n")
+            for line in music.describe_plan(self.bgm_plan):
+                spoiler_handle.write(f"  {line}\n")
         plan = self.enemy_plan
         if plan.empty:
             return

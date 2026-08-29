@@ -128,6 +128,8 @@ from .data.addresses import (
     RAINBOWHORN_ITEM_ID,
     RAINBOWHORN_NEW_CLUT_INDEX,
     RAINBOWHORN_TILE_BIN_OFFSETS,
+    RAISE_DATA_PATCH_SPAN,
+    RAISE_DATA_ROW_SIZE,
     RECYCLE_SHOP_AP_ITEM_ID_BASE,
     RECYCLE_SHOP_AP_ITEM_ID_COUNT,
     RECYCLE_SHOP_LOCATION_NAMES,
@@ -271,6 +273,7 @@ from .data.addresses import (
     ROM_QUEST_ITEMS_NOT_DROPABLE,
     ROM_RAIN_PLANT_GIVEITEM_NEUTER_VALUE,
     ROM_RAIN_PLANT_GIVEITEM_OFFSETS,
+    ROM_RAISE_DATA_OFFSET,
     ROM_RECRUITMENT,
     ROM_RECRUITMENT_FORMAT,
     ROM_SETTRIGGER_PATCH_FORMAT,
@@ -361,6 +364,9 @@ from .enemies import MOVES_BY_ID, RECORD_INDEX, RECORDS_BY_MAP, SITES_BY_MAP, En
 from .evolutions import EvolutionPlan
 from .gifts import GiftPlan
 from .ground_items import compute_ground_item_replacements
+from .music import SITES as BGM_SITE_TABLE
+from .music import BgmPlan
+from .raising import RaisePlan
 from .starters import (
     LEVEL_CHAMPION,
     LEVEL_FRESH,
@@ -2742,6 +2748,25 @@ def _write_species_list_tokens(patch: DigimonWorldProcedurePatch, plan: ListPlan
         )
 
 
+def _write_raise_tokens(patch: DigimonWorldProcedurePatch, plan: RaisePlan) -> None:
+    """Partner raising randomization — the five contiguous bytes (favourite food, sleep cycle,
+    favoured region, training type, default weight) of every changed ``RAISE_DATA`` row."""
+
+    start, end = RAISE_DATA_PATCH_SPAN
+    for species_id, row in sorted(plan.overrides.items()):
+        data = bytes(row)
+        assert len(data) == end - start, (species_id, row)
+        _write_user_data_tokens(patch, ROM_RAISE_DATA_OFFSET, species_id * RAISE_DATA_ROW_SIZE + start, data)
+
+
+def _write_bgm_tokens(patch: DigimonWorldProcedurePatch, plan: BgmPlan) -> None:
+    """Music shuffle — the font byte of every changed ``playBGM`` opcode in MAPHEAD.SCN."""
+
+    for index, font in sorted(plan.overrides.items()):
+        site = BGM_SITE_TABLE[index]
+        patch.write_token(APTokenTypes.WRITE, maphead_bin_offset(site.vm + 1), bytes([font]))
+
+
 def _write_gift_tokens(patch: DigimonWorldProcedurePatch, plan: GiftPlan) -> None:
     """NPC gift randomization — script-byte writes.
 
@@ -3001,7 +3026,7 @@ def write_patch(world: DigimonWorldWorld, output_directory: str) -> None:
     _write_rain_plant_neuter_tokens(patch)  # always-on; single-site giveItem -> setTrigger
     _write_blue_flute_neuter_tokens(patch)  # always-on; same shape as Mansion/Frig/Gear
     _write_leomonstone_neuter_tokens(patch)  # always-on; 7 sites across 3 ROM copies + orphan
-    _write_arena_cup_neuter_tokens(patch)  # always-on; 14 sites x N copies (no-op until ROM_ARENA_SECTION_51_BASES is set)
+    _write_arena_cup_neuter_tokens(patch)  # always-on; no-op until ROM_ARENA_SECTION_51_BASES is set
     _write_merit_shop_wrapper_tokens(patch)  # always-on; engine-hook for Merit-Shop purchases
     _write_trn_gym_bonus_tokens(patch)  # always-on; gym bonus follows AP recruits (TRN_REL immediates)
     # ITEM_PARA 256-slot relocation — always-on (heap claim + boot seed
@@ -3063,6 +3088,10 @@ def write_patch(world: DigimonWorldWorld, output_directory: str) -> None:
         _write_drop_tokens(patch, world.drop_plan)
     if not world.list_plan.empty:
         _write_species_list_tokens(patch, world.list_plan)
+    if not world.raise_plan.empty:
+        _write_raise_tokens(patch, world.raise_plan)
+    if not world.bgm_plan.empty:
+        _write_bgm_tokens(patch, world.bgm_plan)
     if not world.gift_plan.empty:
         _write_gift_tokens(patch, world.gift_plan)
 
