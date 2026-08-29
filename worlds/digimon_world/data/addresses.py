@@ -7011,7 +7011,7 @@ assert ROM_COMBAT_TR3_OFFSET + 16 < ROM_COMBAT_TR1_OFFSET + 0x800, (
 # client now keys on trigger 140 (:data:`RAM_DRIMOGEMON_FIGHT_BIT`), the bit
 # Drimogemon's berserk fight sets (Script 28 §5); the byte stays documented.
 
-RAM_HAS_BEATEN_DRIMOGEMON: Final = 0x001BE130        # u8 — pstat(0xFF): LAST scripted battle's outcome, not Drimogemon's
+RAM_HAS_BEATEN_DRIMOGEMON: Final = 0x001BE130        # u8 — pstat(0xFF): the LAST scripted battle's outcome
 RAM_MERAMON_TUNNEL_DRIMO_STATE: Final = 0x001BE042   # u8 — write 2 (talked)
 RAM_MERAMON_TUNNEL_STATE: Final = 0x001BE043         # u8 — write 10 (dug)
 RAM_MERAMON_TUNNEL_DIGGING_STATE: Final = 0x001BE04F  # u8 — write 5 (empty)

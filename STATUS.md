@@ -23,7 +23,7 @@ project moved out of "build the world" and into **feature expansion + polish + v
 | Locations / items | 280 / 217 |
 | YAML options | 80, in 5 option groups |
 | World test suite | **1163 passed**, 4 skipped, 10878 subtests, ~18 s with `-n auto` (one class is disc-gated: it re-checks vanilla bytes when `Digimon World (USA).bin` sits at the repo root) |
-| Lint | `ruff` at a 322-finding baseline (303 pre-existing + the two census tools' CLI prints, T201, like the other lab tools) |
+| Lint | `ruff` at a 321-finding baseline (303 pre-existing + the two census tools' CLI prints, T201, like the other lab tools) |
 | Commits ahead of `main` | 118 |
 | Decomp coverage | **31 / 1120** SLUS game functions verified — 2.8 % by count, **14.5 % of static call sites** |
 
