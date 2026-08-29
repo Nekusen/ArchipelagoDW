@@ -6998,13 +6998,20 @@ assert ROM_COMBAT_TR3_OFFSET + 16 < ROM_COMBAT_TR1_OFFSET + 0x800, (
 # ----- Fast Drimogemon (client-side; mirrors DWAP) --------------------------
 #
 # Source: ``references/DWAP/source/DWAP/App.axaml.cs:417-428`` and
-# ``Addresses.cs:36-39``. Once the player beats Drimogemon (HasBeaten bit
-# set), the client writes three single-byte flags to mark the Lava Cave
-# tunnel as already dug and the dig pile as empty, collapsing the 10-day
-# in-game wait. Idempotent: writes only fire when the current values
-# differ from target.
+# ``Addresses.cs:36-39``. Once the player beats Drimogemon, the client
+# writes three single-byte flags to mark the Lava Cave tunnel as already
+# dug and the dig pile as empty, collapsing the 10-day in-game wait.
+# Idempotent: writes only fire when the current values differ from target.
+#
+# Correction 2026-08-29 (lab, ``work/dw1_re/decomp/ogremon_chain/NOTES.md``
+# §8.5): DWAP's "HasBeatenDrimogemon" byte 0x001BE130 is ``pstat(0xFF)`` =
+# the outcome word EVERY scripted ``startBattle`` writes — it read 1 after
+# the Ogremon, Secret Beach Cave and Drimogemon fights alike. Keyed on it,
+# the enforcer would pin the tunnel state after any won story battle. The
+# client now keys on trigger 140 (:data:`RAM_DRIMOGEMON_FIGHT_BIT`), the bit
+# Drimogemon's berserk fight sets (Script 28 §5); the byte stays documented.
 
-RAM_HAS_BEATEN_DRIMOGEMON: Final = 0x001BE130        # u8 — read; 1 = beaten
+RAM_HAS_BEATEN_DRIMOGEMON: Final = 0x001BE130        # u8 — pstat(0xFF): LAST scripted battle's outcome, not Drimogemon's
 RAM_MERAMON_TUNNEL_DRIMO_STATE: Final = 0x001BE042   # u8 — write 2 (talked)
 RAM_MERAMON_TUNNEL_STATE: Final = 0x001BE043         # u8 — write 10 (dug)
 RAM_MERAMON_TUNNEL_DIGGING_STATE: Final = 0x001BE04F  # u8 — write 5 (empty)
@@ -9471,12 +9478,14 @@ _SCRIPT_ARCHIVE_SLOTS: Final[dict[int, int]] = {
     48: 0x24800,    # OGRE03 (screen 48, Ogremon's Room): fortress cutscene S52 / S53
     130: 0x5B800,   # FRZL16 (screen 135, Freezeland shore): Whamon ride S51
     137: 0x61800,   # OGRE11 (screen 143, Secret Beach Cave): Ogremon battle S51
+    0: 0x800,       # DG.SCN "script 0": a dead copy of MAPHEAD.SCN that getScript(0) never reads
 }
 _SCRIPT_ARCHIVE_SLOT_SIZES: Final[dict[int, int]] = {
     6: 0x1000, 7: 0x1000, 101: 0x800, 162: 0x2800, 163: 0x2000, 176: 0x1800,
     8: 0x800, 18: 0x2000, 24: 0x800, 44: 0x800, 66: 0x800, 84: 0x800,
     135: 0x1800,
     26: 0x1000, 28: 0x800, 48: 0x800, 130: 0x1000, 137: 0x800,
+    0: 0x6800,
 }
 
 
@@ -11687,4 +11696,62 @@ for _group in OGREMON_CHAIN_GATE_PAIRS:
         assert 24 <= _off % 2352 <= 2072 - len(_cond), hex(_off)           # inside one sector's user data
 # The retired "Ogremon softlock" write sits inside the TUNN02 load gate — the reason it hung the game.
 assert MAPHEAD_LOAD_GATE_TUNN02 < ROM_OGREMON_SOFTLOCK_OFFSETS[1] < MAPHEAD_LOAD_GATE_TUNN02 + 10
+# Its two offsets are the live MAPHEAD.SCN copy and the DG.SCN slot-0 dead copy of byte 2482.
+assert ROM_OGREMON_SOFTLOCK_OFFSETS == (script_vm_to_bin_offset(0, 2482), maphead_bin_offset(2482))
 del _group, _off, _cond
+
+# --- Guards G1 / G2 (dw1-patch agent, three nets, 2026-08-29; NOTES.md §8) ------------------------
+#
+# G1 — Nanimon's placement gate in Ogremon's Room. MAPHEAD Section_48 places
+# Nanimon unless ``150 == false OR 334 == true`` (vm 3680, operand at 3684),
+# i.e. as soon as the Secret Beach Cave battle is done — which under AP can
+# precede the fortress battle (the ferry runs on the *Whamon Recruit* item).
+# With Nanimon in the room the fortress battle faults: ``startAnimation`` asks
+# every placed NPC for the battle-start animation 0x21 and Nanimon's ``.MMD``
+# table has 29 entries and no bounds check (the same fault the standalone's
+# Leomon-cave writes dodge). Reading 175 (fortress cleared) instead keeps
+# Nanimon out until the bandits are gone; his own S11 quest has no 150
+# dependency. Both copies of the operand are written (live + dead archive).
+# G2 — Drimogemon's berserk fight. Script 28 §5 skips the fight (and never
+# sets 140) once Ogremon is recruited (234); Script 29 §51 refuses the dig job
+# without 140, so recruiting Ogremon first — likely under AP — made Drimogemon
+# unobtainable. Reading 140 instead keeps the fight on offer until it is won.
+# Live: G1 (a) Nanimon co-present -> fault, (b) guard -> completes, (c) 175 ->
+# Nanimon alone, S11 to 334; G2 (a) sign line / dig refused, (b) guard ->
+# fight -> 140 -> job intro, (c) 140 set -> no second fight; cold boot on
+# ``ogremon_guards.bin`` (sector diff {142591, 142640, 142983}).
+MAPHEAD_OGRE03_NANIMON_GATE_VM: Final = 3684          # Section_48: the 150 operand of "if !150 OR 334 then skip"
+ROM_OGRE03_NANIMON_GATE_OFFSETS: Final = (
+    maphead_bin_offset(MAPHEAD_OGRE03_NANIMON_GATE_VM),                 # MAPHEAD.SCN, boot-resident copy
+    script_vm_to_bin_offset(0, MAPHEAD_OGRE03_NANIMON_GATE_VM),         # DG.SCN slot-0 dead copy (hygiene)
+)
+ROM_OGRE03_NANIMON_GATE_VANILLA: Final = b"\x96\x00"                  # 150
+ROM_OGRE03_NANIMON_GATE_VALUE: Final = b"\xAF\x00"                    # 175
+ROM_OGRE03_NANIMON_GATE_IF_VANILLA: Final = bytes.fromhex("19000000960081004E011800760E1900")   # @ vm 3680
+DRIMOGEMON_BERSERK_GATE_SCRIPT: Final = 28
+DRIMOGEMON_BERSERK_GATE_VM: Final = 34                                # §5 "if trigger(234) == false then 104", operand
+ROM_DRIMOGEMON_BERSERK_GATE_OFFSET: Final = script_vm_to_bin_offset(DRIMOGEMON_BERSERK_GATE_SCRIPT,
+                                                                    DRIMOGEMON_BERSERK_GATE_VM)
+ROM_DRIMOGEMON_BERSERK_GATE_VANILLA: Final = b"\xEA\x00"              # 234
+ROM_DRIMOGEMON_BERSERK_GATE_VALUE: Final = b"\x8C\x00"                # 140
+ROM_DRIMOGEMON_BERSERK_GATE_IF_VANILLA: Final = bytes.fromhex("19000000EA00180068001900")       # @ vm 30
+DRIMOGEMON_FIGHT_TRIGGER_ID: Final = 140                              # set by the berserk fight (Script 28 §5)
+RAM_DRIMOGEMON_FIGHT_BIT: Final[tuple[int, int]] = (
+    AP_TRIGGER_ARRAY_BASE + DRIMOGEMON_FIGHT_TRIGGER_ID // 8, DRIMOGEMON_FIGHT_TRIGGER_ID % 8,
+)
+assert ROM_OGRE03_NANIMON_GATE_OFFSETS == (0x140B7ECC, 0x13FD6D4C), ROM_OGRE03_NANIMON_GATE_OFFSETS
+assert ROM_DRIMOGEMON_BERSERK_GATE_OFFSET == 0x13FF293A, hex(ROM_DRIMOGEMON_BERSERK_GATE_OFFSET)
+assert RAM_DRIMOGEMON_FIGHT_BIT == (0x001BDFDE, 4), RAM_DRIMOGEMON_FIGHT_BIT
+assert ROM_OGRE03_NANIMON_GATE_OFFSETS[0] - ROM_OGREMON_SOFTLOCK_OFFSETS[1] == 1202    # same sector: the other "96 00"
+assert ROM_OGRE03_NANIMON_GATE_IF_VANILLA[4:6] == ROM_OGRE03_NANIMON_GATE_VANILLA
+assert ROM_DRIMOGEMON_BERSERK_GATE_IF_VANILLA[4:6] == ROM_DRIMOGEMON_BERSERK_GATE_VANILLA
+assert struct.unpack("<H", ROM_OGRE03_NANIMON_GATE_VALUE)[0] == 175
+assert struct.unpack("<H", ROM_DRIMOGEMON_BERSERK_GATE_VALUE)[0] == DRIMOGEMON_FIGHT_TRIGGER_ID
+for _off in (*ROM_OGRE03_NANIMON_GATE_OFFSETS, ROM_DRIMOGEMON_BERSERK_GATE_OFFSET):
+    assert 24 <= _off % 2352 <= 2072 - 2, hex(_off)                     # single-sector writes
+    for _group in OGREMON_CHAIN_GATE_PAIRS:                             # outside every pinned gate condition
+        for _, _gate, _cond, _ in _group:
+            assert _off + 2 <= _gate or _off >= _gate + len(_cond), hex(_off)
+    for _item_off in ROM_MAP_ITEM_OFFSETS:
+        assert _item_off + 1 < _off or _item_off >= _off + 2, hex(_item_off)
+del _off, _group, _gate, _cond, _item_off

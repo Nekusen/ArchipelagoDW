@@ -145,6 +145,8 @@ class TestGenerateOutput(DigimonWorldTestBase):
 
         from ..data.addresses import (
             OGREMON_CHAIN_GATE_PAIRS,
+            ROM_DRIMOGEMON_BERSERK_GATE_OFFSET,
+            ROM_DRIMOGEMON_BERSERK_GATE_VALUE,
             ROM_FIX_LEO_CAVE_OFFSETS,
             ROM_FIX_LEO_CAVE_VALUE,
             ROM_FIX_MOVE_TO_OFFSETS,
@@ -153,6 +155,8 @@ class TestGenerateOutput(DigimonWorldTestBase):
             ROM_FIX_ROTATION_VALUE,
             ROM_FIX_TOY_TOWN_OFFSETS,
             ROM_FIX_TOY_TOWN_VALUE,
+            ROM_OGRE03_NANIMON_GATE_OFFSETS,
+            ROM_OGRE03_NANIMON_GATE_VALUE,
             ROM_OGREMON_SOFTLOCK_OFFSETS,
             ROM_PP_CALC_PATCH_OFFSET,
             ROM_SETTRIGGER_PATCH_FORMAT,
@@ -242,6 +246,11 @@ class TestGenerateOutput(DigimonWorldTestBase):
                 for off, data in observed:
                     self.assertTrue(off + len(data) <= gate_off or off >= gate_off + len(cond),
                                     f"token at {off:#x} overlaps gate {_label}")
+        # The chain's guards G1 (Nanimon gate -> 175, both copies) and G2 (Drimogemon's
+        # berserk fight skipped on 140, not 234) are always on.
+        for off in ROM_OGRE03_NANIMON_GATE_OFFSETS:
+            self.assertIn((off, ROM_OGRE03_NANIMON_GATE_VALUE), observed)
+        self.assertIn((ROM_DRIMOGEMON_BERSERK_GATE_OFFSET, ROM_DRIMOGEMON_BERSERK_GATE_VALUE), observed)
 
         # Chest-item replacement tokens.
         # WorldTestBase.setUp does NOT run fill, so every chest's

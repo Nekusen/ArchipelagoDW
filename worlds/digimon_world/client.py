@@ -130,8 +130,8 @@ from .data.addresses import (
     RAM_CURRENT_DEFENSE,
     RAM_CURRENT_OFFENSE,
     RAM_CURRENT_SPEED,
+    RAM_DRIMOGEMON_FIGHT_BIT,
     RAM_GREAT_CANYON_BRIDGE_UNLOCKED,
-    RAM_HAS_BEATEN_DRIMOGEMON,
     RAM_INVENTORY_DEFAULT_SIZE,
     RAM_INVENTORY_EMPTY_SLOT_ID,
     RAM_INVENTORY_ITEM_IDS_BASE,
@@ -2175,17 +2175,23 @@ class DigimonWorldClient:
         """Collapse Drimogemon's 10-day dig wait to "already dug" state.
 
         Mirrors DWAP's ``EnsureWorldFlags`` for the Fast Drimogemon
-        option. Once :data:`RAM_HAS_BEATEN_DRIMOGEMON` reads 1 (i.e.
-        the player has beaten the Drimogemon fight), pin the three
-        Lava Cave tunnel-state bytes so the player can walk straight
+        option. Once trigger 140 is set (:data:`RAM_DRIMOGEMON_FIGHT_BIT` —
+        the bit Drimogemon's berserk fight sets in Script 28 §5), pin the
+        three Lava Cave tunnel-state bytes so the player can walk straight
         through without waiting in-game days.
+
+        DWAP keyed this on 0x001BE130, which the lab showed to be
+        ``pstat(0xFF)`` — the outcome word of the LAST scripted battle,
+        whichever it was (2026-08-29); keyed on that, the enforcer would
+        have pinned the tunnel after any won story fight.
 
         Cheap: one batched 4-byte read per tick; writes only fire
         when the targets aren't already set.
         """
 
+        fight_byte, fight_bit = RAM_DRIMOGEMON_FIGHT_BIT
         addrs = [
-            (RAM_HAS_BEATEN_DRIMOGEMON, 1, DOMAIN_MAIN_RAM),
+            (fight_byte, 1, DOMAIN_MAIN_RAM),
             (RAM_MERAMON_TUNNEL_DRIMO_STATE, 1, DOMAIN_MAIN_RAM),
             (RAM_MERAMON_TUNNEL_STATE, 1, DOMAIN_MAIN_RAM),
             (RAM_MERAMON_TUNNEL_DIGGING_STATE, 1, DOMAIN_MAIN_RAM),
@@ -2196,9 +2202,9 @@ class DigimonWorldClient:
             return
         if any(len(b) != 1 for b in blocks):
             return
-        beaten, drimo_state, tunnel_state, digging_state = (b[0] for b in blocks)
-        if beaten != 1:
-            return  # Drimogemon not beaten yet — leave dig sequence alone
+        triggers, drimo_state, tunnel_state, digging_state = (b[0] for b in blocks)
+        if not (triggers >> fight_bit) & 1:
+            return  # Drimogemon's fight not won yet — leave the dig sequence alone
 
         writes: list[RamWrite] = []
         if drimo_state != FAST_DRIMOGEMON_DRIMO_STATE_TARGET:

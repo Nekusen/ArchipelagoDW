@@ -480,11 +480,16 @@ def _leomon_extra(_world: DigimonWorldWorld):
     return Has("Leomonstone")
 
 
-# Ogremon's 4-battle chain spans 3 regions: Great Canyon (Battles 1+2
-# at Ogre Fortress), Whamon's Secret Beach Cave (Battle 3 — reachable
-# via either Freezeland's beach or Whamon Recruit; the SBC region rule
-# already collapses both paths), and Drill Tunnel (Battle 4 — final,
-# Ogremon then joins).
+# Ogremon's 4-battle chain spans 3 regions: Great Canyon (Battle 1 = the
+# canyon-road ambush on GCAN08, Battle 2 = Ogremon's Room at the Ogre
+# Fortress — numbering corrected 2026-08-29, ``work/dw1_re/decomp/
+# ogremon_chain/NOTES.md``), Whamon's Secret Beach Cave (Battle 3 —
+# reachable via either Freezeland's beach or Whamon Recruit; the SBC
+# region rule already collapses both paths), and Drill Tunnel (Battle 4
+# — final, Ogremon then joins). Out-of-order play is guarded ROM-side
+# (``_write_ogremon_guard_tokens``): any battle order works, Nanimon
+# stays out of Ogremon's Room until the fortress is cleared, and
+# Drimogemon's berserk fight stays available until won.
 #
 # Under region locking each of these stops can be locked independently,
 # so all three are required as explicit ``CanReachRegion`` rules.
@@ -505,9 +510,11 @@ def _ogremon_extra(world: DigimonWorldWorld):
     )
 
 
-# Whamon's recruit chain requires Ogremon Battles 1+2 at Ogre Fortress
-# (which in turn require Yuramon's dialogue update — see
-# :func:`_ogremon_quest_extra`), then traveling to his cave from
+# Whamon's recruit chain: in-game he appears at the Freezeland shore once
+# the fortress is cleared (trigger 175) and not yet joined (!224), and
+# the cave battle (Battle 3) is what makes him join; the road ambush
+# (Battle 1, Yuramon's dialogue update — see :func:`_ogremon_quest_extra`)
+# is flavour the rule keeps for safety. Then traveling to his cave from
 # Freezeland (Battle 3). Reaching Freezeland via the right chain
 # already requires Great Canyon, but the **Birdramon Flight:
 # Freezeland** bypass would skip Great Canyon, leaving Battles 1+2
@@ -517,8 +524,9 @@ def _whamon_extra(world: DigimonWorldWorld):
     return CanReachRegion("Great Canyon") & _ogremon_quest_extra(world)
 
 
-# Shellmon's recruit chain: complete Ogremon Battles 1+2 at Ogre
-# Fortress (Yuramon dependency — see :func:`_ogremon_quest_extra`),
+# Shellmon's recruit chain: clear Ogremon's Room at the Ogre Fortress
+# (Battle 2; the rule also keeps the Yuramon / Battle 1 dependency — see
+# :func:`_ogremon_quest_extra`),
 # then go to Freezeland SW to find Shellmon and talk. Shellmon's home
 # region is Great Canyon (the cry-for-help triggers there), but the
 # actual recruit happens in Freezeland. Under region locking, Great

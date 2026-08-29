@@ -200,6 +200,8 @@ from .data.addresses import (
     ROM_DIGIMON_DATA,
     ROM_DIGIMON_DATA_OFFSET,
     ROM_DIGIMON_ID_FORMAT,
+    ROM_DRIMOGEMON_BERSERK_GATE_OFFSET,
+    ROM_DRIMOGEMON_BERSERK_GATE_VALUE,
     ROM_DV_CHIP_TEXT_LENGTH,
     ROM_DV_CHIP_TEXT_PATCHES,
     ROM_ELEMENT_MATRIX_OFFSET,
@@ -283,6 +285,8 @@ from .data.addresses import (
     ROM_NOTIFY_TOP_F2_OFFSET,
     ROM_NOTIFY_TOP_HOOK_ADDIU_OFFSET,
     ROM_NOTIFY_TOP_HOOK_LUI_OFFSET,
+    ROM_OGRE03_NANIMON_GATE_OFFSETS,
+    ROM_OGRE03_NANIMON_GATE_VALUE,
     ROM_OLD_FISHROD_REMAP_OFFSETS,
     ROM_OLD_FISHROD_REMAP_VALUE,
     ROM_PIXIMON_MANUAL_GIVEITEM_OFFSETS,
@@ -1261,6 +1265,24 @@ def _write_softlock_fix_tokens(patch: DigimonWorldProcedurePatch) -> None:
     # The standalone's fifth write ("Ogremon softlock", ``ROM_OGREMON_SOFTLOCK_*``) is
     # deliberately NOT emitted since 2026-08-29 — see ``_write_softlock_fix_tokens``'s
     # docstring and the "Ogremon / Whamon quest chain" section of ``data/addresses.py``.
+
+
+def _write_ogremon_guard_tokens(patch: DigimonWorldProcedurePatch) -> None:
+    """Ogremon quest-chain guards G1 / G2 — three 2-byte operand writes, always on
+    (lab-validated through the three nets 2026-08-29; ``work/dw1_re/decomp/ogremon_chain/NOTES.md`` §8):
+
+    * G1: Nanimon's placement gate in Ogremon's Room (MAPHEAD Section_48, both the
+      boot-resident and the dead archive copy) reads 175 (fortress cleared) instead of 150
+      (cave battle done) — with Nanimon in the room the fortress battle faults in
+      ``startAnimation`` (his 29-entry animation table has no battle-start entry).
+    * G2: Drimogemon's berserk fight (Script 28 §5) is skipped on trigger 140 (fight won)
+      instead of 234 (Ogremon recruited), so recruiting Ogremon first no longer makes
+      Drimogemon unobtainable.
+    """
+
+    for offset in ROM_OGRE03_NANIMON_GATE_OFFSETS:
+        patch.write_token(APTokenTypes.WRITE, offset, ROM_OGRE03_NANIMON_GATE_VALUE)
+    patch.write_token(APTokenTypes.WRITE, ROM_DRIMOGEMON_BERSERK_GATE_OFFSET, ROM_DRIMOGEMON_BERSERK_GATE_VALUE)
 
 
 def _write_lava_cave_gate_tokens(patch: DigimonWorldProcedurePatch) -> None:
@@ -3081,6 +3103,7 @@ def write_patch(world: DigimonWorldWorld, output_directory: str) -> None:
     # The setTrigger wrapper and changeMap wrapper are no longer needed.
     _write_recruit_trigger_redirect_tokens(patch)
     _write_softlock_fix_tokens(patch)
+    _write_ogremon_guard_tokens(patch)
     # ChestRandomization off: chests retain vanilla items + vanilla
     # giveItem flow, so the patcher emits no chest-related tokens.
     if int(world.options.chest_randomization.value):

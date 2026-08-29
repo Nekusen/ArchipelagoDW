@@ -220,9 +220,11 @@ These come from [docs/style.md](docs/style.md) and the ruff config and override 
   we shipped was mis-targeted and *caused* the Drill Tunnel hang (it moved
   TUNN02's model-load gate off trigger 150 while the cutscene kept it) —
   retired; the four MAPHEAD-load / script-cutscene gate pairs are pinned
-  (`OGREMON_CHAIN_GATE_PAIRS`). Guards G1 (Nanimon gate → 175) and G2
-  (Drimogemon's fight kept until won) await the lab
-  (`work/dw1_re/decomp/ogremon_chain/NOTES.md`).
+  (`OGREMON_CHAIN_GATE_PAIRS`). Guards G1 (Nanimon gate → 175: Nanimon in
+  the room faults `startAnimation`) and G2 (Drimogemon's fight kept until
+  won) shipped always-on after three nets; `fast_drimogemon` now keys on
+  trigger 140 (0x1BE130 is the last battle's outcome word, not
+  Drimogemon's) (`work/dw1_re/decomp/ogremon_chain/NOTES.md`).
   Not
   ported: recruit-identity
   shuffle, intro hash, happyVending, jukebox truncation, forced starter.
