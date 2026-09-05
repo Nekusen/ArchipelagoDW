@@ -45,10 +45,10 @@ from ..data.addresses import (
     RECYCLE_SHOP_TRIGGER_IDS,
     REGION_ACCESS_RAM_BITS,
     REGION_ACCESS_TRIGGER_IDS,
+    ROM_BIRDRA_FLIGHT_FREE_WORD_PATCHES,
     ROM_BIRDRA_FLIGHT_GCANYON_PATCHES,
     ROM_BIRDRA_FLIGHT_GCANYON_VANILLA_TRIGGER,
     ROM_BIRDRA_FLIGHT_PRICE_OFFSETS,
-    ROM_BIRDRA_FLIGHT_PRICE_ZERO,
     ROM_BIRDRA_FLIGHT_TABLE_PATCHES,
     ROM_TRANSITION_GATE_HOOK_BYTES,
     ROM_TRANSITION_GATE_WRAPPER_BYTES,
@@ -130,8 +130,14 @@ _LAB_SCRIPT_GATE_ENTRIES_2026_08_21: frozenset[tuple[int, str]] = frozenset({
     (0x014025258, "a002"),
     (0x014025438, "19000000a6031800ee0019001600f200"),
 })
+# Andromon iron-door entry gate (factorial_gate feature; net-2 GREEN 2026-09-01,
+# work/dw1_re/decomp/factorial_gate/NOTES.md §10 — byte strings verbatim from the lab).
+_LAB_FACTORIAL_DOOR_ENTRIES: frozenset[tuple[int, str]] = frozenset({
+    (0x1400DE50, "16009806"),
+    (0x1400DF80, "1900000081031800740519004efdfc03d00f000016007005"),
+})
 _LAB_SCRIPT_GATE_ENTRIES: frozenset[tuple[int, str]] = (
-    _LAB_SCRIPT_GATE_ENTRIES_2026_08_21 | _LAB_GATE_FIX_ENTRIES
+    _LAB_SCRIPT_GATE_ENTRIES_2026_08_21 | _LAB_GATE_FIX_ENTRIES | _LAB_FACTORIAL_DOOR_ENTRIES
 )
 
 _ALL_LOCKED = frozenset(LOCKABLE_REGIONS)
@@ -325,10 +331,57 @@ def _capture_tokens(world: Any) -> set[tuple[int, bytes]]:
     return tokens
 
 
+class TestFreeFlightWordPatches(DigimonWorldTestBase):
+    """The three in-place word rewrites that make Birdramon-Messenger
+    flights free (lab-validated 2026-08-30, three PATCH_PROCESS nets).
+
+    The fare must stay non-zero — it doubles as the destination menu's
+    re-entry latch — so freeness lives in the code, not the data."""
+
+    options: ClassVar[dict[str, Any]] = {"region_locking": "off"}
+
+    def test_sites_match_the_lab_spec(self) -> None:
+        self.assertEqual(
+            ROM_BIRDRA_FLIGHT_FREE_WORD_PATCHES,
+            (
+                (0x14D43E80, 0x00000000, 0x14200007),  # affordability gate
+                (0x14D49248, 0x00000000, 0xAF82938C),  # money deduction
+                (0x14D39C98, 0x00002821, 0x8C450004),  # POINT column
+            ),
+        )
+
+    def test_no_other_token_writes_these_words(self) -> None:
+        # A future patch landing on one of these four-byte windows would
+        # silently half-apply (token order decides the winner). Assert
+        # the whole emitted set stays clear of them.
+        free_spans = {
+            off + i
+            for off, _new, _old in ROM_BIRDRA_FLIGHT_FREE_WORD_PATCHES
+            for i in range(4)
+        }
+        for offset, data in _capture_tokens(self.world):
+            if any(off == offset for off, _n, _o in ROM_BIRDRA_FLIGHT_FREE_WORD_PATCHES):
+                continue  # the free-flight tokens themselves
+            overlap = free_spans & set(range(offset, offset + len(data)))
+            self.assertFalse(
+                overlap,
+                f"token at 0x{offset:09X} (+{len(data)}) overlaps a "
+                f"free-flight word at {sorted(hex(o) for o in overlap)}",
+            )
+
+    def test_fares_are_never_zeroed(self) -> None:
+        # Regression guard for the 2026-08-29 deadlock: a fare of 0
+        # never arms MAIN_D_8013500C, so the confirm textbox loops
+        # forever. Nothing may write the cost fields.
+        written = {off for off, _data in _capture_tokens(self.world)}
+        for price_off in ROM_BIRDRA_FLIGHT_PRICE_OFFSETS:
+            self.assertNotIn(price_off, written)
+
+
 class TestRegionGateTokensLockingOff(DigimonWorldTestBase):
     options: ClassVar[dict[str, Any]] = {"region_locking": "off"}
 
-    def test_no_gate_tokens_but_prices_zeroed(self) -> None:
+    def test_no_gate_tokens_and_fares_left_vanilla(self) -> None:
         tokens = _capture_tokens(self.world)
         offsets = {off for off, _data in tokens}
         self.assertNotIn(TRANSITION_GATE_WRAPPER_OFFSET, offsets)
@@ -338,10 +391,15 @@ class TestRegionGateTokensLockingOff(DigimonWorldTestBase):
             self.assertNotIn(lab_off, offsets)
         for gc_off, _trig in ROM_BIRDRA_FLIGHT_GCANYON_PATCHES:
             self.assertNotIn(gc_off, offsets)
-        # Flight price zeroing is unconditional QoL — present even with
-        # region locking off.
+        # Fares stay vanilla: the 2026-08-21 zeroing QoL was retired
+        # 2026-08-29 (a 0 fare deadlocks the destination menu — see
+        # ROM_BIRDRA_FLIGHT_FREE_WORD_PATCHES in data.addresses).
         for price_off in ROM_BIRDRA_FLIGHT_PRICE_OFFSETS:
-            self.assertIn((price_off, ROM_BIRDRA_FLIGHT_PRICE_ZERO), tokens)
+            self.assertNotIn(price_off, offsets)
+        # ...and the three free-flight word rewrites ship unconditionally,
+        # region locking or not.
+        for off, word, _vanilla in ROM_BIRDRA_FLIGHT_FREE_WORD_PATCHES:
+            self.assertIn((off, struct.pack("<I", word)), tokens)
 
 
 class TestRegionGateTokensLockingAll(DigimonWorldTestBase):
@@ -375,8 +433,13 @@ class TestRegionGateTokensLockingAll(DigimonWorldTestBase):
             self.assertIn((lab_off, bytes.fromhex(lab_hex)), tokens)
         for gc_off, new_trig in ROM_BIRDRA_FLIGHT_GCANYON_PATCHES:
             self.assertIn((gc_off, struct.pack("<H", new_trig)), tokens)
+        # Fares untouched even with everything locked (see above), and
+        # the free-flight rewrites present all the same.
+        written = {off for off, _data in tokens}
         for price_off in ROM_BIRDRA_FLIGHT_PRICE_OFFSETS:
-            self.assertIn((price_off, ROM_BIRDRA_FLIGHT_PRICE_ZERO), tokens)
+            self.assertNotIn(price_off, written)
+        for off, word, _vanilla in ROM_BIRDRA_FLIGHT_FREE_WORD_PATCHES:
+            self.assertIn((off, struct.pack("<I", word)), tokens)
 
 
 class TestRegionGateTokensCustomToyTown(DigimonWorldTestBase):

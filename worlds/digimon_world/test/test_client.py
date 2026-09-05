@@ -31,9 +31,12 @@ from unittest import mock
 
 from .. import client as client_module
 from ..client import (
+    DEBUG_BITS_GRANT_AMOUNT,
     DOMAIN_MAIN_RAM,
     ITEM_DELIVERY_ROUTES,
     ITEMS_RECEIVED_COUNTER,
+    ITEMS_RECEIVED_COUNTER_ADDR,
+    ITEMS_RECEIVED_COUNTER_MAGIC,
     LOCATION_RAM_BITS,
     PROSPERITY_RAM_CAP,
     DigimonWorldClient,
@@ -43,9 +46,12 @@ from ..data.addresses import (
     BEATEN_RAM_BITS,
     DWAP_CHEST_RAM_BITS,
     FISH_LOCATION_INVENTORY_IDS,
+    RAM_CURRENT_BITS,
+    RAM_INVENTORY_EMPTY_ORDER_KEY,
     RAM_INVENTORY_EMPTY_SLOT_ID,
     RAM_INVENTORY_ITEM_IDS_BASE,
     RAM_INVENTORY_MAX_SIZE,
+    RAM_INVENTORY_ORDER_KEYS_BASE,
     RAM_INVENTORY_QUANTITIES_BASE,
     RAM_INVENTORY_STACK_CAP,
     RAM_ITEM_BANK_BASE,
@@ -77,10 +83,15 @@ class _FakeItemNames:
 
 
 class _RecvItem:
-    """Minimal ``NetworkItem`` stand-in (only ``.item`` is read)."""
+    """Minimal ``NetworkItem`` stand-in (``.item`` and ``.player`` are read).
 
-    def __init__(self, item: int) -> None:
+    ``player`` defaults to a slot that is never the local one, so
+    ``_deliver_items``' vanilla-grant-chest branch short-circuits.
+    """
+
+    def __init__(self, item: int, player: int = 2) -> None:
         self.item = item
+        self.player = player
 
 
 class _FakeClientCtx:
@@ -105,6 +116,7 @@ class _FakeClientCtx:
         self.locations_checked: set[int] = set()
         self.finished_game = finished_game
         self.sent_msgs: list[Any] = []
+        self.pending_bit_grants = 0
 
     async def send_msgs(self, msgs: Any) -> None:
         self.sent_msgs.append(msgs)
@@ -369,6 +381,25 @@ def _pad_inventory(values: list[int], fill: int) -> bytes:
     )
 
 
+def _order_keys_for(ids: bytes) -> bytes:
+    """The order-obtained key array a normal save would carry for ``ids``.
+
+    Vanilla hands each occupied slot the lowest unused key, so an
+    inventory filled front-to-back reads 0, 1, 2, ... with 0xFF in the
+    empty slots (``giveItem`` / ``removeItem``, ``dw_decomp/item.c``).
+    """
+
+    keys = []
+    used = 0
+    for slot_id in ids:
+        if slot_id == RAM_INVENTORY_EMPTY_SLOT_ID:
+            keys.append(RAM_INVENTORY_EMPTY_ORDER_KEY)
+        else:
+            keys.append(used)
+            used += 1
+    return bytes(keys)
+
+
 class TestInventoryFirstDelivery(DigimonWorldTestBase):
     """2000-block deliveries go to the on-hand inventory when a slot is
     available (stack merge or first empty slot, mirroring vanilla
@@ -384,6 +415,7 @@ class TestInventoryFirstDelivery(DigimonWorldTestBase):
 
     def _deliver(self, item_name: str, *, bank_qty: int = 0,
                  size: int = 10, ids: bytes, counts: bytes,
+                 order_keys: bytes | None = None,
                  items_received: list[Any] | None = None,
                  item_names: _FakeItemNames | None = None) -> list[Any]:
         deliverer = ITEM_DELIVERY_ROUTES[item_name]
@@ -392,9 +424,10 @@ class TestInventoryFirstDelivery(DigimonWorldTestBase):
             ctx.items_received = items_received
         if item_names is not None:
             ctx.item_names = item_names
+        keys = _order_keys_for(ids) if order_keys is None else order_keys
 
         async def fake_read(_bizhawk_ctx: Any, _requests: list[Any]) -> list[bytes]:
-            return [bytes([bank_qty]), bytes([size]), ids, counts]
+            return [bytes([bank_qty]), bytes([size]), ids, counts, keys]
 
         with mock.patch.object(client_module.bizhawk, "read", fake_read):
             return _run(deliverer(ctx))
@@ -406,6 +439,7 @@ class TestInventoryFirstDelivery(DigimonWorldTestBase):
         self.assertEqual(writes, [
             (RAM_INVENTORY_ITEM_IDS_BASE + 1, [self.ITEM_ID], DOMAIN_MAIN_RAM),
             (RAM_INVENTORY_QUANTITIES_BASE + 1, [1], DOMAIN_MAIN_RAM),
+            (RAM_INVENTORY_ORDER_KEYS_BASE + 1, [1], DOMAIN_MAIN_RAM),
         ])
 
     def test_stacks_onto_existing_slot(self) -> None:
@@ -465,15 +499,43 @@ class TestInventoryFirstDelivery(DigimonWorldTestBase):
                 fish_item,
             )
 
-    def test_size_zero_treated_as_vanilla_default(self) -> None:
-        # Uninitialized save: size byte 0 → scan the vanilla 10 slots.
+    def test_dead_inventory_block_defers_instead_of_banking(self) -> None:
+        # Size byte 0 = no save loaded yet, so the 0x0013D4xx arrays are
+        # not the player's inventory. The delivery must DEFER (None), not
+        # bank: banking is irreversible once the counter advances, and
+        # "no free slot" read off a dead block is an artefact.
         ids = _pad_inventory([], RAM_INVENTORY_EMPTY_SLOT_ID)
         counts = _pad_inventory([], 0)
-        writes = self._deliver(self.ITEM_NAME, size=0, ids=ids, counts=counts)
-        self.assertEqual(writes, [
-            (RAM_INVENTORY_ITEM_IDS_BASE + 0, [self.ITEM_ID], DOMAIN_MAIN_RAM),
-            (RAM_INVENTORY_QUANTITIES_BASE + 0, [1], DOMAIN_MAIN_RAM),
-        ])
+        self.assertIsNone(
+            self._deliver(self.ITEM_NAME, size=0, ids=ids, counts=counts),
+        )
+
+    def test_implausible_size_byte_defers(self) -> None:
+        # Vanilla only ever writes 10/20/30; anything else is a torn read
+        # or a block that is not the live inventory. A tiny bound would
+        # otherwise report a full bag and bank the item.
+        ids = _pad_inventory([5, 7], RAM_INVENTORY_EMPTY_SLOT_ID)
+        counts = _pad_inventory([1, 1], 0)
+        for size in (1, 2, 9, 11, 255):
+            with self.subTest(size=size):
+                self.assertIsNone(
+                    self._deliver(
+                        self.ITEM_NAME, size=size, ids=ids, counts=counts,
+                    ),
+                )
+
+    def test_size_20_and_30_are_live(self) -> None:
+        # The other two legitimate capacities still deliver normally
+        # (the keychain reconciler pins them).
+        ids = _pad_inventory(list(range(1, 11)), RAM_INVENTORY_EMPTY_SLOT_ID)
+        counts = _pad_inventory([1] * 10, 0)
+        kc_code = ITEM_NAME_TO_ID[KEYCHAIN_ITEM_NAME]
+        writes = self._deliver(
+            self.ITEM_NAME, size=20, ids=ids, counts=counts,
+            items_received=[_RecvItem(kc_code)],
+            item_names=_FakeItemNames({kc_code: KEYCHAIN_ITEM_NAME}),
+        )
+        self.assertIsNotNone(writes)
 
     def test_vanilla_size_flicker_clamped_to_keychain_target(self) -> None:
         # A vanilla ``setInventorySize 30`` flicker (Nanimon cutscene)
@@ -501,7 +563,45 @@ class TestInventoryFirstDelivery(DigimonWorldTestBase):
         self.assertEqual(writes, [
             (RAM_INVENTORY_ITEM_IDS_BASE + 10, [self.ITEM_ID], DOMAIN_MAIN_RAM),
             (RAM_INVENTORY_QUANTITIES_BASE + 10, [1], DOMAIN_MAIN_RAM),
+            (RAM_INVENTORY_ORDER_KEYS_BASE + 10, [10], DOMAIN_MAIN_RAM),
         ])
+
+    def test_order_key_fills_the_lowest_gap(self) -> None:
+        # Vanilla ``giveItem`` hands the new slot the LOWEST key no other
+        # occupied slot claims, not "one past the highest" — a slot
+        # emptied in the middle frees its key for reuse.
+        ids = _pad_inventory([5, 7, 9], RAM_INVENTORY_EMPTY_SLOT_ID)
+        counts = _pad_inventory([1, 1, 1], 0)
+        keys = _pad_inventory([2, 0, 3], RAM_INVENTORY_EMPTY_ORDER_KEY)
+        writes = self._deliver(
+            self.ITEM_NAME, ids=ids, counts=counts, order_keys=keys,
+        )
+        self.assertEqual(writes, [
+            (RAM_INVENTORY_ITEM_IDS_BASE + 3, [self.ITEM_ID], DOMAIN_MAIN_RAM),
+            (RAM_INVENTORY_QUANTITIES_BASE + 3, [1], DOMAIN_MAIN_RAM),
+            (RAM_INVENTORY_ORDER_KEYS_BASE + 3, [1], DOMAIN_MAIN_RAM),
+        ])
+
+    def test_stack_merge_leaves_the_order_key_alone(self) -> None:
+        # An existing stack already owns a key; bumping its quantity must
+        # not rewrite it (that would reorder the player's inventory).
+        ids = _pad_inventory([self.ITEM_ID], RAM_INVENTORY_EMPTY_SLOT_ID)
+        counts = _pad_inventory([4], 0)
+        writes = self._deliver(self.ITEM_NAME, ids=ids, counts=counts)
+        self.assertNotIn(
+            RAM_INVENTORY_ORDER_KEYS_BASE,
+            [addr for addr, _data, _domain in writes],
+        )
+
+    def test_short_inventory_read_defers(self) -> None:
+        # A truncated block means the connector hiccuped, not that the
+        # bag is full.
+        ids = _pad_inventory([5], RAM_INVENTORY_EMPTY_SLOT_ID)[:12]
+        counts = _pad_inventory([1], 0)
+        self.assertIsNone(
+            self._deliver(self.ITEM_NAME, ids=ids, counts=counts,
+                          order_keys=_pad_inventory([0], 0xFF)),
+        )
 
     def test_bank_cap_drops_delivery(self) -> None:
         # Bank fallback at the 99 cap: the delivery is quietly dropped
@@ -527,13 +627,14 @@ class TestAutoPilotReconciler(DigimonWorldTestBase):
     options: ClassVar[dict[str, Any]] = {}
 
     def _reconcile(self, *, size: int = 10, ids: bytes,
-                   counts: bytes) -> list[Any]:
+                   counts: bytes, order_keys: bytes | None = None) -> list[Any]:
         client = DigimonWorldClient()
         ctx = _FakeClientCtx()
         seen: list[Any] = []
+        keys = _order_keys_for(ids) if order_keys is None else order_keys
 
         async def fake_read(_bizhawk_ctx: Any, _requests: list[Any]) -> list[bytes]:
-            return [bytes([size]), ids, counts]
+            return [bytes([size]), ids, counts, keys]
 
         async def fake_write(_bizhawk_ctx: Any, writes: list[Any]) -> None:
             seen.extend(writes)
@@ -551,6 +652,7 @@ class TestAutoPilotReconciler(DigimonWorldTestBase):
             (RAM_INVENTORY_ITEM_IDS_BASE + 2, [AUTO_PILOT_ITEM_ID],
              DOMAIN_MAIN_RAM),
             (RAM_INVENTORY_QUANTITIES_BASE + 2, [1], DOMAIN_MAIN_RAM),
+            (RAM_INVENTORY_ORDER_KEYS_BASE + 2, [2], DOMAIN_MAIN_RAM),
         ])
 
     def test_present_copy_is_left_alone(self) -> None:
@@ -575,6 +677,20 @@ class TestAutoPilotReconciler(DigimonWorldTestBase):
         ids = _pad_inventory(list(range(1, 11)), RAM_INVENTORY_EMPTY_SLOT_ID)
         counts = _pad_inventory([1] * 10, 0)
         self.assertEqual(self._reconcile(ids=ids, counts=counts), [])
+
+    def test_dead_inventory_block_is_skipped(self) -> None:
+        # Same gate as the deliverer: a size byte outside 10/20/30 means
+        # the 0x0013D4xx arrays are not the player's inventory, so no
+        # Auto Pilot is written into them. The reconciler simply retries
+        # next tick — which is why, before 2026-08-29, it kept working
+        # while deliveries of the same tick fell through to the bank.
+        ids = _pad_inventory([5], RAM_INVENTORY_EMPTY_SLOT_ID)
+        counts = _pad_inventory([1], 0)
+        for size in (0, 3, 255):
+            with self.subTest(size=size):
+                self.assertEqual(
+                    self._reconcile(size=size, ids=ids, counts=counts), [],
+                )
 
     def test_watcher_flag_defaults_off(self) -> None:
         # Until slot_data arrives (or with the option off) the watcher
@@ -876,6 +992,162 @@ class TestDeliverItemsNoopOnNoPending(DigimonWorldTestBase):
              mock.patch.object(client_module.bizhawk, "write") as mocked_write:
             _run(client._deliver_items(ctx))
             mocked_write.assert_not_called()
+
+    def _run_delivery(self, deliverer: Any) -> Any:
+        """Drive ``_deliver_items`` for one pending item routed to
+        ``deliverer``, with the counter reading "0 applied"."""
+
+        client = DigimonWorldClient()
+        ctx = _FakeClientCtx()
+        code = ITEM_NAME_TO_ID["Meat"]
+        ctx.items_received = [_RecvItem(code)]
+        ctx.item_names = _FakeItemNames({code: "Meat"})
+
+        async def fake_read(_bizhawk_ctx: Any, _requests: list[Any]) -> list[bytes]:
+            return [bytes([ITEMS_RECEIVED_COUNTER_MAGIC, 0, 0])]
+
+        with mock.patch.object(client_module.bizhawk, "read", fake_read), \
+             mock.patch.dict(client_module.ITEM_DELIVERY_ROUTES,
+                             {"Meat": deliverer}), \
+             mock.patch.object(client_module.bizhawk, "write") as mocked_write:
+            _run(client._deliver_items(ctx))
+            return mocked_write
+
+    def test_deferred_delivery_does_not_advance_the_counter(self) -> None:
+        # A deliverer returning None means "I could not read the state I
+        # need". Nothing may be written — advancing the counter would
+        # drop the item permanently.
+        async def deferring(_ctx: Any) -> None:
+            return None
+
+        self._run_delivery(deferring).assert_not_called()
+
+    def test_empty_write_list_still_advances_the_counter(self) -> None:
+        # Distinct from deferring: [] means "handled, no RAM change"
+        # (the no-op routes for Progressive bundles / keychains), so the
+        # counter must move or delivery blocks on that item forever.
+        async def noop(_ctx: Any) -> list[Any]:
+            return []
+
+        mocked_write = self._run_delivery(noop)
+        mocked_write.assert_called_once()
+        writes = mocked_write.call_args[0][1]
+        self.assertEqual(
+            [addr for addr, _data, _domain in writes],
+            [ITEMS_RECEIVED_COUNTER_ADDR],
+        )
+
+
+# =============================================================================
+# /bits console command (testing aid, both clients)
+# =============================================================================
+
+
+class TestBitsGrantCommand(DigimonWorldTestBase):
+    """``/bits`` queues a grant on the context; the game watcher applies
+    it. Split that way because commands run on the console/GUI thread,
+    which owns neither the event loop nor the emulator transport."""
+
+    options: ClassVar[dict[str, Any]] = {}
+
+    def _apply(self, *, pending: int, current: int,
+               short_read: bool = False) -> tuple[Any, Any]:
+        client = DigimonWorldClient()
+        ctx = _FakeClientCtx()
+        ctx.pending_bit_grants = pending
+        block = b"" if short_read else current.to_bytes(4, "little")
+
+        async def fake_read(_bizhawk_ctx: Any, _requests: list[Any]) -> list[bytes]:
+            return [block]
+
+        with mock.patch.object(client_module.bizhawk, "read", fake_read), \
+             mock.patch.object(client_module.bizhawk, "write") as mocked_write:
+            _run(client._grant_pending_bits(ctx))
+        return ctx, mocked_write
+
+    def test_no_pending_touches_nothing(self) -> None:
+        _ctx, mocked_write = self._apply(pending=0, current=0)
+        mocked_write.assert_not_called()
+
+    def test_one_grant_adds_the_amount(self) -> None:
+        ctx, mocked_write = self._apply(pending=1, current=250)
+        expected = 250 + DEBUG_BITS_GRANT_AMOUNT
+        mocked_write.assert_called_once()
+        self.assertEqual(
+            mocked_write.call_args[0][1],
+            [(RAM_CURRENT_BITS, list(expected.to_bytes(4, "little")),
+              DOMAIN_MAIN_RAM)],
+        )
+        self.assertEqual(ctx.pending_bit_grants, 0)
+
+    def test_repeated_commands_coalesce_into_one_write(self) -> None:
+        # Three /bits between two ticks must all land, not just the last.
+        ctx, mocked_write = self._apply(pending=3, current=0)
+        expected = 3 * DEBUG_BITS_GRANT_AMOUNT
+        mocked_write.assert_called_once()
+        self.assertEqual(
+            mocked_write.call_args[0][1],
+            [(RAM_CURRENT_BITS, list(expected.to_bytes(4, "little")),
+              DOMAIN_MAIN_RAM)],
+        )
+        self.assertEqual(ctx.pending_bit_grants, 0)
+
+    def test_clamped_to_the_money_cap(self) -> None:
+        ctx, mocked_write = self._apply(
+            pending=99, current=client_module._MONEY_CAP - 1,
+        )
+        self.assertEqual(
+            mocked_write.call_args[0][1],
+            [(RAM_CURRENT_BITS,
+              list(client_module._MONEY_CAP.to_bytes(4, "little")),
+              DOMAIN_MAIN_RAM)],
+        )
+        self.assertEqual(ctx.pending_bit_grants, 0)
+
+    def test_at_cap_drains_without_writing(self) -> None:
+        ctx, mocked_write = self._apply(
+            pending=1, current=client_module._MONEY_CAP,
+        )
+        mocked_write.assert_not_called()
+        self.assertEqual(ctx.pending_bit_grants, 0)
+
+    def test_short_read_keeps_the_queue(self) -> None:
+        # A dropped transport call must retry, not silently eat the grant.
+        ctx, mocked_write = self._apply(pending=2, current=0, short_read=True)
+        mocked_write.assert_not_called()
+        self.assertEqual(ctx.pending_bit_grants, 2)
+
+    def test_command_is_registered_on_both_clients(self) -> None:
+        # One shared command processor serves the BizHawk and the
+        # Duckstation client, so registering it once covers both.
+        from ..context import (
+            DigimonWorldClientContext,
+            DigimonWorldCommandProcessor,
+        )
+        self.assertTrue(hasattr(DigimonWorldCommandProcessor, "_cmd_bits"))
+        # CommonClient renders /help from the docstring — it must exist.
+        self.assertTrue(DigimonWorldCommandProcessor._cmd_bits.__doc__)
+        self.assertIs(
+            DigimonWorldClientContext.command_processor,
+            DigimonWorldCommandProcessor,
+        )
+
+    def test_command_queues_a_grant(self) -> None:
+        from ..context import (
+            DigimonWorldClientContext,
+            DigimonWorldCommandProcessor,
+        )
+        # Bypass CommonContext.__init__ (it wants a live event loop and a
+        # server address); only the counter matters here.
+        ctx = DigimonWorldClientContext.__new__(DigimonWorldClientContext)
+        ctx.pending_bit_grants = 0
+        processor = DigimonWorldCommandProcessor.__new__(
+            DigimonWorldCommandProcessor,
+        )
+        processor.ctx = ctx
+        processor._cmd_bits()
+        processor._cmd_bits()
+        self.assertEqual(ctx.pending_bit_grants, 2)
 
 
 # =============================================================================

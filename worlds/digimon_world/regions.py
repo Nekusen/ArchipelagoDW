@@ -360,3 +360,17 @@ def connect_regions(world: DigimonWorldWorld) -> None:
         world.get_region(source).connect(
             world.get_region(target), f"{source} to {target}",
         )
+    # Andromon's iron door (FactorialGateUnlock). In vanilla the door only
+    # opens from inside Factorial Town after the questline, so it grants
+    # no access logic could use — the edges exist only in the non-vanilla
+    # modes (shuffled: gated on the "Factorial Town Gate" item in
+    # rules.py; always_open: free). Physically blocks both directions,
+    # hence both edges (research: work/dw1_re/decomp/factorial_gate/).
+    if int(world.options.factorial_gate.value) != 1:  # 1 = vanilla
+        for source, target in (
+            ("Gear Savanna", "Factorial Town"),
+            ("Factorial Town", "Gear Savanna"),
+        ):
+            world.get_region(source).connect(
+                world.get_region(target), f"{source} to {target}",
+            )

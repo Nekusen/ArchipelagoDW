@@ -26,8 +26,9 @@ Two independent options:
 **``enemy_randomization``** (off / wild / wild_and_story, plus ``enemy_randomization_tier``) swaps
 every wild species on a screen for another fighting species whose model fits the original's
 heap budget (and, with ``same_level``, of the same evolution level). ``wild_and_story`` also
-swaps story and recruit fights. Non-fighting NPCs, the intro tutorial and cutscene rooms are
-never touched.
+swaps story and recruit fights. Non-fighting NPCs, the intro tutorial, cutscene rooms and the
+script-placed groups (:data:`SCRIPT_PLACED_GROUPS` -- entities the screen script spawns itself)
+are never touched.
 
 **``enemy_stats``** decides stats *and* movesets together:
 
@@ -625,6 +626,25 @@ def plan_move_overrides(
 # Species substitution
 # =============================================================================
 
+#: Groups whose screen script places the entity itself (``loadDigimon``/``setDigimon``
+#: opcodes outside MAPHEAD.SCN): substituting only the record + MAPHEAD operands leaves
+#: the script's operand stale, ``scriptSetDigimon`` refuses the placement and the cutscene
+#: runs against an absent entity -- the scene stalls and its ``setTrigger`` never runs
+#: (2026-08-31 playtest: Leomon's cinematic, the OGRE11 post-battle Whamon scene, the
+#: WaruMonzaemon fight). Full evidence + the per-site operand table that would lift this
+#: exclusion (patch the 47 in-script operand bytes too):
+#: ``work/dw1_re/decomp/story_swap_audit/NOTES.md`` (verdicts, patch_sites, anim coverage).
+#: The second block bites under plain ``wild`` too -- scripted scenes starring wild fodder.
+SCRIPT_PLACED_GROUPS: Final[frozenset[tuple[int, int]]] = frozenset({
+    # story fights (bite only under wild_and_story)
+    (5, 49), (9, 175), (43, 154), (48, 154), (76, 151), (76, 166), (128, 154),
+    (129, 143), (142, 154), (143, 112), (151, 70), (225, 115), (225, 131),
+    # wild fodder with scripted scenes (bite under wild AND wild_and_story)
+    (43, 3), (47, 93), (49, 68), (49, 80), (49, 93), (49, 99), (66, 107),
+    (104, 71), (128, 3), (139, 110),
+})
+
+
 def substitute_pool(original: Species, same_level: bool) -> list[Species]:
     """Fighting, non-story species whose model fits the original's heap budget."""
 
@@ -652,6 +672,8 @@ def plan_substitutions(
             continue
         records = RECORDS_BY_MAP[map_id]
         for species_id in sorted({record.type for record in records}):
+            if (map_id, species_id) in SCRIPT_PLACED_GROUPS:
+                continue  # the screen script places this entity itself — see the frozenset
             group = [record for record in records if record.type == species_id]
             kinds = {classify_record(record) for record in group}
             if CLASS_NPC in kinds or (CLASS_STORY in kinds and not include_story):

@@ -7,3 +7,6 @@ docs/
 # Stray RAM dumps / snapshot captures, in case they ever leak out of tools/.
 *.bin
 dw1_*snapshot*.txt
+
+# Crash dumps left behind by MSYS/Cygwin tooling run inside the package dir.
+*.stackdump

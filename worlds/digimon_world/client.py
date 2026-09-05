@@ -131,17 +131,22 @@ from .data.addresses import (
     RAM_CURRENT_OFFENSE,
     RAM_CURRENT_SPEED,
     RAM_DRIMOGEMON_FIGHT_BIT,
+    RAM_FACTORIAL_GATE_OPEN,
     RAM_GAME_ALIVE_MAPHEAD,
     RAM_GAME_ALIVE_SLUS_MARKER,
+    RAM_GAME_ENTERED_FLAG,
     RAM_GREAT_CANYON_BRIDGE_UNLOCKED,
     RAM_INVENTORY_DEFAULT_SIZE,
+    RAM_INVENTORY_EMPTY_ORDER_KEY,
     RAM_INVENTORY_EMPTY_SLOT_ID,
     RAM_INVENTORY_ITEM_IDS_BASE,
     RAM_INVENTORY_MAX_SIZE,
+    RAM_INVENTORY_ORDER_KEYS_BASE,
     RAM_INVENTORY_QUANTITIES_BASE,
     RAM_INVENTORY_SIZE,
     RAM_INVENTORY_SLOT_COUNT,
     RAM_INVENTORY_STACK_CAP,
+    RAM_INVENTORY_VALID_SIZES,
     RAM_ITEM_BANK_BASE,
     RAM_ITEM_BANK_SIZE,
     RAM_MACHINEDRAMON_DEFEATED_BYTE,
@@ -158,6 +163,7 @@ from .data.addresses import (
     RAM_STAT_CAP,
     RAM_STAT_CAP_FLAG,
     RAM_STAT_GAIN_MULT,
+    RAM_TAMER_ENTITY_PTR,
     RAM_TROPICAL_JUNGLE_BRIDGE_FIXED,
     RECRUIT_RAM_BITS,
     RECYCLE_SHOP_LOCATION_RAM_BITS,
@@ -212,7 +218,13 @@ if TYPE_CHECKING:
 RamWrite = tuple[int, list[int], str]
 # An item delivery route reads RAM (to compute additive deltas) and
 # returns a list of writes to apply. Async because reads are async.
-ItemDeliverer = Callable[["DigimonWorldClientContext"], Awaitable[list[RamWrite]]]
+# A deliverer returns the RAM writes that apply one item, or ``None`` to
+# DEFER: "the game state I need is not readable right now, ask me again next
+# tick". Deferring leaves the items_received counter untouched, so the item
+# stays pending instead of being applied to whatever happened to be in RAM.
+ItemDeliverer = Callable[
+    ["DigimonWorldClientContext"], Awaitable["list[RamWrite] | None"],
+]
 
 
 logger = logging.getLogger("Client")
@@ -709,20 +721,75 @@ def _keychain_inventory_target(ctx: DigimonWorldClientContext) -> int:
     return min(target, RAM_INVENTORY_MAX_SIZE)
 
 
+def _inventory_is_live(live_size: int) -> bool:
+    """True when the ``RAM_INVENTORY_SIZE`` byte proves the on-hand inventory
+    block currently holds the player's real inventory.
+
+    Vanilla only ever writes 10 / 20 / 30 there
+    (:data:`RAM_INVENTORY_VALID_SIZES`), and the keychain reconciler pins one
+    of the same three. Any other value — 0 before a save is loaded, or a torn
+    read — means the 0x0013D4xx arrays are not the player's inventory, so the
+    ids in them are meaningless: "no empty slot" would be an artefact, not a
+    full bag.
+
+    Callers that can retry (every per-tick reconciler) should simply skip the
+    tick. :func:`_make_item_deliverer` defers the delivery instead of banking
+    it, because banking is irreversible once the counter advances.
+    """
+
+    return live_size in RAM_INVENTORY_VALID_SIZES
+
+
 def _inventory_scan_bound(live_size: int, ctx: DigimonWorldClientContext) -> int:
     """Number of on-hand inventory slots writers may scan this tick.
 
-    Combines the live ``RAM_INVENTORY_SIZE`` byte (0 = uninitialized
-    save → vanilla default; clamped to the structural cap) with the
-    AP-controlled keychain target, taking the minimum of both so
-    neither a stale/flickered size byte nor a not-yet-pinned one can
-    widen the writable range.
+    Takes the minimum of the live ``RAM_INVENTORY_SIZE`` byte (clamped to the
+    structural cap) and the AP-controlled keychain target, so neither a stale
+    vanilla ``setInventorySize`` flicker nor a not-yet-pinned byte can widen
+    the writable range.
+
+    Callers must have checked :func:`_inventory_is_live` first — this function
+    trusts ``live_size`` to describe a real inventory.
     """
 
-    if live_size == 0:
-        live_size = RAM_INVENTORY_DEFAULT_SIZE
     live_size = min(live_size, RAM_INVENTORY_MAX_SIZE)
     return min(live_size, _keychain_inventory_target(ctx))
+
+
+def _place_in_free_slot(
+    slot: int, item_id: int, order_keys: bytes, bound: int,
+) -> list[RamWrite]:
+    """Writes that park ``item_id`` (count 1) in the empty inventory ``slot``.
+
+    Mirrors vanilla ``giveItem`` (``item.c:420-440``), which keeps THREE
+    parallel arrays in step: the id byte, the quantity byte, and the
+    "order obtained" key at :data:`RAM_INVENTORY_ORDER_KEYS_BASE`. The key
+    is the lowest index in ``0..bound-1`` that no other occupied slot
+    already claims; it is what the inventory menu's sort submenu orders by,
+    so a slot filled without one keeps a stale/duplicate key and the sort
+    misbehaves. ``removeItem`` clears the key back to 0xFF with the id, so
+    a genuinely free slot always reads
+    :data:`RAM_INVENTORY_EMPTY_ORDER_KEY` here.
+
+    If every key in range is somehow taken (only reachable from a corrupt
+    array), the key write is skipped rather than guessed — vanilla's own
+    loop leaves the slot's key untouched in that case too.
+    """
+
+    writes: list[RamWrite] = [
+        (RAM_INVENTORY_ITEM_IDS_BASE + slot, [item_id], DOMAIN_MAIN_RAM),
+        (RAM_INVENTORY_QUANTITIES_BASE + slot, [1], DOMAIN_MAIN_RAM),
+    ]
+    taken = {
+        order_keys[i] for i in range(bound)
+        if i != slot and order_keys[i] != RAM_INVENTORY_EMPTY_ORDER_KEY
+    }
+    key = next((k for k in range(bound) if k not in taken), None)
+    if key is not None:
+        writes.append(
+            (RAM_INVENTORY_ORDER_KEYS_BASE + slot, [key], DOMAIN_MAIN_RAM),
+        )
+    return writes
 
 
 # Item ids the deliverer must NEVER place in the on-hand inventory.
@@ -753,11 +820,20 @@ def _make_item_deliverer(dw_code: int) -> ItemDeliverer:
       fall back to the bank rather than opening a second stack.
     * Otherwise the first empty slot (id ``0xFF``) within the scan
       bound (see :func:`_inventory_scan_bound`) receives the item
-      with count 1.
-    * No eligible slot (inventory full), a bank-only id (fish — see
-      :data:`_INVENTORY_BANK_ONLY_IDS`), or a short read → bank
-      increment exactly as the historical bank deliverer did (capped
-      at :data:`_BANK_QUANTITY_CAP`; at-cap deliveries are dropped).
+      with count 1 **and a fresh order-obtained key**, exactly as
+      vanilla does (see :func:`_place_in_free_slot`).
+    * No eligible slot (inventory genuinely full) or a bank-only id
+      (fish — see :data:`_INVENTORY_BANK_ONLY_IDS`) → bank increment
+      exactly as the historical bank deliverer did (capped at
+      :data:`_BANK_QUANTITY_CAP`; at-cap deliveries are dropped).
+    * A short read, or a ``RAM_INVENTORY_SIZE`` byte that fails
+      :func:`_inventory_is_live` → **defer** (return ``None``), so the
+      item stays pending and is retried next tick. This is the one
+      case that must not bank: an inventory block that is not the
+      player's live inventory reads as "no free slot", and every
+      per-tick reconciler simply skips such a tick, so a deliverer that
+      banked instead would silently disagree with them (2026-08-29:
+      Auto Pilot kept topping up while deliveries went to the bank).
 
     Concurrency: the adapter interface has no guarded/conditional
     write (deliberately — PINE can't provide one), so this follows the
@@ -781,34 +857,49 @@ def _make_item_deliverer(dw_code: int) -> ItemDeliverer:
     bank_address = RAM_ITEM_BANK_BASE + item_id
     inventory_eligible = item_id not in _INVENTORY_BANK_ONLY_IDS
 
-    async def deliver(ctx: DigimonWorldClientContext) -> list[RamWrite]:
+    async def deliver(ctx: DigimonWorldClientContext) -> list[RamWrite] | None:
         blocks = await bizhawk.read(ctx.bizhawk_ctx, [
             (bank_address, 1, DOMAIN_MAIN_RAM),
             (RAM_INVENTORY_SIZE, 1, DOMAIN_MAIN_RAM),
             (RAM_INVENTORY_ITEM_IDS_BASE, RAM_INVENTORY_MAX_SIZE, DOMAIN_MAIN_RAM),
             (RAM_INVENTORY_QUANTITIES_BASE, RAM_INVENTORY_MAX_SIZE, DOMAIN_MAIN_RAM),
+            (RAM_INVENTORY_ORDER_KEYS_BASE, RAM_INVENTORY_MAX_SIZE, DOMAIN_MAIN_RAM),
         ])
-        if len(blocks) != 4 or len(blocks[0]) != 1:
-            return []
-        if (inventory_eligible
-                and len(blocks[1]) == 1
-                and len(blocks[2]) == RAM_INVENTORY_MAX_SIZE
-                and len(blocks[3]) == RAM_INVENTORY_MAX_SIZE):
+        if len(blocks) != 5 or len(blocks[0]) != 1:
+            return None  # transient read failure — retry next tick
+        # Reason the bank fallback fired, for the log line below. ``None``
+        # once the inventory path has taken the delivery.
+        reason = "fish id (bank-only by design)" if not inventory_eligible else None
+        if inventory_eligible:
+            if (len(blocks[1]) != 1
+                    or any(len(b) != RAM_INVENTORY_MAX_SIZE for b in blocks[2:5])):
+                return None  # short read — retry next tick
+            if not _inventory_is_live(blocks[1][0]):
+                # The 0x0013D4xx block is not the player's inventory right
+                # now (no save loaded yet, or a torn read): its ids are
+                # meaningless, so "no free slot" would be an artefact.
+                # Defer rather than bank — banking is irreversible once
+                # the counter advances.
+                return None
             bound = _inventory_scan_bound(blocks[1][0], ctx)
             ids = blocks[2]
             counts = blocks[3]
+            order_keys = blocks[4]
             # First matching slot wins — mirrors getItemCount/giveItem.
             held = next(
                 (i for i in range(bound) if ids[i] == item_id), None,
             )
             if held is not None:
                 if counts[held] < RAM_INVENTORY_STACK_CAP:
+                    # Existing stack already owns an order key — only
+                    # the quantity byte moves.
                     return [(
                         RAM_INVENTORY_QUANTITIES_BASE + held,
                         [counts[held] + 1],
                         DOMAIN_MAIN_RAM,
                     )]
                 # Full stack: vanilla keeps one stack per id — bank.
+                reason = f"slot {held} already holds a full stack of 99"
             else:
                 free = next(
                     (i for i in range(bound)
@@ -816,14 +907,22 @@ def _make_item_deliverer(dw_code: int) -> ItemDeliverer:
                     None,
                 )
                 if free is not None:
-                    return [
-                        (RAM_INVENTORY_ITEM_IDS_BASE + free, [item_id],
-                         DOMAIN_MAIN_RAM),
-                        (RAM_INVENTORY_QUANTITIES_BASE + free, [1],
-                         DOMAIN_MAIN_RAM),
-                    ]
-        # Bank fallback: fish ids, full stack, no free slot, or a
-        # short inventory read.
+                    return _place_in_free_slot(
+                        free, item_id, order_keys, bound,
+                    )
+                reason = (
+                    f"no empty slot in the first {bound} "
+                    f"(ids {bytes(ids[:bound]).hex()})"
+                )
+        # Bank fallback: fish ids, a full stack, or a genuinely full
+        # inventory — never a bad read (those deferred above). Logged
+        # because "it went to the bank" is otherwise indistinguishable
+        # from these three causes when a player reports it
+        # (2026-08-29 playtest).
+        logger.info(
+            "DW1 item %d delivered to the bank instead of the inventory: %s",
+            item_id, reason,
+        )
         bank_qty = blocks[0][0]
         new_qty = min(_BANK_QUANTITY_CAP, bank_qty + 1)
         if new_qty == bank_qty:
@@ -852,6 +951,17 @@ def _make_progressive_bundle_deliverer() -> ItemDeliverer:
         return []
 
     return deliver
+
+
+# Bits granted per ``/bits`` console command (see
+# :meth:`DigimonWorldClient._grant_pending_bits`). Testing aid, not tied
+# to any option: with `region_locking: all` and a starting region other
+# than Native Forest, a seed can put the player somewhere whose only exit
+# is a Birdramon-Messenger flight they cannot afford — the fares went back
+# to vanilla 2026-08-29 because a fare of 0 deadlocks the destination menu
+# (see ``ROM_BIRDRA_FLIGHT_PRICE_OFFSETS`` in ``data.addresses``). Until
+# the two-instruction free-flight patch ships, this is the unblock.
+DEBUG_BITS_GRANT_AMOUNT: int = 5000
 
 
 def _make_money_deliverer(amount: int) -> ItemDeliverer:
@@ -1080,7 +1190,6 @@ _NOTIFY_NARROW_6 = frozenset("fj")
 _NOTIFY_NARROW_4 = frozenset("il ")
 _NOTIFY_PUNCT_5 = frozenset("!',.:;")
 NOTIFY_PEN_LIMIT = 244
-NOTIFY_MAX_PENDING = 6
 
 
 def notification_width(text: str) -> int:
@@ -1116,51 +1225,53 @@ def sanitize_notification(text: str) -> str:
     return cleaned
 
 
-def _with_player(text: str, ctx: Any, slot: int | None, preposition: str) -> str:
-    """``text`` + " <preposition> <player name>" when the slot's name is known and the longer
-    message still fits the banner untouched; otherwise ``text`` as is (the other player's name is
-    the part worth dropping, never the item)."""
+def _with_player(text: str, ctx: Any, slot: int | None, preposition: str) -> list[str]:
+    """Banner message(s) for ``text`` attributed to the player in ``slot``.
+
+    One combined message ("<text> <preposition> <name>") when it fits the
+    banner untouched; otherwise TWO messages — ``text`` and then
+    "<preposition> <name>" on its own banner — so the sender/receiver is
+    always shown (2026-09-01 playtest: long item names dropped the
+    "from X" half almost every time). Unknown slot/name → just ``text``.
+    """
 
     if slot is None:
-        return text
+        return [text]
     names = getattr(ctx, "player_names", None) or {}
     name = names.get(slot) if isinstance(names, dict) else None
     if not name:
-        return text
+        return [text]
     longer = f"{text} {preposition} {name}"
-    return longer if sanitize_notification(longer) == longer else text
+    if sanitize_notification(longer) == longer:
+        return [longer]
+    return [text, f"{preposition} {name}"]
 
 
 class NotificationQueue:
-    """Messages waiting for the in-game banner: one at a time, bounded, overflow summarised."""
+    """Messages waiting for the in-game banner: one at a time, unbounded.
+
+    Unbounded on purpose (user decision 2026-09-01): every message shows,
+    however long the queue gets — the earlier overflow collapse into
+    "...and N more" was retired together with the 5 s banner (at ~1 s per
+    banner even a large burst drains quickly).
+    """
 
     def __init__(self) -> None:
         self._pending: deque[str] = deque()
-        self._overflow = 0
 
     def push(self, text: str) -> None:
         text = sanitize_notification(text)
-        if not text:
-            return
-        if len(self._pending) >= NOTIFY_MAX_PENDING:
-            self._overflow += 1
-        else:
+        if text:
             self._pending.append(text)
 
     def pop(self) -> str | None:
-        if self._pending:
-            return self._pending.popleft()
-        if self._overflow:
-            count, self._overflow = self._overflow, 0
-            return sanitize_notification(f"...and {count} more")
-        return None
+        return self._pending.popleft() if self._pending else None
 
     def clear(self) -> None:
         self._pending.clear()
-        self._overflow = 0
 
     def __len__(self) -> int:
-        return len(self._pending) + (1 if self._overflow else 0)
+        return len(self._pending)
 
 
 class DigimonWorldClient:
@@ -1206,7 +1317,8 @@ class DigimonWorldClient:
             return
         lookup = getattr(ctx.item_names, "lookup_in_slot", None)
         name = lookup(item.item, receiving) if lookup is not None else ctx.item_names.lookup_in_game(item.item)
-        self._notifications.push(_with_player(f"Sent: {name}", ctx, receiving, "to"))
+        for message in _with_player(f"Sent: {name}", ctx, receiving, "to"):
+            self._notifications.push(message)
 
     def __init__(self) -> None:
         # Cache for AP-side lookups; populated lazily on first watcher
@@ -1230,6 +1342,8 @@ class DigimonWorldClient:
         # Last verdict of :meth:`_game_alive` (None = never checked); the
         # watcher touches nothing until the SLUS + its boot tables are resident.
         self._game_alive_state: bool | None = None
+        # Last verdict of :meth:`_game_entered` (None = never checked).
+        self._game_entered_state: bool | None = None
         self._easy_monochromon: bool | None = None
         # Stat-gain multiplier (1..10). 1 = vanilla rate, no enforcer
         # writes. Driven by slot_data.
@@ -1241,6 +1355,7 @@ class DigimonWorldClient:
         # Great Canyon bridge: same shape as the Tropical Jungle bridge
         # toggle, controlling :data:`RAM_GREAT_CANYON_BRIDGE_UNLOCKED`.
         self._great_canyon_always_open: bool | None = None
+        self._factorial_gate_always_open: bool | None = None
         # God Mode: when True, partner stats are pinned to near-max each
         # tick. Testing-only.
         self._god_mode: bool | None = None
@@ -1253,6 +1368,13 @@ class DigimonWorldClient:
         # option shipped them (slot_data); until it lands nothing is queued.
         self._in_game_notifications: bool | None = None
         self._notifications = NotificationQueue()
+        # Highest items_received index a "Got:" banner has been queued
+        # for this client session. Deliveries with a lower index are
+        # RE-deliveries (the in-RAM counter rolled back: a game reboot
+        # to the title screen, or loading an older save) — the items
+        # land again by design, but the banners must not (2026-08-31
+        # playtest: every reboot replayed the whole history).
+        self._notified_through: int = 0
         # Goal selection from the user's yaml. 0 = machinedramon (fires
         # when DW1's post-Machinedramon ``setTrigger 50`` flips), 1 =
         # prosperity (fires when in-game prosperity meets the
@@ -1391,6 +1513,12 @@ class DigimonWorldClient:
             self._great_canyon_always_open = (
                 int(ctx.slot_data.get("great_canyon_unlock", 0)) == 0
             )
+        if self._factorial_gate_always_open is None and ctx.slot_data is not None:
+            # FactorialGateUnlock: 0 = always_open. Pre-feature seeds
+            # (key absent) default to vanilla (1) — no pin.
+            self._factorial_gate_always_open = (
+                int(ctx.slot_data.get("factorial_gate", 1)) == 0
+            )
         if self._god_mode is None and ctx.slot_data is not None:
             self._god_mode = bool(ctx.slot_data.get("god_mode", 0))
         if self._infinite_auto_pilot is None and ctx.slot_data is not None:
@@ -1420,6 +1548,11 @@ class DigimonWorldClient:
             # that hung at boot) leaves RAM as whatever the emulator
             # initialised it to, and polling that sent 172 phantom checks.
             if not await self._game_alive(ctx):
+                return
+            # Second gate: the game runs at the title screen too, over a
+            # save block full of new-game defaults. Deliver nothing until
+            # a save is actually loaded (see :meth:`_game_entered`).
+            if not await self._game_entered(ctx):
                 return
             # Run the arena enforcer FIRST -- it snapshots/restores
             # recruit-block bytes and toggles the
@@ -1456,8 +1589,11 @@ class DigimonWorldClient:
                 await self._enforce_bridge_always_open(ctx)
             if self._great_canyon_always_open:
                 await self._enforce_great_canyon_always_open(ctx)
+            if self._factorial_gate_always_open:
+                await self._enforce_factorial_gate_always_open(ctx)
             if self._god_mode:
                 await self._enforce_god_mode(ctx)
+            await self._grant_pending_bits(ctx)
             await self._check_goal(ctx)
             await self._push_notifications(ctx)
         except bizhawk.RequestFailedError:
@@ -1465,16 +1601,30 @@ class DigimonWorldClient:
             # let the BizHawk framework reconnect on the next tick.
             return
 
-    def _notify_received(self, ctx: DigimonWorldClientContext, item: Any, item_name: str) -> None:
-        """Queue a "Got: <item>" banner (with the sender when it fits) for a delivered item."""
+    def _notify_received(self, ctx: DigimonWorldClientContext, item: Any, item_name: str,
+                         index: int) -> None:
+        """Queue a "Got: <item>" banner (with the sender when it fits) for a delivered item.
 
+        ``index`` is the item's position in ``ctx.items_received``. Each
+        index is announced at most once per client session: a rolled-back
+        in-RAM counter (game reboot, older-save load) makes
+        :meth:`_deliver_items` re-deliver the items, and those replays
+        must stay silent.
+        """
+
+        if index < self._notified_through:
+            return
+        self._notified_through = index + 1
         if not self._in_game_notifications:
             return
         text = f"Got: {item_name}"
         sender = getattr(item, "player", None)
-        if sender is not None and sender != ctx.slot:
-            text = _with_player(text, ctx, sender, "from")
-        self._notifications.push(text)
+        messages = (
+            _with_player(text, ctx, sender, "from")
+            if sender is not None and sender != ctx.slot else [text]
+        )
+        for message in messages:
+            self._notifications.push(message)
 
     async def _push_notifications(self, ctx: DigimonWorldClientContext) -> None:
         """Hand the next queued message to the mailbox once the banner is idle (flag 0).
@@ -2210,6 +2360,45 @@ class DigimonWorldClient:
                                "logo, report it: the patch is broken, not your save.")
         return alive
 
+    async def _game_entered(self, ctx: DigimonWorldClientContext) -> bool:
+        """True once a save is loaded and the player is actually in the game.
+
+        :meth:`_game_alive` passes on the TITLE SCREEN: boot init fills the
+        save-block region with new-game defaults (including a valid-looking
+        inventory) and the items counter reads no magic, so without this
+        gate every reboot re-delivered the whole item history into pre-save
+        RAM (2026-08-31 playtest: "sent to bank" log lines at the title,
+        replayed banners after loading). Predicate — both u32s nonzero:
+
+        * :data:`RAM_GAME_ENTERED_FLAG` (``MAIN_D_80134EB0``) — the only
+          global the quit-to-title path reliably re-zeroes;
+        * :data:`RAM_TAMER_ENTITY_PTR` (``ENTITY_TABLE[0]``) — installed
+          strictly after the main menu returns, covering the CONTINUE
+          slot-pick microwindow where the save is already in RAM.
+
+        Verified FALSE at title/menu and TRUE across 14 in-game states
+        including battles and the NEW-game opening cutscene (fresh
+        multiworld slots must deliver) — ``work/dw1_re/decomp/client_gates``.
+        """
+
+        try:
+            entered_flag, tamer_ptr = await bizhawk.read(ctx.bizhawk_ctx, [
+                (RAM_GAME_ENTERED_FLAG, 4, DOMAIN_MAIN_RAM),
+                (RAM_TAMER_ENTITY_PTR, 4, DOMAIN_MAIN_RAM),
+            ])
+        except bizhawk.RequestFailedError:
+            return False
+        entered = (len(entered_flag) == 4 and len(tamer_ptr) == 4
+                   and entered_flag != b"\x00\x00\x00\x00"
+                   and tamer_ptr != b"\x00\x00\x00\x00")
+        if entered != self._game_entered_state:
+            self._game_entered_state = entered
+            if entered:
+                logger.info("Save loaded; delivering.")
+            else:
+                logger.info("Waiting at the title screen — nothing is delivered until a save is loaded.")
+        return entered
+
     async def _enforce_fast_drimogemon(self, ctx: DigimonWorldClientContext) -> None:
         """Collapse Drimogemon's 10-day dig wait to "already dug" state.
 
@@ -2301,6 +2490,30 @@ class DigimonWorldClient:
         """
 
         byte_addr, bit_index = RAM_GREAT_CANYON_BRIDGE_UNLOCKED
+        bit_mask = 1 << bit_index
+        current = (await bizhawk.read(
+            ctx.bizhawk_ctx, [(byte_addr, 1, DOMAIN_MAIN_RAM)],
+        ))[0]
+        if not current:
+            return
+        if current[0] & bit_mask:
+            return  # already set
+        await bizhawk.write(
+            ctx.bizhawk_ctx,
+            [(byte_addr, [current[0] | bit_mask], DOMAIN_MAIN_RAM)],
+        )
+
+    async def _enforce_factorial_gate_always_open(self, ctx: DigimonWorldClientContext) -> None:
+        """Pin the Andromon iron-door trigger bit (FactorialGateUnlock
+        ``always_open``).
+
+        Same shape as :meth:`_enforce_great_canyon_always_open`: bit-OR
+        into :data:`RAM_FACTORIAL_GATE_OPEN` (trigger 328). The quest-side
+        neuter the patcher emits in every non-vanilla mode keeps this pin
+        from sequence-breaking Andromon's recruit chain.
+        """
+
+        byte_addr, bit_index = RAM_FACTORIAL_GATE_OPEN
         bit_mask = 1 << bit_index
         current = (await bizhawk.read(
             ctx.bizhawk_ctx, [(byte_addr, 1, DOMAIN_MAIN_RAM)],
@@ -2559,6 +2772,43 @@ class DigimonWorldClient:
             ))
         await bizhawk.write(ctx.bizhawk_ctx, writes)
 
+    async def _grant_pending_bits(self, ctx: DigimonWorldClientContext) -> None:
+        """Apply the bits queued by the ``/bits`` console command.
+
+        Each queued grant adds :data:`DEBUG_BITS_GRANT_AMOUNT` to the
+        bits counter, capped at :data:`_MONEY_CAP`. Grants queued while
+        the game is not running simply wait — the watcher only reaches
+        this method once :meth:`_game_alive` passes.
+
+        The queue is drained in one write so repeated ``/bits`` between
+        two ticks all land. It is decremented only after the write is
+        accepted, so a dropped transport call retries next tick rather
+        than losing the grant. Reaching the cap still drains the queue
+        (there is nothing left to grant).
+        """
+
+        pending = ctx.pending_bit_grants
+        if not pending:
+            return
+        current = (await bizhawk.read(
+            ctx.bizhawk_ctx, [(RAM_CURRENT_BITS, 4, DOMAIN_MAIN_RAM)],
+        ))[0]
+        if len(current) != 4:
+            return  # transient read failure — keep the queue, retry
+        current_value = int.from_bytes(current, "little")
+        new_value = min(_MONEY_CAP, current_value + DEBUG_BITS_GRANT_AMOUNT * pending)
+        if new_value != current_value:
+            await bizhawk.write(ctx.bizhawk_ctx, [(
+                RAM_CURRENT_BITS,
+                list(new_value.to_bytes(4, "little")),
+                DOMAIN_MAIN_RAM,
+            )])
+        ctx.pending_bit_grants -= pending
+        logger.info(
+            "Granted %d bits (%d -> %d).",
+            new_value - current_value, current_value, new_value,
+        )
+
     async def _reconcile_auto_pilot(self, ctx: DigimonWorldClientContext) -> None:
         """Infinite Auto Pilot QoL (slot_data ``infinite_auto_pilot``).
 
@@ -2570,9 +2820,10 @@ class DigimonWorldClient:
           extras, never add a second copy). A held copy with count 0
           is defensively topped back to 1 in place.
         * Absent and a free slot exists within the scan bound
-          (:func:`_inventory_scan_bound`) → write id 22 / count 1
-          there. A used-up Auto Pilot therefore reappears on the next
-          watcher tick.
+          (:func:`_inventory_scan_bound`) → write id 22 / count 1 /
+          a fresh order-obtained key there (:func:`_place_in_free_slot`).
+          A used-up Auto Pilot therefore reappears on the next watcher
+          tick.
         * Absent and no free slot → skip this tick and retry on the
           next one; the top-up waits for a free slot rather than
           displacing an item (documented in the option's YAML text).
@@ -2585,15 +2836,18 @@ class DigimonWorldClient:
             (RAM_INVENTORY_SIZE, 1, DOMAIN_MAIN_RAM),
             (RAM_INVENTORY_ITEM_IDS_BASE, RAM_INVENTORY_MAX_SIZE, DOMAIN_MAIN_RAM),
             (RAM_INVENTORY_QUANTITIES_BASE, RAM_INVENTORY_MAX_SIZE, DOMAIN_MAIN_RAM),
+            (RAM_INVENTORY_ORDER_KEYS_BASE, RAM_INVENTORY_MAX_SIZE, DOMAIN_MAIN_RAM),
         ])
-        if (len(blocks) != 3
+        if (len(blocks) != 4
                 or len(blocks[0]) != 1
-                or len(blocks[1]) != RAM_INVENTORY_MAX_SIZE
-                or len(blocks[2]) != RAM_INVENTORY_MAX_SIZE):
+                or any(len(b) != RAM_INVENTORY_MAX_SIZE for b in blocks[1:4])):
             return
+        if not _inventory_is_live(blocks[0][0]):
+            return  # not the player's inventory this tick — try the next
         bound = _inventory_scan_bound(blocks[0][0], ctx)
         ids = blocks[1]
         counts = blocks[2]
+        order_keys = blocks[3]
         held = next(
             (i for i in range(bound) if ids[i] == AUTO_PILOT_ITEM_ID), None,
         )
@@ -2611,11 +2865,9 @@ class DigimonWorldClient:
         )
         if free is None:
             return  # inventory full — wait for a free slot
-        await bizhawk.write(ctx.bizhawk_ctx, [
-            (RAM_INVENTORY_ITEM_IDS_BASE + free, [AUTO_PILOT_ITEM_ID],
-             DOMAIN_MAIN_RAM),
-            (RAM_INVENTORY_QUANTITIES_BASE + free, [1], DOMAIN_MAIN_RAM),
-        ])
+        await bizhawk.write(ctx.bizhawk_ctx, _place_in_free_slot(
+            free, AUTO_PILOT_ITEM_ID, order_keys, bound,
+        ))
 
     async def _check_locations(self, ctx: DigimonWorldClientContext) -> None:
         """Poll per-location RAM signals and send LocationChecks for new ones.
@@ -2842,7 +3094,9 @@ class DigimonWorldClient:
         3. Otherwise, look up the route for the next pending item, run
            the deliverer (which reads RAM and computes the write list),
            append the counter increment, and submit a single
-           :func:`bizhawk.write` for both writes atomically.
+           :func:`bizhawk.write` for both writes atomically. A deliverer
+           that returns ``None`` has *deferred* — nothing is written and
+           the counter stays put, so the item is retried next tick.
 
         Atomicity matters: if we wrote the item bytes but not the
         counter, a crash or disconnect between the two writes would
@@ -2949,9 +3203,14 @@ class DigimonWorldClient:
             return
 
         write_list = await deliverer(ctx)
+        if write_list is None:
+            # Deferred: the deliverer could not read the game state it
+            # needs. Leave the counter alone so this same item is retried
+            # next tick rather than applied to whatever was in RAM.
+            return
         write_list.extend(counter_advance)
         await bizhawk.write(ctx.bizhawk_ctx, write_list)
-        self._notify_received(ctx, next_item, item_name)
+        self._notify_received(ctx, next_item, item_name, applied)
 
     async def _check_goal(self, ctx: DigimonWorldClientContext) -> None:
         """Fire ``StatusUpdate(GoalComplete)`` for the configured goal.

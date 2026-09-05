@@ -307,10 +307,43 @@ class TestSubstitutionPlanner(unittest.TestCase):
     def test_story_mode_swaps_bosses_but_keeps_stats(self) -> None:
         substitutions, _ = enemies.plan_substitutions(Random(2), include_story=True, same_level=False)
         self.assertIn((1, 152), substitutions)
-        self.assertIn((225, 115), substitutions)
+        # (225, 115) — the old example here — is now script-placed-excluded
+        # (MGEN99 script-places the final boss); (2, 164) is a story group
+        # that remains substitutable.
+        self.assertIn((2, 164), substitutions)
         # stats live in stat_overrides only; substitution never writes them
         plan = enemies.EnemyPlan({}, substitutions, {}, {}, {}, {})
         self.assertEqual(plan.stat_overrides, {})
+
+    def test_script_placed_groups_are_never_substituted(self) -> None:
+        # 2026-08-31 playtest + story-swap audit: these screens' scripts
+        # place the fight entity themselves (loadDigimon/setDigimon in the
+        # script, not MAPHEAD), so a substituted record leaves the script
+        # operand stale, the placement is refused and the cutscene stalls
+        # against an absent entity — Leomon, the OGRE11 post-battle Whamon
+        # scene (setTrigger 224 unreachable) and WaruMonzaemon were hit live.
+        for pair in ((76, 151), (76, 166), (143, 112), (142, 154), (151, 70)):
+            self.assertIn(pair, enemies.SCRIPT_PLACED_GROUPS)
+        for seed in range(5):
+            for include_story in (False, True):
+                substitutions, _final = enemies.plan_substitutions(
+                    Random(seed), include_story=include_story, same_level=False,
+                )
+                hit = set(substitutions) & enemies.SCRIPT_PLACED_GROUPS
+                self.assertFalse(hit, (seed, include_story, hit))
+
+    def test_story_mode_retains_value_after_the_exclusion(self) -> None:
+        # The audit found 47 of 60 story groups clean — the option must
+        # still substitute a healthy majority of them.
+        substitutions, _ = enemies.plan_substitutions(Random(2), include_story=True, same_level=False)
+        story = [
+            (m, sp) for (m, sp) in substitutions
+            if enemies.CLASS_STORY in {
+                enemies.classify_record(r)
+                for r in enemies.RECORDS_BY_MAP[m] if r.type == sp
+            }
+        ]
+        self.assertGreaterEqual(len(story), 40)
 
     def test_vanilla_mode_gives_swapped_species_power_equivalent_moves(self) -> None:
         _, final = enemies.plan_substitutions(Random(3), include_story=False, same_level=True)

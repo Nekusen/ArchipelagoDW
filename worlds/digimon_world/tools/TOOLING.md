@@ -118,6 +118,43 @@ decompiled C — prepend its bin to PATH so gcc finds `as`).
   - MAPHEAD.SCN is boot-resident at 0x1B1D30: poke `0x1B1D30 + file offset` BEFORE the screen
     loads (hub-derived states restore the boot copy). Rotation: `_atan(dz, dx)`, +z = 2048.
 
+- **Lab facts from the 2026-08-30 → 09-01 missions** (free flights, client gates,
+  factorial gate):
+  - **Pin `pcsx.json` `pads[*].PadType = 2` (Keyboard) — never 0 (Auto).** Auto merges any
+    host controller into emulated pad 1; a drifting device held phantom UP+LEFT for two whole
+    missions and fabricated "game bugs" (a fake arrival soft-lock, an immobile pocket, a
+    warp bounce loop) plus Mr.-Warp cursor drift that got `dw1_warp_state.py` wrongly blamed.
+    Preflight every session: sample `POLLED_INPUT` 0x134EE4 a few times — a constant nonzero
+    read (especially a high nibble) means phantom pad; stop everything and fix the config
+    first. Enum: 0 = Auto, 1 = Controller, 2 = Keyboard. The workbench `pcsx.json` is pinned.
+  - Pad driving: `pad().setOverride(...)`/`clearOverride(...)` are **dot-called** with the
+    button as first arg (the colon form throws). On the title menu keep taps <= 0.1 s —
+    auto-repeat kicks in at ~5 frames and DOWN+CROSS lands on the DELETE GAME row.
+  - **DG.SCN slot 0 is a DEAD byte-identical copy of MAPHEAD.SCN**: `getScript(0)` always
+    returns the boot-resident copy, so a "script 0" .bin offset in 0x13FD5DB8..0x13FDD528
+    does nothing at runtime. Disc patches target MAPHEAD.SCN's own footprint (LBA 142982,
+    file offset == VM offset); live pokes go to 0x1B1D30 + vm. MAPHEAD also carries
+    engine-only section ids >= 255 (1245 = Auto Pilot City-Top ladder, 1246 partner-death,
+    1250-1253), reachable only via `callScriptSection`; the running section id is stored
+    u8-truncated at 0x134FE4.
+  - Robust position read: `STORED_TAMER_POS` 0x138720 — the 0x15576C entity chain goes NULL
+    during transitions (bites `dw1_gate_fix_live.py player_pos`). Robust scripted crossing:
+    poke the runtime MAP_WARPS tables (0x138780/0x138794) and plant collision cell 110
+    under the pair. Savestates taken < 30 s after a warp can freeze the walk-in mid-flight —
+    gate saves on position stability plus a pad probe.
+  - Repeated full-RAM REST dumps plus savestate/pause churn kill the emulator silently (the
+    known 2026-08-28 class); use region dumps (`work\dw1_re\cg_regdump.lua` pattern) for
+    state comparisons.
+  - Forged `callScriptSection` calls sometimes initialize the VM but never tick — reload the
+    state and retry. An invalid context (script needing a live map, forged from the naming
+    screen) can leave the CPU in the BIOS: reboot the emulator, don't trust the session. When
+    an in-situ call hijacks a gp-relative global, stop on an Exec breakpoint at the park loop
+    and restore the global immediately — a wall-clock sleep lets the live screen's own code
+    scribble through the hijacked pointer.
+  - Net-1 upgrade: `work\dw1_re\decomp\free_flight\r3000.py` is a reusable MIPS-I
+    interpreter that replays the actual SLUS instruction words with stubbed callees — the
+    cheapest way to make net 1 validate *bytes* rather than a hand model.
+
 - **User-driven (live) sessions, rules from three crashes on 2026-08-28**: no per-frame Lua
   listeners (`dw1_redux_input.lua`) while the user plays, no REST data GETs (`/cpu/ram/raw`,
   `/gpu/vram/raw`), and wrap `PCSX.createSaveState()` in `pauseEmulator()`/`resumeEmulator()`.

@@ -161,8 +161,9 @@ These come from [docs/style.md](docs/style.md) and the ruff config and override 
   PATCH_PROCESS nets and disc-boot byte-verified, and committed on
   `digimon-world-ps1`:
     - Physical **region-gate** enforcement for `region_locking` (walk-on
-      loop-back wrapper + 12 script-class gates + Birdramon-flight gating;
-      flight fares zeroed as QoL).
+      loop-back wrapper + 12 script-class gates + Birdramon-flight gating).
+      The fare-zeroing QoL shipped with it was **retired 2026-08-29** — a
+      fare of 0 deadlocks the destination menu; see STATUS.md §2.5.
     - **ITEM_PARA relocation** to a contiguous 256-slot table on
       heap-claimed RAM (ext ceiling 173 → 255; merit teleports retired).
     - **Shopsanity** — per-shop off/coexist/replace for all four shops
@@ -238,6 +239,24 @@ These come from [docs/style.md](docs/style.md) and the ruff config and override 
   **partner's** auto-battle AI, not the enemy AI. Remaining technique
   objective = `BTL_calculateDamage` decomp + `.MMD` census + species-list
   shuffle.
+- **2026-08-30 → 09-01** — the first playtest (three sittings) and its
+  corrective batches, all lab-validated through the three nets (NOTES under
+  `work/dw1_re/decomp/{free_flight,story_swap_audit,client_gates,
+  factorial_gate}/`): **free flights redone as three code rewrites with the
+  fares left vanilla** (a fare of 0 deadlocks the destination menu — never
+  zero the fare table); `wild`/`wild_and_story` **exclude the 23
+  script-placed groups** (`SCRIPT_PLACED_GROUPS`: those screens' scripts
+  spawn the fight entity themselves — substituting only record + MAPHEAD
+  stalls the cutscene); **DG.SCN slot 0 is a dead copy of MAPHEAD.SCN**
+  (script-0 patches must hit MAPHEAD's footprint — the Auto Pilot City-Top
+  fix wired ~20 live twins); the client gained `_game_entered` (nothing is
+  delivered at the title screen), the **delivery defer contract** (`None` =
+  counter untouched, retried) + `_inventory_is_live`, the third inventory
+  array (order keys) and a `/bits` test command; new **`factorial_gate`**
+  option (always_open/vanilla/shuffled, item "Factorial Town Gate" 5003,
+  five-site neuter whenever ≠ vanilla); notification queue unbounded, the
+  player half as its own banner, duration 150 → 30 ticks (~1 s). Suite
+  1223 / 81 options. Full detail: STATUS.md §1.1.
 - **2026-08-28**: jype0's byte-matching `dw_decomp` adopted as the reading
   source for game code (see References); its symbols, structs and typed
   globals are in the Ghidra project. Audits against it found no model

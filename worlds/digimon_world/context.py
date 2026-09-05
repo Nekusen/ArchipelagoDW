@@ -67,6 +67,24 @@ class DigimonWorldCommandProcessor(ClientCommandProcessor):
             return
         ap_logger.info(f"Emulator: connected via {ctx.emu.name}")
 
+    def _cmd_bits(self) -> None:
+        """Grant yourself bits (testing aid). Repeat for more."""
+
+        from .client import DEBUG_BITS_GRANT_AMOUNT
+
+        ctx = self.ctx
+        assert isinstance(ctx, DigimonWorldClientContext)
+        # Commands run on the console/GUI thread, which owns neither the
+        # event loop nor the emulator transport. Queue the grant and let
+        # the game watcher apply it on its next tick, like every other
+        # RAM write in this client.
+        ctx.pending_bit_grants += 1
+        ap_logger.info(
+            f"Queued {DEBUG_BITS_GRANT_AMOUNT} bits "
+            f"({ctx.pending_bit_grants} pending); "
+            f"applied on the next watcher tick with the game running.",
+        )
+
 
 class DigimonWorldClientContext(CommonContext):
     """:class:`CommonContext` specialised for DW1.
@@ -98,6 +116,10 @@ class DigimonWorldClientContext(CommonContext):
     client_handler: Any | None
     # Wired through to the watcher loop.
     watcher_timeout: float
+    # Number of ``/bits`` grants the console has queued and the watcher
+    # has not applied yet. Owned by the command processor (producer) and
+    # ``DigimonWorldClient._grant_pending_bits`` (consumer).
+    pending_bit_grants: int
 
     def __init__(
         self,
@@ -117,6 +139,7 @@ class DigimonWorldClientContext(CommonContext):
         self.rom_hash = None
         self.client_handler = None
         self.watcher_timeout = WATCHER_TIMEOUT
+        self.pending_bit_grants = 0
 
     def make_gui(self):
         ui = super().make_gui()

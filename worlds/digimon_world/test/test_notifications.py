@@ -208,15 +208,16 @@ class TestSanitizer(unittest.TestCase):
 
 
 class TestQueue(unittest.TestCase):
-    def test_bounded_with_overflow_summary(self) -> None:
+    def test_unbounded_every_message_shows(self) -> None:
+        # User decision 2026-09-01: no overflow collapse — every message
+        # queues and shows, however long the burst (at ~1 s per banner).
         queue = NotificationQueue()
-        for i in range(10):
+        for i in range(40):
             queue.push(f"Got: item {i}")
-        self.assertEqual(len(queue), 7)                                   # 6 pending + the summary
-        popped = [queue.pop() for _ in range(8)]
-        self.assertEqual(popped[:6], [f"Got: item {i}" for i in range(6)])
-        self.assertEqual(popped[6], "...and 4 more")
-        self.assertIsNone(popped[7])
+        self.assertEqual(len(queue), 40)
+        popped = [queue.pop() for _ in range(41)]
+        self.assertEqual(popped[:40], [f"Got: item {i}" for i in range(40)])
+        self.assertIsNone(popped[40])
         queue.push("")
         self.assertEqual(len(queue), 0)
 
@@ -254,6 +255,36 @@ class TestClientContract(unittest.TestCase):
                 self.assertEqual(seen, [])
                 self.assertEqual(len(client._notifications), 1)
 
+    def test_redelivery_stays_silent(self) -> None:
+        # A game reboot (title screen) or an older-save load rolls the
+        # in-RAM items counter back, so _deliver_items re-delivers the
+        # whole tail. The items must land again; the banners must not
+        # (2026-08-31 playtest: every reboot replayed the history).
+        client = self._client()
+        ctx = _Ctx()
+        client._notify_received(ctx, _Item(10, 1), "Meat", 0)
+        client._notify_received(ctx, _Item(11, 1), "Omnipotent", 1)
+        self.assertEqual(len(client._notifications), 2)
+        client._notifications.pop()
+        client._notifications.pop()
+        # Counter rollback: indices 0 and 1 delivered again.
+        client._notify_received(ctx, _Item(10, 1), "Meat", 0)
+        client._notify_received(ctx, _Item(11, 1), "Omnipotent", 1)
+        self.assertEqual(len(client._notifications), 0)
+        # A genuinely new item still announces.
+        client._notify_received(ctx, _Item(12, 1), "Meat", 2)
+        self.assertEqual(client._notifications.pop(), "Got: Meat")
+
+    def test_mark_advances_even_with_notifications_off(self) -> None:
+        # The high-water mark tracks deliveries, not banners: if the
+        # option turns out disabled, replays after a later reconnect
+        # must still know these indices were seen.
+        client = DigimonWorldClient()
+        client._in_game_notifications = False
+        client._notify_received(_Ctx(), _Item(10, 1), "Meat", 0)
+        self.assertEqual(client._notified_through, 1)
+        self.assertEqual(len(client._notifications), 0)
+
     def test_disabled_client_never_touches_ram(self) -> None:
         client = DigimonWorldClient()
         self.assertIsNone(client._in_game_notifications)
@@ -271,18 +302,54 @@ class TestClientContract(unittest.TestCase):
     def test_received_and_sent_messages(self) -> None:
         client = self._client()
         ctx = _Ctx()
-        client._notify_received(ctx, _Item(10, 2), "Meat")
+        client._notify_received(ctx, _Item(10, 2), "Meat", 0)
         self.assertEqual(client._notifications.pop(), "Got: Meat from Link")
-        client._notify_received(ctx, _Item(10, 1), "Meat")
+        client._notify_received(ctx, _Item(10, 1), "Meat", 1)
         self.assertEqual(client._notifications.pop(), "Got: Meat")
         client.on_package(ctx, "PrintJSON", {"type": "ItemSend", "item": _Item(20, 1), "receiving": 2})  # type: ignore[arg-type]
         self.assertEqual(client._notifications.pop(), "Sent: Master Sword to Link")
         # The receiver's name is dropped, never the item, when the message would not fit the banner.
         client.on_package(ctx, "PrintJSON", {"type": "ItemSend", "item": _Item(21, 1), "receiving": 2})  # type: ignore[arg-type]
+        # Too long for one banner: the receiver now gets a follow-up
+        # banner instead of being dropped (2026-09-01).
         self.assertEqual(client._notifications.pop(), "Sent: Ultimate Digivolver")
+        self.assertEqual(client._notifications.pop(), "to Link")
         client.on_package(ctx, "PrintJSON", {"type": "ItemSend", "item": _Item(10, 2), "receiving": 1})  # type: ignore[arg-type]
         client.on_package(ctx, "PrintJSON", {"type": "Hint", "item": _Item(20, 1), "receiving": 2})  # type: ignore[arg-type]
         self.assertIsNone(client._notifications.pop())
+
+
+class TestGameEnteredGuard(unittest.TestCase):
+    """Second watcher gate (2026-08-31): _game_alive passes at the TITLE
+    SCREEN (boot init fills the save block with new-game defaults), so the
+    client re-delivered the whole item history into pre-save RAM on every
+    reboot. Nothing is delivered until a save is actually loaded."""
+
+    def test_verdicts(self) -> None:
+        from ..client import DigimonWorldClient
+        from ..data.addresses import RAM_GAME_ENTERED_FLAG, RAM_TAMER_ENTITY_PTR
+
+        zero = b"\x00\x00\x00\x00"
+        flag_on = b"\x01\x00\x00\x00"
+        tamer_on = b"\x6c\x57\x15\x80"   # observed ENTITY_TABLE[0] value
+        cases = [
+            ((zero, zero), False),        # cold title
+            ((flag_on, zero), False),     # CONTINUE slot-pick microwindow
+            ((zero, tamer_on), False),    # post-credits stale entity slot
+            ((flag_on, tamer_on), True),  # in game
+            ((b"\x01", tamer_on), False),  # short read
+        ]
+        for (flag, tamer), expected in cases:
+            client = DigimonWorldClient()
+
+            async def fake_read(_ctx: Any, requests: list[Any],
+                                _flag: bytes = flag, _tamer: bytes = tamer) -> list[bytes]:
+                assert [r[0] for r in requests] == [RAM_GAME_ENTERED_FLAG, RAM_TAMER_ENTITY_PTR]
+                return [_flag, _tamer]
+
+            with mock.patch.object(client_module.bizhawk, "read", fake_read):
+                verdict = _run(client._game_entered(_Ctx()))
+            self.assertIs(verdict, expected, (flag, tamer))
 
 
 class TestGameAliveGuard(unittest.TestCase):

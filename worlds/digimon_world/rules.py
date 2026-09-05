@@ -183,6 +183,7 @@ def _set_entrance_rules(world: DigimonWorldWorld) -> None:
     options = world.options
     bridge_mode = int(options.bridge_unlock.value)              # 0/1/2
     canyon_mode = int(options.great_canyon_unlock.value)        # 0/1/2
+    factorial_mode = int(options.factorial_gate.value)          # 0/1/2
     lava_mode = int(options.lava_cave_access.value)             # 0/1
     # Mt. Infinity / Tower / Back Dimension / Final Battle all share
     # the player's configured threshold (the in-game
@@ -376,6 +377,22 @@ def _set_entrance_rules(world: DigimonWorldWorld) -> None:
         _set_entrance_rule(world, "Tropical Jungle", "Great Canyon", _pp(6))
         _set_entrance_rule(world, "Great Canyon", "Tropical Jungle", _pp(6))
     # always_open: free in both directions
+
+    # Gear Savanna ↔ Factorial Town: Andromon's iron door, both
+    # directions (it physically blocks both ways). Edges only exist when
+    # ``factorial_gate`` != vanilla (regions.py): shuffled gates them on
+    # the item; always_open leaves them free. The region-lock pass ANDs
+    # Region Access terms on top as usual.
+    if factorial_mode == _OPT_SHUFFLED:
+        _set_entrance_rule(
+            world, "Gear Savanna", "Factorial Town",
+            Has("Factorial Town Gate"),
+        )
+        _set_entrance_rule(
+            world, "Factorial Town", "Gear Savanna",
+            Has("Factorial Town Gate"),
+        )
+    # always_open: free in both directions (edges exist, no rule)
 
     # Great Canyon → Freezeland: free
     # Freezeland → Misty Trees: free

@@ -162,6 +162,7 @@ class DigimonWorldWorld(World):
             "stat_gain_multiplier",
             "bridge_unlock",
             "great_canyon_unlock",
+            "factorial_gate",
             "lava_cave_access",
             "god_mode",
             "recycle_shop_locations",

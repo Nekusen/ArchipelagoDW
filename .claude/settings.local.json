@@ -370,7 +370,8 @@
       "PowerShell(Get-Command python, python3, py -ErrorAction SilentlyContinue)",
       "Bash(awk 'NR>=1 && NR<=20 {print}' \"c:/opt/dev/AP/ArchipelagoDW/references/DW1-Code/SLUS.asm\")",
       "Bash(grep -nE \"addiu r[0-9]+,r[0-9]+,0x0[0-3][0-9a-f]{2}\" c:/opt/dev/AP/ArchipelagoDW/references/DW1-Code/SLUS.asm)",
-      "Bash(awk 'NR>=5100 && NR<=5115 {print NR\": \"$0}' \"c:/opt/dev/AP/ArchipelagoDW/references/DW1-Code/SLUS.asm\")"
+      "Bash(awk 'NR>=5100 && NR<=5115 {print NR\": \"$0}' \"c:/opt/dev/AP/ArchipelagoDW/references/DW1-Code/SLUS.asm\")",
+      "Bash(python *)"
     ],
     "additionalDirectories": [
       "C:\\opt\\dev\\AP\\ArchipelagoDW",

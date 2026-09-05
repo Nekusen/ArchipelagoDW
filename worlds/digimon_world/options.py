@@ -186,6 +186,40 @@ class GreatCanyonUnlock(Choice):
     default = option_always_open
 
 
+class FactorialGateUnlock(Choice):
+    """Factorial Town <-> Gear Savanna gate (Andromon's iron door).
+
+    Vanilla DW1 keeps the iron door between Gear Savanna and Factorial
+    Town closed until the Factorial questline is complete (beat Giromon,
+    then talk to and beat Numemon); talking to Andromon afterwards opens
+    it. The door physically blocks BOTH directions until then, so in
+    vanilla it is only ever a post-quest shortcut — the quest itself
+    requires entering Factorial Town by the Whamon ferry first.
+
+    * ``vanilla`` — DW1's original behavior; the door is not part of AP
+      logic (opening it requires Factorial access anyway). Default.
+    * ``shuffled`` — the ``Factorial Town Gate`` AP item opens the door
+      (both directions); Andromon's quest no longer does. This makes the
+      Gear Savanna side a REAL second entrance into Factorial Town in
+      logic, alongside the Whamon ferry. Item only — no AP location.
+    * ``always_open`` — the door is open from the start (the client pins
+      the trigger bit).
+
+    In every non-vanilla mode the patcher retargets the quest-side reads
+    and the ``setTrigger`` of the door bit onto the questline's own next
+    flag, so Andromon's recruit chain (+3 prosperity) stays quest-gated
+    and cannot be sequence-broken by the AP-delivered bit. Side effect:
+    his post-quest dialog beats run back-to-back (no "come back later"
+    pause); the quest reward is unchanged.
+    """
+
+    display_name = "Factorial Town Gate"
+    option_always_open = 0
+    option_vanilla = 1
+    option_shuffled = 2
+    default = option_vanilla
+
+
 class LavaCaveAccess(Choice):
     """Drill Tunnel boulder gate (path to Lava Cave / Meramon / Mt. Panorama).
 
@@ -1526,6 +1560,7 @@ class DigimonWorldOptions(PerGameCommonOptions):
     type_lock_unlocks: TypeLockUnlocks
     bridge_unlock: BridgeUnlock
     great_canyon_unlock: GreatCanyonUnlock
+    factorial_gate: FactorialGateUnlock
     lava_cave_access: LavaCaveAccess
     region_locking: RegionLocking
     region_locking_list: RegionLockingList
@@ -1633,7 +1668,7 @@ option_groups: list[OptionGroup] = [
         [
             FastDrimogemon, EasyMonochromon, SkipIntro, InfiniteAutoPilot,
             ItemStatGain,
-            TypeLockUnlocks, BridgeUnlock, GreatCanyonUnlock, LavaCaveAccess,
+            TypeLockUnlocks, BridgeUnlock, GreatCanyonUnlock, FactorialGateUnlock, LavaCaveAccess,
             RegionLocking, RegionLockingList, StartingRegion,
             SpawnRateBoost, StatGainMultiplier, CombatStatMultiplier,
             CardTradeMultiplier,

@@ -167,17 +167,46 @@ RAM_INVENTORY_SIZE: Final = 0x0013D4CE         # u8, current inventory capacity
 # received count, 2), clamped to [10, 30].
 RAM_INVENTORY_MAX_SIZE: Final = 30             # vanilla structural cap
 RAM_INVENTORY_DEFAULT_SIZE: Final = 10         # vanilla starting capacity
+# The ONLY values this byte ever legitimately holds: the three
+# ``setInventorySize`` operands vanilla uses, which are also the three the
+# client's keychain reconciler pins. Anything else (0 at boot, a torn read,
+# a screen the save block is not paged into) means the 0x0013D4xx block is
+# NOT the player's live inventory right now, and no AP writer may scan or
+# fill slots from it -- see ``client._inventory_is_live``.
+RAM_INVENTORY_VALID_SIZES: Final[frozenset[int]] = frozenset({10, 20, 30})
 KEYCHAIN_INVENTORY_PER_ITEM: Final = 10        # each Progressive Keychain bumps by 10
 KEYCHAIN_MAX_COPIES: Final = 2                 # vanilla questline gives 2 keychains total
 
 # Player on-hand inventory: 10 fixed slots. Item ID byte at +i, quantity
-# byte at +i+0x1E (0x1E = 30 between IDs and quantities — verified live
+# byte at +i+0x1E (0x1E = 30 between IDs and quantities -- verified live
 # 2026-04-28 by writing test items and watching them appear in the in-game
 # menu). Empty slot = ID 0xFF.
 RAM_INVENTORY_ITEM_IDS_BASE: Final = 0x0013D474
 RAM_INVENTORY_QUANTITIES_BASE: Final = 0x0013D492
 RAM_INVENTORY_SLOT_COUNT: Final = 10
 RAM_INVENTORY_EMPTY_SLOT_ID: Final = 0xFF
+
+# THIRD parallel 30-byte array of the same block, at +0x3C from the IDs
+# (``INVENTORY_ITEM_NAMES`` in ``references/dw_decomp/src/main/item.c``,
+# symbol 0x8013D4B0). Each occupied slot holds a distinct index used as the
+# slot's "order obtained" key -- what the inventory menu's sort submenu and
+# ``moveItem`` shuffle alongside the id/quantity bytes. Vanilla keeps the
+# three arrays in lockstep:
+#
+#   * ``giveItem`` fills a free slot, then assigns the LOWEST index in
+#     ``0..size-1`` that no other occupied slot already uses (item.c:425-439).
+#   * ``removeItem`` writes 0xFF here the moment a stack hits 0 (item.c:472),
+#     exactly as it does to the id byte.
+#
+# Any AP writer that parks an item in a free slot must do the same, or the
+# slot keeps a stale/duplicate key and the sort submenu misorders (or drops)
+# rows. Two client writers do this: the inventory-first item deliverer and
+# the infinite-Auto-Pilot reconciler. Incrementing an EXISTING stack must NOT
+# touch it -- that slot already owns a key.
+RAM_INVENTORY_ORDER_KEYS_BASE: Final = 0x0013D4B0
+RAM_INVENTORY_EMPTY_ORDER_KEY: Final = 0xFF
+assert RAM_INVENTORY_QUANTITIES_BASE - RAM_INVENTORY_ITEM_IDS_BASE == 0x1E
+assert RAM_INVENTORY_ORDER_KEYS_BASE - RAM_INVENTORY_ITEM_IDS_BASE == 0x3C
 
 # Full-stack quantity for one on-hand inventory slot. Ground truth: the
 # shop inventory-fit scan (``build_shop_runtime_list``, VERIFIED decomp
@@ -856,6 +885,45 @@ KEYITEM_LOCATION_RAM_BITS: Final[dict[str, tuple[int, int]]] = {
 # Per-AP-item delivery flags for AP-side delivery of key items. Mirrors
 # the recruit deliverer pattern: when AP delivers the matching item, set
 # this bit in RAM.
+# ----- Factorial Town <-> Gear Savanna gate (Andromon's iron door) ----------
+#
+# Researched + lab-validated 2026-09-01 (three nets for the neuter;
+# ``work/dw1_re/decomp/factorial_gate/NOTES.md``). Trigger 328 opens the
+# door between FACT05 (156) and GIAS02 (71); vanilla sets it only in
+# Script 151 (Andromon, FACT06) after the Factorial questline. The
+# mechanism is asymmetric: GIAS02 -> FACT05 is script-only (S51 tile ->
+# ``warpTo 156 1``), FACT05 -> GIAS02 is walk-on slot 1; the closed door
+# seals even the warp-strip cells per screen load (``setRectImpassible``,
+# args are center + half-extents).
+#
+# The AP item ("Factorial Town Gate", shuffled mode) delivers the vanilla
+# bit — no new trigger ids. The NEUTER below retargets every quest-side
+# 328 site to the existing quest bit 329 (Old-Fishrod pattern) so the
+# Andromon recruit +3 PP chain stays quest-gated and independent of the
+# AP-delivered door bit. It must be emitted whenever the option is NOT
+# vanilla — including always_open — because a client-pinned 328 would
+# otherwise sequence-break the recruit chain (this is why the Great
+# Canyon "shuffled-only" emission template does NOT apply here).
+# Net-validated caveat: with the neuter, Andromon's post-quest dialogs
+# run back-to-back (no "come back later" beat); quest + 3 PP unchanged.
+RAM_FACTORIAL_GATE_OPEN: Final[tuple[int, int]] = (0x001BDFF6, 0)
+FACTORIAL_GATE_TRIGGER_ID: Final = 328
+assert RAM_FACTORIAL_GATE_OPEN == (
+    0x001BDFCD + FACTORIAL_GATE_TRIGGER_ID // 8, FACTORIAL_GATE_TRIGGER_ID % 8,
+)
+ROM_FACTORIAL_GATE_NEUTER_OFFSETS: Final[tuple[int, ...]] = (
+    0x14050A8C,  # Script 151 vm 4068  setTrigger id      (single ROM copy)
+    0x140503FC,  # Script 151 vm 2388  apology IF cond2 id
+    0x14050A94,  # Script 151 vm 4076  replay IF id
+    0x140B9AA2,  # MAPHEAD.SCN Section_192 file 9898 IF id (live copy)
+    0x13FD8922,  # DG.SCN slot-0 dead twin of the above (hygiene only — see dw1-dead-dg-copy)
+)
+ROM_FACTORIAL_GATE_NEUTER_VALUE: Final = bytes((0x49, 0x01))  # trigger 329 LE
+for _off in ROM_FACTORIAL_GATE_NEUTER_OFFSETS:
+    _pos = _off % 2352
+    assert 24 <= _pos and _pos + 2 <= 2072, f"neuter write at 0x{_off:09X} straddles a sector"
+del _off, _pos
+
 KEYITEM_DELIVERY_RAM_BITS: Final[dict[str, tuple[int, int]]] = {
     # Rod items target the trigger bits the fishing minigame actually
     # reads (`getBestFishingRod()` in DW1-SydPatches' `Fishing.cpp` checks
@@ -866,6 +934,7 @@ KEYITEM_DELIVERY_RAM_BITS: Final[dict[str, tuple[int, int]]] = {
     "Lava Cave Access":       LAVA_CAVE_ACCESS_FLAG,
     "Tropical Jungle Bridge": RAM_TROPICAL_JUNGLE_BRIDGE_FIXED,
     "Great Canyon Bridge":    RAM_GREAT_CANYON_BRIDGE_UNLOCKED,
+    "Factorial Town Gate":    RAM_FACTORIAL_GATE_OPEN,
 }
 
 # ----- Birdramon flight destination gates -----------------------------------
@@ -1930,7 +1999,7 @@ ROM_RECRUITMENT: Final = (
         digimon_id=0x29,  # Giromon
     ),
     RecruitmentEntry(
-        trigger_offsets=(0x13FDD278, 0x13FE0010, 0x13FD63CA, 0x140B754A, 0x140B60CE),
+        trigger_offsets=(0x13FE0010, 0x13FD63CA, 0x140B754A, 0x140B60CE),
         jijimon_message_offsets=(0x13FDF51C, 0x13FDFE62),
         name_list_index=242,
         digimon_id=0x2A,  # Etemon
@@ -2057,7 +2126,9 @@ ROM_RECRUITMENT: Final = (
 ROM_SPECIAL_EVO_FORMAT: Final = "<B"
 
 ROM_SPECIAL_EVO: Final = (
-    ((0x140466BF, 0x14046693, 0x14046841, 0x13FD8065, 0x140479ED), 0x0E, 0x0B),  # Monzaemon / Toy Town
+    # 0x140B91E5 = live MAPHEAD twin of the dead DG-copy 0x13FD8065 (S145
+    # species compare; client_gates audit 2026-08-31).
+    ((0x140466BF, 0x14046693, 0x14046841, 0x13FD8065, 0x140B91E5, 0x140479ED), 0x0E, 0x0B),  # Monzaemon / Toy Town
     ((0x14054503,), 0x29, 0x0D),  # Giromon
     ((0x14054589,), 0x1B, 0x0D),  # MetalMamemon
     ((0x140A2E11,), 0x25, 0x03),  # Bakemon
@@ -2271,7 +2342,7 @@ ROM_FIX_LEOMON_CAVE_NANIMON_SOFTLOCK_OFFSETS: Final = (
 # Recruit-spawn rate offsets, addressed per Digimon. Patch values live in
 # the patcher's payload.
 ROM_SPAWN_RATE_MAMEMON_OFFSETS: Final = (0x13FD678F, 0x140B790F)
-ROM_SPAWN_RATE_PIXIMON_OFFSETS: Final = (0x13FD64DB, 0x13FDD389, 0x13FE0121, 0x140B765B)
+ROM_SPAWN_RATE_PIXIMON_OFFSETS: Final = (0x13FD64DB, 0x13FE0121, 0x140B765B)
 ROM_SPAWN_RATE_MMAMEMON_OFFSETS: Final = (0x13FD831F, 0x140B949F)
 ROM_SPAWN_RATE_OTAMAMON_OFFSETS: Final = (0x13FD7F47, 0x140B90C7)
 
@@ -2898,7 +2969,7 @@ ROM_RECRUIT_TRIGGERS: Final[dict[str, RecruitTriggerEntry]] = {
     ),
     "Etemon": RecruitTriggerEntry(
         trigger_id=242,
-        trigger_offsets=(0x13FDD278, 0x13FE0010, 0x13FD63CA, 0x140B754A, 0x140B60CE),
+        trigger_offsets=(0x13FE0010, 0x13FD63CA, 0x140B754A, 0x140B60CE),
         name_offsets=(0x13FDF51C, 0x13FDFE62),
     ),
     "Biyomon": RecruitTriggerEntry(
@@ -6140,8 +6211,8 @@ ROM_FIELD_SPAWN_TRIGGER_PATCHES: Final = (
     (0x140B9900, 240, 760),
     # ----- Giromon (1 sites) -----
     (0x140B5DE0, 241, 761),
-    # ----- Etemon (4 sites) -----
-    (0x13FDD278, 242, 762),
+    # ----- Etemon (3 sites; a 4th at 0x13FDD278 was residue past MAPHEAD's
+    #       24686 bytes, dead in both runtime copies — dropped 2026-08-31) -----
     (0x13FE0010, 242, 762),
     (0x140B60CE, 242, 762),
     (0x140B754A, 242, 762),
@@ -6608,6 +6679,42 @@ ROM_FIELD_SPAWN_TRIGGER_PATCHES: Final = (
     (0x14059C84, 205, 725),  # script 162 byte 1752
     (0x14059CC0, 205, 725),  # script 162 byte 1812
     (0x14059CE4, 205, 725),  # script 162 byte 1848
+    # ====================================================================
+    # Live MAPHEAD.SCN twins (2026-08-31, ``work/dw1_re/decomp/client_gates``).
+    # DG.SCN slot 0 is a byte-identical DEAD copy of MAPHEAD.SCN --
+    # ``getScript(0)`` always returns the boot-resident MAPHEAD (0x1B1D30),
+    # so every ``# script 0`` entry above in 0x13FD5DB8..0x13FDD528 patches
+    # bytes the runtime never reads. These are the live twins the audit
+    # found uncovered. First block = Section_1245, the engine-only City
+    # Top ladder the Auto Pilot handler runs (``callScriptSection(0,
+    # 0x4dd, 0)``) -- the reason an Auto Pilot warp populated File City
+    # from vanilla recruit bits (net-2 validated: patched pokes flip the
+    # chosen variant). Trigger 203 (Agumon, 0x140BDB30) stays vanilla on
+    # purpose: no family redirects 203 anywhere. Second block = screen
+    # sections run by ``runMapHeadScript`` at screen load (latent
+    # same-class bugs, byte-verified; includes Angemon's ROOM10 and
+    # Monzaemon's ROOM11 interiors).
+    # ----- MAPHEAD Section_1245 (Auto Pilot City Top ladder, 12 sites) -----
+    (0x140BDB40, 220, 740),  # Angemon
+    (0x140BDB44, 214, 734),  # Monzaemon
+    (0x140BDB60, 221, 741),  # Birdramon
+    (0x140BDB78, 225, 745),  # Vegiemon
+    (0x140BDB88, 246, 766),  # Palmon
+    (0x140BDB9C, 225, 745),
+    (0x140BDBAC, 246, 766),
+    (0x140BDBC0, 221, 741),
+    (0x140BDBD8, 225, 745),
+    (0x140BDBE8, 246, 766),
+    (0x140BDBFC, 225, 745),
+    (0x140BDC0C, 246, 766),
+    # ----- MAPHEAD screen sections (7 latent twins) -----
+    (0x140B7456, 246, 766),  # Section_2
+    (0x140B9896, 205, 725),  # Section_179 (City Top variant)
+    (0x140B9E1E, 254, 774),  # Section_192 (TWNB13)
+    (0x140B9E56, 254, 774),  # Section_192 (TWNB13)
+    (0x140B9FEA, 220, 740),  # Section_205 (ROOM10 -- Angemon interior)
+    (0x140BA016, 214, 734),  # Section_206 (ROOM11 -- Monzaemon interior)
+    (0x140BACE2, 254, 774),  # Section_254
 )
 
 
@@ -7115,7 +7222,9 @@ ROM_UNLOCK_TOY_TOWN_OFFSETS: Final = (0x140479EA,)
 ROM_SPAWN_RATE_FORMAT: Final = "<B"
 ROM_SPAWN_RATE_MAMEMON_OFFSETS: Final = (0x13FD678F, 0x140B790F)
 ROM_SPAWN_RATE_PIXIMON_OFFSETS: Final = (
-    0x13FD64DB, 0x13FDD389, 0x13FE0121, 0x140B765B,
+    # 0x13FDD389 dropped 2026-08-31: slot-tail residue past MAPHEAD's real
+    # bytes, dead in both runtime copies (client_gates audit).
+    0x13FD64DB, 0x13FE0121, 0x140B765B,
 )
 ROM_SPAWN_RATE_MMAMEMON_OFFSETS: Final = (0x13FD831F, 0x140B949F)
 ROM_SPAWN_RATE_OTAMAMON_OFFSETS: Final = (0x13FD7F47, 0x140B90C7)
@@ -9146,21 +9255,66 @@ ROM_BIRDRA_FLIGHT_GCANYON_PATCHES: Final[tuple[tuple[int, int], ...]] = tuple(
 )
 ROM_BIRDRA_FLIGHT_GCANYON_VANILLA_TRIGGER: Final = 221
 
-# --- Flight price zeroing (unconditional QoL, user-confirmed) ---------------
+# --- Flight fares: RETIRED zeroing (a 0 fare deadlocks the menu) ------------
 #
-# Zero the u32 cost field of all 6 destination entries in BOTH table
-# copies. Written unconditionally by the patcher — no option. (An older
-# comment claimed G Canyon Top is free in vanilla; it costs 1000 — the
-# zeroing here is what makes every flight free. dw_decomp audit 2026-08-28.)
+# Between 2026-08-21 and 2026-08-29 the patcher zeroed the u32 cost field of
+# all 6 destination entries in BOTH table copies, unconditionally, as a QoL
+# ("every flight is free once its trigger bit is delivered"). **Retired
+# 2026-08-29** -- a fare of 0 makes the destination menu unusable, and the
+# 2026-08-29 playtest hit it: picking a destination re-showed the "Are you
+# sure? Once you go, I can't take you back." textbox forever, and X never
+# reached the yes/no selection.
+#
+# Root cause, from dw_decomp (``script_ops.c:MAIN_func_801094F0``, the list
+# box's per-frame input callback, and ``script_draw.c:MAIN_func_8010C28C``,
+# the flight state machine):
+#
+#     if (MAIN_D_8013500C != 0) return;          /* <- re-entry latch  */
+#     if (isKeyDown(0x40)) {                     /*    X = confirm     */
+#         item = <cursor entry>;
+#         if (item & 0x80) {                     /*    affordable      */
+#             showMapHeadTextbox(6, ...);        /*    "Are you sure?" */
+#             MAIN_D_8013500C = <entry cost>;    /*    latch = fare    */
+#             SCRIPT_STATE_4 = 4;                /*    -> yes/no       */
+#         }
+#     }
+#
+# ``MAIN_D_8013500C`` (the shared shop "amount owed" global) doubles as this
+# callback's own re-entry latch: the fare is what stops the callback from
+# firing again on the very next frame, when ``isXPressedAfterDialogue()``
+# turns true for the same X press that dismissed the confirm box. Latch a
+# fare of 0 and the guard never engages, so the callback re-shows textbox 6
+# and re-arms ``SCRIPT_STATE_4 = 4`` forever; case 5 of the state machine
+# (the actual warp) is never reached.
+#
+# Two more engine reads make a nonzero fare load-bearing in both directions,
+# which is why "just make it 1 bit" is not a fix either:
+#
+#   * ``MAIN_func_80107AB8`` only sets the selectable flag (``i | 0x80``) when
+#     ``cost <= MONEY``, so a fare of 1 greys the row out at 0 bits.
+#   * ``MAIN_func_8010C28C`` case 5 does ``MONEY -= MAIN_D_8013500C``, so a
+#     fare the player cannot pay would underflow the money counter.
+#
+# Freeness therefore has to come from the CODE, not the data: see
+# :data:`ROM_BIRDRA_FLIGHT_FREE_WORD_PATCHES` below, which is what actually
+# ships. The fares stay vanilla (1000/1000/1500/2000/2500/2500) purely so the
+# latch keeps arming; AP owns WHICH destinations appear through the trigger
+# rewrites above.
+#
+# The cost offsets are kept (unused by ``rom.py``) so a future per-destination
+# pricing feature, or any lab spec, can address the fields without re-deriving
+# them.
 ROM_BIRDRA_FLIGHT_PRICE_OFFSETS: Final[tuple[int, ...]] = tuple(
     base + 8 * entry + 2
     for base in ROM_BIRDRA_FLIGHT_TABLE_BASES
     for entry in range(6)
 )
-ROM_BIRDRA_FLIGHT_PRICE_ZERO: Final = b"\x00\x00\x00\x00"
-# Flat token writes only — none of the 4-byte price writes (nor the 2-byte
-# entry-0 trigger writes) may cross a Mode2/2352 user-data boundary
-# (header 24 B, user data bytes 24..2071 of each 2352-B sector).
+ROM_BIRDRA_FLIGHT_VANILLA_PRICES: Final[tuple[int, ...]] = (
+    1000, 1000, 1500, 2000, 2500, 2500,
+)
+# Flat token writes only -- the 2-byte entry-0 trigger writes may not cross a
+# Mode2/2352 user-data boundary (header 24 B, user data bytes 24..2071 of each
+# 2352-B sector). The cost offsets are checked too, for the future feature.
 for _off, _ln in (
     *((o, 4) for o in ROM_BIRDRA_FLIGHT_PRICE_OFFSETS),
     *((o, 2) for o, _t in ROM_BIRDRA_FLIGHT_GCANYON_PATCHES),
@@ -9170,6 +9324,65 @@ for _off, _ln in (
         f"flight-table write at 0x{_off:09X} straddles a sector boundary"
     )
 del _off, _ln, _pos
+
+
+# --- Free flights: three in-place word rewrites (unconditional) -------------
+#
+# Lab-validated 2026-08-30 through the three PATCH_PROCESS nets
+# (``work/dw1_re/decomp/free_flight/NOTES.md``). Restores the intent of the
+# retired fare-zeroing above without touching the fare, which the destination
+# menu needs non-zero as a re-entry latch.
+#
+#   1. ``MAIN_func_80107AB8`` (``script_ops.c:734``) builds the destination
+#      rows and sets bit 0x80 -- "selectable, draw white" -- only when
+#      ``cost <= MONEY`` (an UNSIGNED ``sltu``). Nopping the branch makes every
+#      unlocked row affordable. The delay slot is already a nop and the
+#      then-branch ends in ``beq $zero,$zero`` past the else, so control flows
+#      correctly with the single word removed.
+#   2. ``MAIN_func_8010C28C`` case 5 (``script_draw.c:449``) does
+#      ``MONEY -= MAIN_D_8013500C`` right before the warp. Nopping the store
+#      leaves the money counter alone; the now-dead ``lw``/``sub`` above it are
+#      harmless because ``$v0`` is redefined on the next instruction.
+#   3. ``MAIN_func_800FED64`` (``script_common.c:1941``) prints the fare in the
+#      row's POINT column. Feeding ``intToStringSJIS`` a zero makes the menu
+#      say 0 instead of advertising a price nothing charges. Cosmetic and
+#      independent -- dropping it alone keeps 1 and 2 working (net 1 covers
+#      that combination).
+#
+# **Exclusivity** (binary xref over SLUS + all 16 overlays, jal encodings and
+# raw pointer words, 4-byte aligned): zero overlay references; 80107AB8 has one
+# caller (0x8010C304) and 8010C28C one (0x80105DB4, the ``ACTIVE_INSTRUCTION ==
+# 10`` arm); 800FED64's three callers are all style-3 arms, and style 3 is
+# passed as a constant at exactly five sites, all inside the flight menu.
+# ``MAIN_D_8013500C`` is a SHARED shop global, so the money census matters: of
+# the 13 ``sw MONEY`` sites in the image exactly one (0x8010C450) is the
+# flight's -- the four money shops debit elsewhere and were re-tested charging
+# normally in net 2.
+#
+# Consequence to keep in mind: with site 1 in place, per-destination *pricing*
+# is no longer expressible. Reverting site 1 is what a future pricing option
+# would need.
+_FREE_FLIGHT_SITES: Final[tuple[tuple[int, int, int], ...]] = (
+    # (SLUS RAM address, patched word, vanilla word)
+    (0x80107B38, 0x00000000, 0x14200007),  # bne $at,$zero,0x80107B58 -> nop
+    (0x8010C450, 0x00000000, 0xAF82938C),  # sw $v0,-27764($gp)       -> nop
+    (0x800FEEB0, 0x00002821, 0x8C450004),  # lw $a1,4($v0) -> addu $a1,$zero,$zero
+)
+ROM_BIRDRA_FLIGHT_FREE_WORD_FORMAT: Final = "<I"
+ROM_BIRDRA_FLIGHT_FREE_WORD_PATCHES: Final[tuple[tuple[int, int, int], ...]] = tuple(
+    (_slus_ram_to_bin_offset(ram), new, old) for ram, new, old in _FREE_FLIGHT_SITES
+)  # ((bin_offset, patched_word, vanilla_word), ...)
+assert ROM_BIRDRA_FLIGHT_FREE_WORD_PATCHES == (
+    (0x14D43E80, 0x00000000, 0x14200007),
+    (0x14D49248, 0x00000000, 0xAF82938C),
+    (0x14D39C98, 0x00002821, 0x8C450004),
+), ROM_BIRDRA_FLIGHT_FREE_WORD_PATCHES
+for _off, _new, _old in ROM_BIRDRA_FLIGHT_FREE_WORD_PATCHES:
+    _pos = _off % 2352
+    assert 24 <= _pos and _pos + 4 <= 2072, (
+        f"free-flight word write at 0x{_off:09X} straddles a sector boundary"
+    )
+del _off, _new, _old, _pos
 
 
 # --- Walk-on transition-gate wrapper + table (Cave6) ------------------------
@@ -9487,6 +9700,8 @@ _SCRIPT_ARCHIVE_SLOTS: Final[dict[int, int]] = {
     48: 0x24800,    # OGRE03 (screen 48, Ogremon's Room): fortress cutscene S52 / S53
     130: 0x5B800,   # FRZL16 (screen 135, Freezeland shore): Whamon ride S51
     137: 0x61800,   # OGRE11 (screen 143, Secret Beach Cave): Ogremon battle S51
+    # Factorial gate (2026-09-01):
+    68: 0x31000,    # GIAS02 (screen 71): Andromon iron-door tile S51
     0: 0x800,       # DG.SCN "script 0": a dead copy of MAPHEAD.SCN that getScript(0) never reads
 }
 _SCRIPT_ARCHIVE_SLOT_SIZES: Final[dict[int, int]] = {
@@ -9494,6 +9709,7 @@ _SCRIPT_ARCHIVE_SLOT_SIZES: Final[dict[int, int]] = {
     8: 0x800, 18: 0x2000, 24: 0x800, 44: 0x800, 66: 0x800, 84: 0x800,
     135: 0x1800,
     26: 0x1000, 28: 0x800, 48: 0x800, 130: 0x1000, 137: 0x800,
+    68: 0x800,
     0: 0x6800,
 }
 
@@ -9626,6 +9842,25 @@ SCRIPT_GATE_PATCHES: Final[dict[str, tuple[ScriptGatePatch, ...]]] = {
             ) + _encode_script_jump_to(6864),
             None,
             "stub-B over Script 162 slot-tail residue",
+        ),
+        # D: Andromon iron-door entry tile (GIAS02 S51, factorial_gate
+        # feature 2026-09-01, net-2 GREEN — factorial_gate NOTES §10).
+        # The open-path entityWalkTo head at vm 1384 retargets to stub-D;
+        # vm 1388..1391 stay vanilla (dead — the jump skips them).
+        # Without FT-RA the OPEN door behaves like the closed one (the
+        # vanilla dialog + walk-back at 1396); with it, the vanilla open
+        # path runs unchanged (jumpTo 1392 = the warpTo 156 1 head).
+        ScriptGatePatch(
+            68, 1384, _encode_script_jump_to(1688), bytes.fromhex("4EFDFC03"),
+            "Andromon door: S51 open-path walk head -> stub-D",
+        ),
+        ScriptGatePatch(
+            68, 1688,
+            _encode_script_if_trigger_unset(
+                REGION_ACCESS_TRIGGER_IDS["Factorial Town"], 1396,
+            ) + bytes.fromhex("4EFDFC03D00F0000") + _encode_script_jump_to(1392),
+            None,
+            "stub-D over Script 68 slot-tail residue",
         ),
     ),
     "Beetle Land": (
@@ -11398,7 +11633,7 @@ BGM_MODE_DAY_ONLY: Final = 1
 # agent; ``work/dw1_re/decomp/notifications/NOTES.md``): the client writes a
 # short ASCII message into a RAM mailbox and the game shows it at the top of
 # the screen (top-banner renderer below; the vanilla loading banner keeps the
-# centre) for 150 game-loop iterations (~5 s at the 30 Hz game loop), through
+# centre) for 30 game-loop iterations (~1 s at the 30 Hz game loop), through
 # its own area-name banner path --
 # ``addMapNameObject(239)`` draws ``MAP_NAME_PTR[MAP_ENTRIES[239].loadingName]``
 # and registers the ``renderMapName`` object; ``removeObject`` takes it down.
@@ -11410,7 +11645,7 @@ BGM_MODE_DAY_ONLY: Final = 1
 # the standalone's custom tick hook used, never written by rom.py otherwise)
 # and runs every draw loop: flag 1 (pending) + tamer idle on the field
 # (``GAME_STATE == 0 && TAMER_STATE == 0 && IS_SCRIPT_PAUSED == 1``) -> add the
-# banner, flag = 2 + 150; each frame counts down; a menu / dialog / battle /
+# banner, flag = 2 + 30; each frame counts down; a menu / dialog / battle /
 # warp / pickup while showing removes the banner and re-arms flag 1 (the
 # message is shown again once idle); expiry clears the flag to 0.
 #
@@ -11434,7 +11669,7 @@ BGM_MODE_DAY_ONLY: Final = 1
 NOTIFY_CALLBACK_RAM: Final = 0x80095C68          # Cave6, 28 words: tail of the relocated ITEM_DESC_PTR table
 NOTIFY_CALLBACK_WORDS: Final[tuple[int, ...]] = (
     0x3C088009, 0x91095FBC, 0x938A93DE, 0x938B9165, 0x938E94C8, 0x11200014, 0x014B5025, 0x39CE0001,
-    0x014E5025, 0x2D210002, 0x10200005, 0x240C0098, 0x1540000D, 0x240400EF, 0x080363EC, 0xA10C5FBC,
+    0x014E5025, 0x2D210002, 0x10200005, 0x240C0020, 0x1540000D, 0x240400EF, 0x080363EC, 0xA10C5FBC,
     0x000A682B, 0x2529FFFF, 0x240500EF, 0x15400004, 0x24040FA1, 0x2D210003, 0x10200003, 0xA1095FBC,
     0x08028C02, 0xA10D5FBC, 0x03E00008, 0x00000000,
 )
@@ -11443,7 +11678,11 @@ NOTIFY_MAILBOX_SIZE: Final = 68
 NOTIFY_TEXT_OFFSET: Final = 4
 NOTIFY_TEXT_MAX: Final = 63                      # bytes before the NUL
 NOTIFY_TEXT_MAX_CHARS: Final = 26                # the renderer's practical width cap (mixed case)
-NOTIFY_DURATION_FRAMES: Final = 150              # immediate in word 11 (0x240C0098 = 152 = 2 + 150)
+NOTIFY_DURATION_FRAMES: Final = 30               # immediate in word 11 (0x240C0020 = 32 = 2 + 30)
+# ^^^ 30 iterations of the 30 Hz draw loop ~= 1 s on screen. Shortened from the
+# original 150 (~5 s) after the 2026-08-29 playtest: back-to-back sends queued up
+# far slower than the banner drained. The value is a `li` immediate stored into the
+# u8 flag, so anything in 3..253 is legal (flag 0 = idle, 1 = owed, 2 = expiring).
 RAM_NOTIFY_FLAG: Final = NOTIFY_MAILBOX_RAM & 0x1FFFFF          # physical 0x00095FBC (client side)
 RAM_NOTIFY_TEXT: Final = RAM_NOTIFY_FLAG + NOTIFY_TEXT_OFFSET   # physical 0x00095FC0
 NOTIFY_FLAG_IDLE: Final = 0
@@ -11455,6 +11694,23 @@ NOTIFY_FLAG_PENDING: Final = 1
 # hooks. Until both hold the client polls and writes nothing (2026-08-29).
 RAM_GAME_ALIVE_SLUS_MARKER: Final[tuple[int, bytes]] = (0x0010643C, bytes((0xE0, 0xFF, 0xBD, 0x27)))
 RAM_GAME_ALIVE_MAPHEAD: Final = 0x001B1D30
+# "A save is loaded / the player is in the game" predicate (2026-08-31,
+# ``work/dw1_re/decomp/client_gates/NOTES.md``): BOTH u32s nonzero. The
+# first is dw_decomp ``MAIN_D_80134EB0`` -- the only global the
+# quit-to-title path reliably re-zeroes; nonzero from landing-screen exit.
+# The second is ``ENTITY_TABLE[0]`` (the tamer entity pointer), installed
+# by ``initializeTamer`` strictly AFTER the main menu returns on all
+# three entry paths -- it covers the CONTINUE slot-pick microwindow where
+# the save is already in RAM while the menu still runs. Verified FALSE at
+# the title (cold + post-attract) and the main menu; TRUE across 14
+# in-game states including battles, the in-game save menu, cutscenes and
+# the NEW-game opening (fresh multiworld slots must deliver). Known
+# residual hole: the post-credits menu (``removeEntity`` spares entity
+# slots 0/1) -- falls back to the harmless-after-load noise this gate
+# exists to remove. Rejected candidates (measured): MAIN_STATE,
+# CURRENT_MENU, TAMER_STATE, IS_SCRIPT_PAUSED, CURRENT_SCREEN, pstats.
+RAM_GAME_ENTERED_FLAG: Final = 0x00134EB0     # u32, MAIN_D_80134EB0
+RAM_TAMER_ENTITY_PTR: Final = 0x0012F344      # u32, ENTITY_TABLE[0]
 NOTIFY_HOOK_LUI_RAM: Final = 0x800E36DC          # initializeFileReadQueue: lui a3, hi(render cb)
 NOTIFY_HOOK_LUI_VANILLA: Final = 0x3C07800E
 NOTIFY_HOOK_LUI_PATCHED: Final = 0x3C078009

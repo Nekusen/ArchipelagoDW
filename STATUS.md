@@ -1,6 +1,6 @@
 # Digimon World 1 (PS1) APWorld — Project Status and Roadmap
 
-**Snapshot date: 2026-08-29.** Branch `digimon-world-ps1`, `world_version 0.6.0`.
+**Snapshot date: 2026-09-05.** Branch `digimon-world-ps1`, `world_version 0.6.0`.
 
 This is the live status document. [PLAN.md](PLAN.md) is the historical exploration record and
 [CLAUDE.md](CLAUDE.md) carries the working conventions; neither is updated for day-to-day state —
@@ -20,11 +20,11 @@ project moved out of "build the world" and into **feature expansion + polish + v
 | Measure | Value |
 | --- | --- |
 | World version | 0.6.0 (`minimum_ap_version` 0.6.7) |
-| Locations / items | 280 / 217 |
-| YAML options | 80, in 5 option groups |
-| World test suite | **1168 passed**, 4 skipped, 10878 subtests, ~18 s with `-n auto` (one class is disc-gated: it re-checks vanilla bytes when `Digimon World (USA).bin` sits at the repo root) |
+| Locations / items | 280 / 218 |
+| YAML options | 81, in 5 option groups |
+| World test suite | **1223 passed**, 4 skipped, 11382 subtests, ~15 s with `-n auto` (one class is disc-gated: it re-checks vanilla bytes when `Digimon World (USA).bin` sits at the repo root) |
 | Lint | `ruff` at a 321-finding baseline (303 pre-existing + the two census tools' CLI prints, T201, like the other lab tools) |
-| Commits ahead of `main` | 121 |
+| Commits ahead of `main` | 121 (the 2026-08-30 → 09-01 batches sit in the working tree, not yet committed) |
 | Decomp coverage | **31 / 1120** SLUS game functions verified — 2.8 % by count, **14.5 % of static call sites** |
 
 ### 1.1 What is shipped
@@ -45,7 +45,9 @@ is [worlds/digimon_world/data/addresses.py](worlds/digimon_world/data/addresses.
 disc-boot byte-verified):
 
 - Physical **region-gate** enforcement for `region_locking` — walk-on loop-back wrapper, 12
-  script-class gates, Birdramon-flight gating; flight fares zeroed as QoL.
+  script-class gates, Birdramon-flight gating. (The "zero every flight fare" QoL that shipped
+  with it was retired 2026-08-29 and **replaced 2026-08-30** by three in-place word rewrites —
+  see the 2026-08-30 entry below and §2.5 for the side effects.)
 - **ITEM_PARA relocation** to a contiguous 256-slot table on heap-claimed RAM (ceiling 173 → 255).
 - **Shopsanity** — per-shop off / coexist / replace for all four shops, tiered or randomized prices.
 - **Card-trade multiplier** and the **Piximon Training Manual** check.
@@ -349,6 +351,94 @@ physically behind the boulder, so the shortcut can never open without `Lava Cave
 second IF is needed; as a logic edge it would add nothing (same requirement as the Meramon
 Tunnel route, plus an Ogremon-fled state logic cannot know).
 
+**2026-08-30 — free flights, done properly** (the first playtest's first finding). The
+unconditional "zero every Birdramon-Messenger fare" QoL made the destination menu unusable:
+`MAIN_func_801094F0` latches the fare into `MAIN_D_8013500C` and uses that same global as its own
+re-entry guard, so a fare of 0 re-showed the "Are you sure?" textbox on every X press and the warp
+was never reached. Freeness now comes from the **code**, with the fares left vanilla so the latch
+keeps arming — three in-place word rewrites, all in flight-exclusive code
+(`ROM_BIRDRA_FLIGHT_FREE_WORD_PATCHES`): drop the `cost <= MONEY` gate in `MAIN_func_80107AB8`,
+drop `MONEY -= MAIN_D_8013500C` in `MAIN_func_8010C28C` case 5, and feed the POINT column a 0 in
+`MAIN_func_800FED64`. Three nets (`work/dw1_re/decomp/free_flight/NOTES.md`): net 1 green on 6081
+checks via a three-way agreement including an R3000 interpreter replaying the real SLUS words
+(which also disproved three design variants, the fare-zeroing among them); net 2 flew twice off
+`flight_birdramon.state` at 0 bits and at 5000 bits with MONEY unchanged, and re-tested all four
+money shops still charging; net 3 built the .bin (3 sectors touched), cold-booted it and reproduced
+the behaviour off the disc. `MAIN_D_8013500C` is a shared shop global, so the exclusivity evidence
+matters: a binary xref over SLUS + all 16 overlays gives each site exactly one flight caller, and
+of the 13 `sw MONEY` sites in the image only 0x8010C450 is the flight's. This also resolves the
+`region_locking: all` seed-impossibility (a mandatory flight the player could not afford); the
+side effects that remain are in §2.5.
+
+**2026-08-31 — the first playtest's corrective batch.** The user's sittings (2026-08-29 → 09-01)
+surfaced real defects beyond the boot hang; each was root-caused in the lab and fixed:
+
+- **`wild_and_story` stalled cutscene-scripted story fights — fixed by exclusion**
+  (`SCRIPT_PLACED_GROUPS`, 23 pairs, applied to BOTH `wild` and `wild_and_story`). The static
+  audit (`work/dw1_re/decomp/story_swap_audit/`, 297 substituted groups enumerated) found a
+  mechanism DIFFERENT from the suspected animation class: those screens' scripts **place the
+  fight entity themselves** (`loadDigimon`/`setDigimon` opcodes in the script, not MAPHEAD); the
+  patcher only rewrites record + MAPHEAD operands, so the stale script operand makes
+  `scriptSetDigimon` refuse the placement and the scene stalls against an absent entity — Leomon
+  (GIAS07), OGRE11 → OGRE10 (the absent fleeing Ogremon leaves `setTrigger 224` unreachable = the
+  reported stuck transition), WaruMonzaemon (OMOC08). The animation-table hypothesis is retired
+  for this option. The exclusion also inoculates the final boss (MGEN99 script-places
+  Machinedramon) and **10 latent plain-`wild` bugs** (GCAN08 ambush, GCAN11 shop customers,
+  Gekomon summon, curse events) that were already shipping. 47 of 60 story groups remain
+  substitutable; the Patamon control (MAPHEAD-placed) was predicted safe and observed working.
+  The upgrade path that lifts the exclusion entirely is queued in §2.5.
+- **Auto Pilot's warp rebuilt File City from vanilla 200+X bits — fixed.** Root cause (lab,
+  `work/dw1_re/decomp/client_gates/`): **DG.SCN slot 0 is a byte-identical DEAD copy of
+  MAPHEAD.SCN** — `getScript(0)` always returns the boot-resident MAPHEAD, so every `# script 0`
+  entry of `ROM_FIELD_SPAWN_TRIGGER_PATCHES` in 0x13FD5DB8..0x13FDD528 patched bytes the runtime
+  never reads. The Auto Pilot handler runs `callScriptSection(0, 0x4dd, 0)` = MAPHEAD
+  **Section_1245**, an engine-only City Top ladder reading triggers 203/220/214/221/225/246.
+  Wired: the 12 Section_1245 live twins (net-2 validated) + 7 latent screen-section twins the
+  audit found (incl. Angemon's ROOM10 and Monzaemon's ROOM11 interiors) + the special-evo species
+  byte 0x140B91E5 into `ROM_SPECIAL_EVO`'s Monzaemon tuple; 2 residue writes dead in BOTH copies
+  dropped. Trigger 203 (Agumon) stays vanilla by design; 80 other dead-copy writes are harmless
+  duplicates of already-patched live twins. The landmine is recorded in §2.5.
+- **The client worked the RAM before a save was loaded — fixed.** `_game_alive` passes on the
+  title screen (boot init fills the save block with new-game defaults), so every reboot
+  re-delivered the whole item history into pre-save RAM. A second watcher gate, `_game_entered`,
+  now requires BOTH u32s nonzero: `RAM_GAME_ENTERED_FLAG` (0x134EB0 — the only global
+  quit-to-title reliably re-zeroes) AND `RAM_TAMER_ENTITY_PTR` (0x12F344, `ENTITY_TABLE[0]`,
+  installed strictly after the main menu returns — covers the CONTINUE slot-pick microwindow).
+  Lab-verified FALSE at title/menu, TRUE across 14 in-game states incl. battles and the new-game
+  opening (fresh multiworld slots deliver). Belt kept: the `_notify_received` per-session
+  high-water mark still silences banner replays on a counter rollback.
+- **Two delivery-path defects from the same sittings.** Inventory-first delivery ignored the
+  third inventory array — vanilla `giveItem` keeps id / quantity / order-obtained key in
+  lockstep, the client wrote only the first two, and the inventory sort submenu orders by the
+  stale key; fixed in `_place_in_free_slot` (deliverer + Auto Pilot reconciler). And "foreign
+  items go to the bank with a non-full inventory": the deliverer banked on a single unreadable
+  tick because `_deliver_items` advanced the `items_received` counter **unconditionally**, and
+  `_inventory_scan_bound` invented a bound of 10 from a size byte of 0. Fixed: deliverers may now
+  return `None` to **defer** (counter untouched, retried next tick), and both inventory writers
+  gate on `_inventory_is_live` (`RAM_INVENTORY_SIZE` ∈ {10, 20, 30} — the only values
+  `setInventorySize` and the keychain reconciler ever write); the bank fallback is reached only
+  by its three legitimate causes and logs which one fired.
+
+**2026-09-01 — Factorial Town gate option + notification QoL.** New option **`factorial_gate`**
+(always_open / vanilla (default) / shuffled) for Andromon's iron door between Gear Savanna and
+Factorial Town: item "Factorial Town Gate" (id 5003, shuffled only), region edges + rules in both
+directions in the non-vanilla modes (the door physically blocks both ways), a client pin in
+always_open, and the five-site neuter (trigger 328 → 329, Old-Fishrod style) emitted **whenever the
+option ≠ vanilla** — MAPHEAD §192's reader feeds the Andromon recruit chain (+3 PP), so a pinned
+328 would sequence-break it even in always_open; with the neuter the 329 → 330 → 240 recruit ladder
+completes without 328. Three nets green (`work/dw1_re/decomp/factorial_gate/NOTES.md` §9). The two
+research "blockers" (FACT05 e1 arrival soft-lock, GIAS02 e2 bounce loop) turned out to be a **lab
+artifact** — a phantom pad (`pcsx.json` PadType Auto merging a drifting host controller); with
+PadType=Keyboard both arrivals are clean, so no arrival patches ship and `warpTo 156 1` stays
+vanilla. The region-locking entry stub also landed (net-2 green, NOTES §10): Script 68 vm 1384 →
+stub @1688 in `SCRIPT_GATE_PATCHES["Factorial Town"]`, emitted iff Factorial Town is locked.
+**Notification QoL** (client-only, user decisions from the playtest): the queue is now unbounded
+(the "...and N more" overflow collapse is retired), an over-width "from/to <player>" half becomes
+its **own follow-up banner** instead of being dropped, and the banner duration went 150 → 30
+game-loop ticks (~1 s at the 30 Hz loop), so even large bursts drain fast. A `/bits` console
+command (5000 per call, queued to the watcher tick) joins the shared command processor as a
+testing aid.
+
 **Technique objective, remaining (set 2026-08-28):** the *data* half shipped above; still open
 are the two RE questions in §2.3 / §3.5 — does the element matrix enter `BTL_calculateDamage`,
 and can species technique lists gain slots (`.MMD` animation census) — and the species-list
@@ -361,7 +451,7 @@ shuffle they gate.
 | Generation logic | Test suite green; generic AP suite green |
 | Patcher | Sector-aware writes + EDC recalculation; every patch has a C-model net, a live-RAM net and one confirming ISO build |
 | Client | Unit-tested deliverers/reconcilers; end-to-end smoke passed 2026-04-28 |
-| **Human validation of the August batch** | **NOT DONE** — checklist at `work/dw1_re/BIZHAWK_SESSION_CHECKLIST.md`. This is the one thing standing between "lab-validated" and "release-validated". |
+| **Human validation of the August batches** | **First playtest DONE 2026-08-29 → 09-01** — it caught one release blocker (the boot hang) and five real defects, all fixed (§1.1). A second pass on a regenerated seed remains (§2.1). |
 
 ---
 
@@ -373,9 +463,10 @@ Grouped by **what blocks each item**, because that is what decides the order.
 
 | Item | What is needed | Why it matters |
 | --- | --- | --- |
-| **BizHawk validation session** | One play session on the real client against `work/dw1_re/BIZHAWK_SESSION_CHECKLIST.md` — now also the 2026-08-29 options (technique data, drops, gifts, QoL patches, digivolution, species lists, raising, music, notifications, the five re-gated borders). | Closes the August batches. May generate corrective work. |
+| **BizHawk validation — round 2, regenerated seed** | The first playtest (2026-08-29 → 09-01, three sittings) did its job: boot hang, flight-menu deadlock, story-fight stalls, Auto Pilot city rebuild, pre-save delivery and the banking bug all found and fixed (§1.1). Still needed: one session on a REGENERATED seed — the fixed story fights (plus the promised tested-fight list for the audit diff, §2.5), `factorial_gate` in its three modes, the 1-s unbounded banners, and the delivery log check. | Closes the corrective batch; `work/dw1_re/BIZHAWK_SESSION_CHECKLIST.md` is current. |
 | **Savestate batch** | The states in [SAVESTATE_REQUESTS.md](worlds/digimon_world/tools/SAVESTATE_REQUESTS.md) — see §4. **First sitting done 2026-08-28** (6 states incl. the `debug_warp` teleport hub); Medium rows remain | Patch validation in the real game (fishing, training, post-game heap margin) |
 | **Logic review** | The user's own pass over `rules.py` | — |
+| **`work/` tree missing (found 2026-09-05)** | The gitignored `work/` directory is absent from the repo root — with it the RE-lab workbench: the Ghidra project, ~50 savestates, every mission's NOTES.md evidence record (free_flight, client_gates, factorial_gate, story_swap_audit, ogremon_chain, item_para_reloc, …), LEDGER.md, patch specs (`patch_sites.json`, the story-swap §5.2 operand table) and BIZHAWK_SESSION_CHECKLIST.md. Not in the Recycle Bin; no moved copy in the obvious locations. **User to confirm: moved (where?) or lost.** If lost: shipped code is unaffected (everything landed in the repo + tests), but the evidence archives and the lab need rebuilding before the next patch mission, and the story-swap §5.2 upgrade path loses its site table. | Blocks any future lab mission; decides whether the workbench must be rebuilt. |
 
 ### 2.2 Ready now — no RE, no user input
 
@@ -401,7 +492,7 @@ savestates are now for.
 | ~~**Enemy-stat scaling by sphere**~~ **SHIPPED 2026-08-28** as `enemy_stats: progressive` | Turned out to be data: every field Digimon is a `.MAP` record (`loadMapDigimon`, Ghidra export) that the battle copies verbatim (`BTL_initializeCombat`); no code hook. | Validated: `enemy_poc_map2.state`, `enemy_poc_battle.state` (edited record fought) | Done in the lab (3 nets). **Open**: the user's BizHawk pass, and whether the default policy (vanilla region budgets re-assigned by sphere depth, one factor per region so bosses stay proportionally tougher) is the balance they want. |
 | ~~**Species technique lists**~~ **SHIPPED 2026-08-29** as `species_technique_lists` (in-place, class- and element-preserving) | Settled by the `.MMD` animation census: lists cannot grow (a model carries animations for exactly its populated slots; only MegaSeadramon / Machinedramon have one spare), so the option re-fills slots in place. The element matrix is a damage multiplier (sum of the defender-specialty cells / 30, read from the BTL / STD assembly) and the partner AI's ranking key. | None. Runtime check in the user's BizHawk pass (a wild Digimon using a swapped technique; brain training / battle learning of a swapped partner technique). | Provenance only: a VERIFIED replay of `BTL_calculateDamage` against the three battle states. |
 | ~~**Digivolution randomization**~~ **SHIPPED 2026-08-29** (`digivolution_randomization` + obtain-all / requirements / special) | Tree `EVO_PATHS_DATA[62]` (`EvolutionPath{from[5], to[6]}`, 0x8012B66C, walked by `evolution.c:60-230`; Fresh -> In-Training hard-coded in `getFreshEvolutionTarget`), requirements `EVO_REQ_DATA[63]` (`evl.h:47-62`, scored by `calculateRequirementScore` `evolution.c:303-411`), gains `EVO_GAINS_DATA[66]` (applied in `EVL_applyEvolution` 0x80063350, ASM-only — only Devimon's row is rewritten), special evolutions = SLUS immediates in `handleSpecialEvolutions` (`evolution.c:231-300`) + script bytes (`ROM_SPECIAL_EVO`). Pure data; no AP-logic change — the option warns that the three partner-gated areas become luck without `type_lock_unlocks`. | None. Runtime validation pending in the user's BizHawk pass (a natural digivolution under random requirements, a death digivolution, the suit). | Open follow-up only: `EVL_applyEvolution` decomp if the gains table is ever randomized beyond Devimon. |
-| ~~**Wild-digimon randomization**~~ **SHIPPED 2026-08-28** as `enemy_randomization` | Species = record type + MAPHEAD.SCN `loadDigimon`/`setDigimon` operands (`scriptSetDigimon` guard); models are malloc3'd whole (`loadMMD`), so swaps are heap-budgeted. | Validated: `enemy_poc_map0.state`, `enemy_poc_icemon_battle.state` (Icemon swap fought to the end) | Done for `wild`; `wild_and_story` ships **untested in a story cutscene** (a substitute may lack a scripted animation). Heap slack beyond size-neutral swaps unmeasured. |
+| ~~**Wild-digimon randomization**~~ **SHIPPED 2026-08-28** as `enemy_randomization` | Species = record type + MAPHEAD.SCN `loadDigimon`/`setDigimon` operands (`scriptSetDigimon` guard); models are malloc3'd whole (`loadMMD`), so swaps are heap-budgeted. | Validated: `enemy_poc_map0.state`, `enemy_poc_icemon_battle.state` (Icemon swap fought to the end) | Done for both modes: `wild_and_story` was playtested 2026-08-31, stalled on cutscene-scripted fights, and was fixed by the `SCRIPT_PLACED_GROUPS` exclusion — the mechanism is script-placed entities, not missing animations (§1.1); the 47-site in-script operand upgrade that lifts the exclusion is queued (§2.5). Heap slack beyond size-neutral swaps unmeasured. |
 | **Fishing locations (expansion)** | `src/fish/` (95 % in C). The 6 `FISH_REL` ITEM_PARA readers our relocation patched can now be read in C. | `fishing.state` — **still needed**: the relocation's FISH_REL readers have never been *exercised*; the lab has no fishing state | MEDIUM |
 | **Digivolution (v2 scope)** | `calculateRequirementScore`, `getNumMasteredMoves`, `hasDigimonRaised` in `src/main/evolution.c` / `script_common.c`; requirement table `EVO_REQ_DATA` @ 0x8012ABEC | `digivolve_accepted.state`, `species_raised.state` — for validating an AP digivolution item, not for RE | MEDIUM. The "ever raised" flag (trigger 512+form) can **veto** a digivolution whose stat requirements are met — an AP digivolution item must account for it. |
 | **Post-game heap margin** | None — measurement only | `mt_infinity.state`, `back_dimension.state` | LOW. The 8 KB ITEM_PARA claim sits 0x408 bytes above the glyph ring; late-game allocations unmeasured. |
@@ -416,6 +507,27 @@ and locations.
 
 ### 2.5 Known issues and debt
 
+- **Free flights' side effects** (2026-08-30): with the affordability gate patched out,
+  per-destination *pricing* is no longer expressible without reverting that site — and reverting
+  it brings back the `region_locking: all` seed-impossibility (a mandatory flight the player
+  cannot afford; `rules.py` models no bits source). The `/bits` console command stays as the
+  testing convenience for money-adjacent checks.
+- **Story-swap upgrade path** (queued, needs the lab): the 47 one-byte in-script operand patches
+  of `work/dw1_re/decomp/story_swap_audit/` §5.2 (`patch_sites.json`) would lift the
+  `SCRIPT_PLACED_GROUPS` exclusion entirely; verify script slots 199-202 against the archive u32
+  table and the script-48 collision first. Needs a regenerated seed; the user's tested-fight
+  list, when it arrives, gets diffed against the audit's per-screen predicted verdicts (NOTES
+  §4.1).
+- **RE landmine — DG.SCN slot 0 is a dead copy of MAPHEAD.SCN**: `getScript(0)` returns the
+  boot-resident MAPHEAD, so a "script 0" patch at a .bin offset inside 0x13FD5DB8..0x13FDD528
+  does nothing; script-0 patches must target MAPHEAD's own footprint (`maphead_bin_offset`).
+- **`_game_entered` residual hole**: the post-credits menu (`removeEntity` spares entity slots
+  0/1) can still pass the gate — the old, harmless noise in a far narrower window.
+- **Banner geometry is fixed** (top-right, `len*8+4` composite + the rasteriser's 244-px pen, the
+  game's only menu face): resizing or repositioning means a new lab pass on the
+  `_build_notify_top_words` fragments. Not queued.
+- **Delivery bank-fallback log**: confirm on the next session that items only bank for the three
+  legitimate causes; "no empty slot" during a 10-slot burst is by design.
 - `test_fill` fails on some random seeds under `region_locking: all` (pre-existing, not the batch).
 - Merit-shop `mark_bought` faults; the client reconciler is load-bearing. One unreproduced
   greyed-out-row sighting in Volume Villa.

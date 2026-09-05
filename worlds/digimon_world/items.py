@@ -114,6 +114,7 @@ _KEY_ITEMS: Final[dict[str, ItemEntry]] = {
     # the 5000+ "virtual access item" range.
     "Tropical Jungle Bridge": ItemEntry(5001, ItemClassification.progression),
     "Great Canyon Bridge":    ItemEntry(5002, ItemClassification.progression),
+    "Factorial Town Gate":    ItemEntry(5003, ItemClassification.progression),
 }
 
 # =============================================================================
@@ -981,6 +982,10 @@ def create_all_items(world: DigimonWorldWorld) -> None:
         skip_keys.add("Tropical Jungle Bridge")
     if int(world.options.great_canyon_unlock.value) != 2:
         skip_keys.add("Great Canyon Bridge")
+    # FactorialGateUnlock: same encoding; the door item only exists in
+    # shuffled (=2) — always_open pins the bit client-side instead.
+    if int(world.options.factorial_gate.value) != 2:
+        skip_keys.add("Factorial Town Gate")
 
     pool: list[Item] = []
     # Compute the bootstrap set once — anything in it is pre-collected

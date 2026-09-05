@@ -160,9 +160,9 @@ from .data.addresses import (
     ROM_ARENA_SECTION_51_BASES,
     ROM_BIN_BYTES,
     ROM_BIN_SHA1,
+    ROM_BIRDRA_FLIGHT_FREE_WORD_FORMAT,
+    ROM_BIRDRA_FLIGHT_FREE_WORD_PATCHES,
     ROM_BIRDRA_FLIGHT_GCANYON_PATCHES,
-    ROM_BIRDRA_FLIGHT_PRICE_OFFSETS,
-    ROM_BIRDRA_FLIGHT_PRICE_ZERO,
     ROM_BIRDRA_FLIGHT_TABLE_FORMAT,
     ROM_BIRDRA_FLIGHT_TABLE_PATCHES,
     ROM_BLUE_FLUTE_GIVEITEM_NEUTER_VALUE,
@@ -211,6 +211,8 @@ from .data.addresses import (
     ROM_EVO_REQUIREMENTS,
     ROM_EVO_STAT_GAINS,
     ROM_EVO_TO_FROM,
+    ROM_FACTORIAL_GATE_NEUTER_OFFSETS,
+    ROM_FACTORIAL_GATE_NEUTER_VALUE,
     ROM_FIELD_SPAWN_TRIGGER_FORMAT,
     ROM_FIELD_SPAWN_TRIGGER_PATCHES,
     ROM_FIX_LEO_CAVE_FORMAT,
@@ -1290,6 +1292,35 @@ def _write_ogremon_guard_tokens(patch: DigimonWorldProcedurePatch) -> None:
     patch.write_token(APTokenTypes.WRITE, ROM_DRIMOGEMON_BERSERK_GATE_OFFSET, ROM_DRIMOGEMON_BERSERK_GATE_VALUE)
 
 
+def _write_factorial_gate_neuter_tokens(
+    patch: DigimonWorldProcedurePatch, world: DigimonWorldWorld,
+) -> None:
+    """Decouple Andromon's quest from the iron-door trigger (FactorialGateUnlock).
+
+    Emitted whenever ``factorial_gate`` is NOT vanilla — including
+    ``always_open``. Five u16 trigger-id rewrites (328 -> 329, the
+    questline's own next flag, Old-Fishrod style): the quest-side
+    ``setTrigger`` and every quest-side reader move off the door bit, so
+    the AP-delivered (or client-pinned) 328 opens the DOOR only and the
+    Andromon recruit chain (+3 PP) stays quest-gated. Lab-validated
+    through the three nets 2026-09-01
+    (``work/dw1_re/decomp/factorial_gate/NOTES.md`` §9): with the neuter,
+    the apology sets 329 (not 328) and the 329 -> 330 -> 240 recruit
+    ladder completes without 328; an AP-early 328 cannot sequence-break.
+
+    Why not shuffled-only like the Great Canyon template: MAPHEAD §192's
+    reader feeds the recruit chain, so a pinned 328 in ``always_open``
+    would sequence-break it just the same.
+    """
+
+    if int(world.options.factorial_gate.value) == 1:  # 1 = vanilla
+        return
+    for offset in ROM_FACTORIAL_GATE_NEUTER_OFFSETS:
+        patch.write_token(
+            APTokenTypes.WRITE, offset, ROM_FACTORIAL_GATE_NEUTER_VALUE,
+        )
+
+
 def _write_lava_cave_gate_tokens(patch: DigimonWorldProcedurePatch) -> None:
     """Replace the boulder script's digimon-ID whitelist with an AP-controlled
     trigger gate.
@@ -1854,13 +1885,22 @@ def _write_birdra_flight_table_tokens(patch: DigimonWorldProcedurePatch) -> None
             struct.pack(ROM_BIRDRA_FLIGHT_TABLE_FORMAT, new_trigger_id),
         )
 
-    # QoL (unconditional, user-confirmed 2026-08-21): zero the u32 price
-    # field of all 6 destination entries in BOTH table copies (vanilla
-    # fares 1000..2500 bits). The engine handles price 0, so every
-    # flight becomes free once its trigger bit is delivered.
-    for offset in ROM_BIRDRA_FLIGHT_PRICE_OFFSETS:
+    # Free flights (unconditional QoL, lab-validated 2026-08-30). The
+    # table fares are left VANILLA on purpose: the 2026-08-21 "zero
+    # every fare" version was retired 2026-08-29 because the engine
+    # does NOT handle a price of 0 -- the destination list's input
+    # callback latches the fare into ``MAIN_D_8013500C`` and uses that
+    # same global as its re-entry guard, so a 0 fare re-shows the "Are
+    # you sure?" textbox on every X press and the warp is never
+    # reached. Freeness comes from three in-place word rewrites
+    # instead: drop the ``cost <= MONEY`` gate, drop the ``MONEY -=``,
+    # and print 0 in the menu's POINT column. Full evidence next to
+    # :data:`ROM_BIRDRA_FLIGHT_FREE_WORD_PATCHES` in ``data.addresses``.
+    for offset, patched_word, _vanilla_word in ROM_BIRDRA_FLIGHT_FREE_WORD_PATCHES:
         patch.write_token(
-            APTokenTypes.WRITE, offset, ROM_BIRDRA_FLIGHT_PRICE_ZERO,
+            APTokenTypes.WRITE,
+            offset,
+            struct.pack(ROM_BIRDRA_FLIGHT_FREE_WORD_FORMAT, patched_word),
         )
 
 
@@ -3123,6 +3163,7 @@ def write_patch(world: DigimonWorldWorld, output_directory: str) -> None:
     # offsets today, but keep the ordering contract anyway).
     _write_region_gate_tokens(patch, world)
     _write_old_fishrod_remap_tokens(patch)  # always-on; decouples cutscene from rod ownership
+    _write_factorial_gate_neuter_tokens(patch, world)  # no-op in vanilla mode
     _write_coelamon_cutscene_remap_tokens(patch)  # always-on; shore machine -> trigger 779
     _write_mansion_key_neuter_tokens(patch)  # always-on; vanilla key give -> AP location signal
     _write_frig_key_neuter_tokens(patch)  # always-on; same shape as Mansion Key
