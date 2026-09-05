@@ -52,6 +52,7 @@ Game-derived artifacts and per-session state. Never committed. Contains:
 | `ghidra_scripts/DW1FunctionStats.java` | Whole-program function census (address, name, size, callers, callees) to a TSV — the decomp coverage denominator. |
 | `ghidra_scripts/DW1ImportHeaders.java` | Parses dw_decomp's `include/dw/*.h` into the program's data-type manager, resolving PsyQ types (`POLY_FT4`, `DVECTOR`, ...) from the psx-loader's `psyq350.gdt` instead of parsing PsyQ headers; `<libgte.h>` etc. resolve to empty stubs in `work/dw1_re/ghidra_stub_includes/` (`setjmp.h` stub must define `jmp_buf`). Applied 2026-08-28: 48/48 headers, 1827 types. |
 | `ghidra_scripts/DW1ApplyExternTypes.java` | Applies those types to the globals: every `extern <Type> NAME[dims];` in `include/dw/` sets the data type at NAME's address; unsized `[]` arrays take their length from `symbols.txt` sizes. After this the decompiler renders `PARTNER_ENTITY.learnedMoves[1]` instead of a raw pointer deref. Run after the two imports above. |
+| `dw1_hub_rebuild.py` | **Rebuilds the teleport hub `debug_warp.state` from a cold boot, unattended** (title -> new game -> intro mash -> debug NPC set -> Mr. Warp's menu -> save -> self-test). See "Rebuilding the lab from nothing" below. |
 | `dw1_warp_state.py` | **Unattended savestate on any screen.** Loads the `debug_warp.state` hub (debug map, Mr. Warp open), pokes the resident script 164's warp byte (+1941 at 0x1B9ED8) to the target map id, presses CROSS twice through a self-removing Vsync listener, waits until `CURRENT_SCREEN` (0x134DA8) matches, then saves. `--god`, `--set-trigger N`, `--poke ADDR:HEX` (the hub's `warpTo` operand bytes sit at 0x1B9ED8+1940 = `4B 12 00 FF`: `--poke 0x1BA66E:<exit>` selects the landing exit slot, e.g. the arrival-only spawn of a dead slot = the far mouth of a screen) (applied after the hub state loads -- the way to test a MAPHEAD.SCN patch, whose boot-resident copy at 0x1B1D30 every savestate restores). Validated 2026-08-28 on screens 141, 6, 0 and 2. |
 | `dw1_enemy_census.py` | **Every field Digimon on the disc.** Parses each screen's `.MAP` entity records (species, position, hp/mp/off/def/spd/brn/bits, 4 move anim-ids + priorities, script id) into `work\dw1_re\enemy_census.tsv`; `--map N` prints one screen; `--bin` reads a patched disc (net-1 round-trip for record patches); `--emit-python` regenerates the world's `data/enemy_records.py` (full `MOVE_DATA` rows, species table with model heap sizes and drops, `ITEM_PARA` names/prices/sort/dropable, the 7x7 element matrix, the three digivolution tables, records, MAPHEAD `loadDigimon`/`setDigimon` sites); `--check-dump` proves the MAPHEAD opcode scan against the reference disassembly (1177/1177 on 2026-08-28). Needs `work\dw1_re\iso_files.json` (ISO file table) and `SLUS_010.32`. |
 | `dw1_mmd_census.py` | **Animation tables of every species' `.MMD` model.** Resolves `\CHDAT\MMDn\{code}.MMD` per species, reads the animation offset table (`mmd + u32[1]`, table-relative offsets, 0 = absent, length = first offset / 4) and reports, per species, how many technique ids `0x2E..0x3D` carry an animation versus how many list slots `DIGIMON_DATA` populates -> `work\dw1_re\mmd_census.tsv`; `--species N` dumps one table. Result (2026-08-29): lists can only be re-filled **in place** (140 species exact, MegaSeadramon / Machinedramon one spare slot, Kuwagamon clone 169 none) — the basis of `species_technique_lists`. |
@@ -204,3 +205,47 @@ decompiled C — prepend its bin to PATH so gcc finds `as`).
 - Reusable in-situ call harness: `work\dw1_re\dw1_call_harness.lua` (pause → forge
   GPR/pc, park ra at a scratch address → resume → read v0/memory). Judge results by
   v0+memory effects, never by the paused pc (often mid-vblank at 0x80000080).
+
+## Rebuilding the lab from nothing (proven 2026-09-05, after the loss of `work/`)
+
+`work/` is gitignored and was wiped once (see STATUS.md). Everything in it is regenerable in
+under an hour from the repo, the game image at the repo root and the references:
+
+| Piece | How | Time |
+| --- | --- | --- |
+| `work\dw1_re\SLUS_010.32` | `python worlds\digimon_world\tools\dw1_iso_extract.py extract SLUS_010.32 work\dw1_re` | seconds |
+| Ghidra project `work\dw1_re\ghidra\DW1.gpr` | `analyzeHeadless work\dw1_re\ghidra DW1 -import work\dw1_re\SLUS_010.32 -scriptPath worlds\digimon_world\tools\ghidra_scripts` (the psx loader autodetects the PS-X EXE; ~1 min of analysis), then `dw1_ghidra.ps1 -Script DW1ImportSymbols.java <all references\dw_decomp\config\symbols*.txt>`, `-Script DW1ImportHeaders.java references\dw_decomp\include <ext>\data\psyq340.gdt`, `-Script DW1ApplyExternTypes.java references\dw_decomp\include\dw`. Expected: ~1773 functions, ~9200 symbols (1154 FUN_ renamed, 6800 data labels), 46/48 headers (script.h/btl.h fail to parse, known), 143 extern types. | 5 min |
+| `pcsx.json`, `boot.lua`, memcards | created by `dw1_redux_launch.ps1` (`-FreshCards` before ANY new game: a NEW GAME occupies its save slot the moment it is created, and the START SLOT screen then refuses slot 1). **Then pin `pads[*].PadType = 2`** and relaunch: the default `0` (Auto) merges a drifting host controller into pad 1 and the title-menu cursor wanders (phantom pad). | 1 min |
+| `debug_warp.state` (the teleport hub) | `python worlds\digimon_world\tools\dw1_hub_rebuild.py` — cold boot -> NEW GAME -> CROSS masher through the intro (name defaults to `AAAAAA`) -> outside Jijimon's house (map 204, script 164) -> debug NPC set -> Mr. Warp's menu -> save; ends with a `dw1_warp_state.py` self-test. | ~8 min |
+| Every other field savestate | `dw1_warp_state.py --map <id> --out <name> [--god] [--set-trigger N] [--poke ADDR:HEX]` from the hub. `work\dw1_re\SAVESTATE_REBUILD.md` lists the recipes and the few states that need a human at the pad. | 20 s each |
+
+Facts the hub rebuild relies on (all live-verified 2026-09-05):
+
+- The debug NPC set is loaded by **MAPHEAD Section_204** (`setScript 164 204`) only when triggers 54
+  AND 55 are both clear **at the moment map 204 loads** (`if trigger(55) == false` -> `if trigger(54)
+  == true` -> else `setDigimon 117/30/117/117` into slots 0-3). A fresh game leaves 54 set (byte
+  `0x1BDFD3` = 0x40), so: write 0, walk UP into the house (218), walk DOWN back out. Inside the
+  house the resident script is 178 (193 during the intro); the debug NPCs stand outside, around the
+  house, which is what "the debug NPCs render outside" meant.
+- The intro visits map 204 twice (a brief "He arrived!" beat on 204, then the opening on 238, the
+  house on 218, then 204 for real): "screen 204 + script 164" is only the end once no script runs
+  any more (`IS_SCRIPT_PAUSED` 0x134FF4 == 1, the name is inverted) with the masher off.
+- Door cells fire on ENTRY only: you spawn on the house door cell, so to leave you step away
+  (~1 s) and walk back onto the arrival coordinates; holding DOWN alone never exits.
+- Mr. Warp = NPC slot 0 of that set, script 164 **Section_5** (his talk: stat presets, a colour test
+  box, the date, "I'm Mr. Warp", then `Near / Far away / Very far away`; the `Near` list is
+  `warpTo 18 / 12 / 24` at +1940/+1944/+1948, which is the byte `dw1_warp_state.py` pokes).
+  Jijimon's debug dialog (Giromon room / Toy deepest / Fight check / Last Battle) is Section_54.
+- **NPC-move talk trick**: NPC talk is collision-based, so write the NPC's
+  `PositionData.location.x/z` (posData+0x78/+0x80) AND `Entity.anim.locX/locZ` (entity+0x10/+0x18,
+  value = coordinate << 15) to the tamer's position (+60 on x) and tap CROSS. Works from any distance.
+  Tamer entity `0x15576C` (+4 = PositionData*), NPC entities `0x155828`, 8 x 0x68 bytes, `scriptId`
+  at +0x65, `autotalk` +0x66, `isOnMap` +0x34.
+- Reading RAM: only small Lua `getMemPtr()` evals. **Range-check every pointer before indexing** — an
+  index past 2 MB (stale NPC `posData` on an unused slot) segfaults the emulator instantly.
+- Pad: `setOverride/clearOverride` from a self-removing Vsync listener; 8-frame taps are enough. In
+  the house, DOWN walks out through the door you came in by; outside, directions map to world axes
+  as LEFT = -x, RIGHT = +x, DOWN+LEFT = (-x,-z), DOWN+RIGHT = (+x,-z), UP+LEFT = (-x,+z).
+- Screen ids used by the regenerated states: item shop 216, secret shop 217, recycle 131, merit /
+  Gekomon 141, gym 112, fishing 6, curling 134, arena 205, Birdramon Messenger 207 (ROOM12; the flight list needs his dialog open), Factorial gate 71/156,
+  Mt. Infinity 219, Machinedramon 225, Back Dimension 226, opening 238, Jijimon's house 218.
