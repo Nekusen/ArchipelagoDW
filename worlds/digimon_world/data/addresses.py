@@ -11651,9 +11651,11 @@ BGM_MODE_DAY_ONLY: Final = 1
 #
 # Client contract (``client.NotificationQueue``): write only when the flag
 # reads 0 -- text first (<= 63 ASCII bytes, NUL-terminated, renderable set
-# ``A-Z a-z 0-9 space ! ' + , - . : ; = ?``, mixed case, <= 26 characters so
-# the ``len*8+4`` composite width holds), then flag = 1. Flag 1 is "still
-# owed", never free.
+# ``A-Z a-z 0-9 space ! ' + , - . : ; = ?``, mixed case, <= 26 characters,
+# padded with trailing spaces to <= 30 until the ``len*8+4`` composite rect
+# covers the drawn width -- capitals and ``+ - =`` draw 12 px, the rest 8 or
+# less, so an unpadded "E-Crystals" lost its tail), then flag = 1. Flag 1 is
+# "still owed", never free.
 
 # Callback placement — MOVED 2026-08-29 (evening). It first sat at 0x80096650,
 # "the 116-B free range after the ITEM_PARA boot seed hook" — true only for the
@@ -11678,6 +11680,7 @@ NOTIFY_MAILBOX_SIZE: Final = 68
 NOTIFY_TEXT_OFFSET: Final = 4
 NOTIFY_TEXT_MAX: Final = 63                      # bytes before the NUL
 NOTIFY_TEXT_MAX_CHARS: Final = 26                # the renderer's practical width cap (mixed case)
+NOTIFY_TEXT_MAX_PADDED: Final = 30               # text + trailing-space padding: rect 30*8+4 = the 244-px pen
 NOTIFY_DURATION_FRAMES: Final = 30               # immediate in word 11 (0x240C0020 = 32 = 2 + 30)
 # ^^^ 30 iterations of the 30 Hz draw loop ~= 1 s on screen. Shortened from the
 # original 150 (~5 s) after the 2026-08-29 playtest: back-to-back sends queued up

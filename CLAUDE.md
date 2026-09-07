@@ -257,6 +257,20 @@ These come from [docs/style.md](docs/style.md) and the ruff config and override 
   five-site neuter whenever ≠ vanilla); notification queue unbounded, the
   player half as its own banner, duration 150 → 30 ticks (~1 s). Suite
   1223 / 81 options. Full detail: STATUS.md §1.1.
+- **2026-09-07** — second playtest report, six fixes (logic + client + data,
+  no ROM change): the G Canyon Top flight is in logic whenever Great Canyon
+  is locked (the slot reads bit 878 = Birdramon Recruit + GC Region Access;
+  unlocked seeds keep it out — vanilla bit 221); `_apply_region_locks` walks
+  `Region.entrances` so the `factorial_gate` door pair gets its Region
+  Access terms; the notification sanitizer **pads** with trailing spaces
+  (capitals draw 12 px against the 8 px/char rect) instead of trimming;
+  **Andromon** is Factorial Town reach only, 0 PP (chain read from Scripts
+  151/154/180 — the "four buildings" model was Giromon's; the non-vanilla
+  `factorial_gate` neuter makes the chain skip the door bit by design);
+  Amazing Rod + Merit Shop rows require `CanReachRegion("Card Vending")`;
+  `species_technique_lists` keeps finisher slots (58..112) vanilla (a
+  foreign finisher = empty Finish!! attack). Found: the generic fill fails
+  ~10 % of seeds under `region_locking: all` (STATUS.md §2.5). Suite 1263.
 - **2026-08-28**: jype0's byte-matching `dw_decomp` adopted as the reading
   source for game code (see References); its symbols, structs and typed
   globals are in the Ghidra project. Audits against it found no model

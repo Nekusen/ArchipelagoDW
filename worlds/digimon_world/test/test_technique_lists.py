@@ -35,8 +35,8 @@ class TestPools(unittest.TestCase):
         self.assertEqual(fire_normals, list(range(0, 8)))
         self.assertTrue(all(tl.ELEMENT_OF[t] == tl.ELEMENT_OF[0] for t in fire_normals))
         self.assertEqual(tl.candidate_pool(115), [115])         # a bubble never moves
-        finisher_pool = tl.candidate_pool(58)
-        self.assertTrue(all(58 <= t <= 112 and tl.ELEMENT_OF[t] == tl.ELEMENT_OF[58] for t in finisher_pool))
+        self.assertEqual(tl.candidate_pool(58), [58])           # finishers never move either (2026-09-07)
+        self.assertEqual(tl.candidate_pool(112), [112])
 
     def test_shuffleable_species(self) -> None:
         species = tl.shuffleable_species()
@@ -59,8 +59,8 @@ class TestRandomizeList(unittest.TestCase):
                 for k in populated:
                     self.assertEqual(tl.tech_class(moves[k]), tl.tech_class(vanilla[k]), (species_id, k))
                     self.assertEqual(tl.ELEMENT_OF[moves[k]], tl.ELEMENT_OF[vanilla[k]], (species_id, k))
-                    if vanilla[k] >= tl.BUBBLE_FIRST:
-                        self.assertEqual(moves[k], vanilla[k])
+                    if vanilla[k] >= tl.FINISHER_FIRST:
+                        self.assertEqual(moves[k], vanilla[k])   # finisher + bubble slots stay vanilla
                 used = [m for m in moves if m != enemies.NO_MOVE]
                 self.assertEqual(len(used), len(set(used)), species_id)
             if 60 in lists:

@@ -171,7 +171,8 @@ shipped:
   `work/dw1_re/decomp/mmd_census/NOTES.md`) settled the open question: a model carries an
   animation for exactly its populated slots (140 species exact, MegaSeadramon / Machinedramon one
   spare, Kuwagamon clone 169 none), so lists can only be re-filled **in place**. The option
-  re-draws every populated slot inside its class (normal / finisher / bubble) and element, so the
+  re-draws every populated normal-technique slot inside its element (finisher and bubble slots
+  stay vanilla since 2026-09-07 — a foreign finisher broke the Finish!! attack), so the
   partner keeps learning from battle and brain training; `enemy_stats` reads the shuffled lists
   (`ListPlan.species_table` threaded through `enemies.py`). Module `technique_lists.py`.
 - **`partner_raising`** — `RAISE_DATA` readers pinned per field (agent, dw_decomp + Ghidra
@@ -439,6 +440,38 @@ game-loop ticks (~1 s at the 30 Hz loop), so even large bursts drain fast. A `/b
 command (5000 per call, queued to the watcher tick) joins the shared command processor as a
 testing aid.
 
+**2026-09-07 — second playtest report, six fixes (logic + client + data; no ROM change).**
+(1) **G Canyon Top flight**: under region locking with Great Canyon locked the flight slot reads
+bit 878, which the client pins on Birdramon Recruit + Great Canyon Region Access, yet `rules.py`
+kept the `File City → Great Canyon` edge at `False_()` (the wiki's "must have been there once")
+— the tracker showed nothing inside Great Canyon with both items in hand. The edge is now
+`Has(Birdramon Recruit)` whenever Great Canyon is locked (the lock pass ANDs the access term);
+unlocked seeds keep it out of logic because the slot then reads Birdramon's vanilla field-recruit
+bit (221, an engine read that is not redirected). (2) **Factorial door vs region locks**:
+`_apply_region_locks` walked `regions._EDGES`, but the `factorial_gate` door pair is connected
+outside it, so Factorial Town → Gear Savanna carried no Gear Savanna Region Access term while the
+ROM gates both directions; the pass now walks `Region.entrances`. (3) **Notification tails**
+("E-Crystals" → "E", "FurryZX" → "FurryZ"): the sanitizer trimmed characters until the drawn width
+fitted the `len*8+4` blit rect, and capitals / `+ - =` draw 12 px, not 8. It now pads with
+trailing spaces (8 px of rect for 4 px of pen each; cap 30 with padding, `NOTIFY_TEXT_MAX_PADDED`)
+and only trims when padding cannot fit. (4) **Andromon** read from Scripts 151/154/180: the chain
+is FACT08B cutscene (344) → Andromon (341) → Numemon's sewer fight (vanilla 211, an unpatched
+read) → door 328/329 → data read (330) → join (240, +3 PP), all inside Factorial Town with no
+prosperity or building check — the "four buildings + 15 PP" model was Giromon's requirement
+(Script 152 §81: 329 + one of Tyrannomon/Meramon/Garurumon/Frigimon, patched to the AP bits;
+Giromon is not a location). Andromon is 0 PP with no extra rule; the sewer Nanimon site (species
+171 after 330) likewise. (5) **Merit rows need cards**: Geko Swamp is reachable without Gear
+Savanna (Misty Trees flight + walk-back), so `Amazing Rod Pickup` sat in logic with no card
+source; it and the 14 Merit Shop rows now require `CanReachRegion("Card Vending")` (either
+machine). (6) **`species_technique_lists` broke the Finish!! attack** (empty animation, no hit):
+the partner's finisher is `moves[3]` → `entityGetTechFromAnim` → the list's finisher-class id, and
+a foreign species' finisher does not carry its effect; finisher slots (58..112) now stay vanilla
+like bubbles — only normal-technique slots shuffle. Tests: `test_playtest_fixes.py` (+11), suite
+1263 / 4 skipped. **Found on the way**: the generic `test_fill` fails ~10 % of seeds under
+`region_locking: all` (4/40 on the old rules, 4/40 on the new; 6/40 with `bridge_unlock:
+shuffled`, 7-9/40 with lava shuffled too) — sphere-1 starvation with everything locked; the new
+test classes run rules only (`run_default_tests = False`). §2.5.
+
 **Technique objective, remaining (set 2026-08-28):** the *data* half shipped above; still open
 are the two RE questions in §2.3 / §3.5 — does the element matrix enter `BTL_calculateDamage`,
 and can species technique lists gain slots (`.MMD` animation census) — and the species-list
@@ -529,6 +562,12 @@ and locations.
 - **Delivery bank-fallback log**: confirm on the next session that items only bank for the three
   legitimate causes; "no empty slot" during a 10-slot burst is by design.
 - `test_fill` fails on some random seeds under `region_locking: all` (pre-existing, not the batch).
+  Quantified 2026-09-07 with fixed seeds 1..40: 4/40 with `region_locking: all` alone (identical
+  before and after that day's rule fixes), 6/40 adding `bridge_unlock: shuffled`, 7-9/40 adding
+  `lava_cave_access: shuffled` too — `FillError: No more spots to place ~65 items` with only
+  File City + Native Forest in sphere 1. Real generation of such a single-game seed fails the same
+  way; a multi-game seed has more sphere-1 slots. Fix candidates: a larger starting kit under
+  `all`, or a sphere-1 minimum enforced in `generate_early`.
 - Merit-shop `mark_bought` faults; the client reconciler is load-bearing. One unreproduced
   greyed-out-row sighting in Volume Villa.
 - **Trigger-bit budget is nearly exhausted**: 781..783 are the last audited-free bits (780 went to

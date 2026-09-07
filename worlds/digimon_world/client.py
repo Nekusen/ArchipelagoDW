@@ -124,6 +124,7 @@ from .data.addresses import (
     NOTIFY_FLAG_PENDING,
     NOTIFY_TEXT_MAX,
     NOTIFY_TEXT_MAX_CHARS,
+    NOTIFY_TEXT_MAX_PADDED,
     PIXIMON_MANUAL_LOCATION_RAM_BITS,
     RAM_CURRENT_BITS,
     RAM_CURRENT_BRAINS,
@@ -1209,18 +1210,37 @@ def notification_width(text: str) -> int:
 
 
 def notification_fits(text: str) -> bool:
-    """``renderMapName`` composites ``len * 8 + 4`` px and the rasteriser drops glyphs past the
-    244-px pen: the text must fit both."""
+    """``renderMapName`` blits a ``len * 8 + 4`` px rect of the composited text and the
+    rasteriser drops glyphs past the 244-px pen: the drawn width must fit both."""
 
     return notification_width(text) <= min(NOTIFY_PEN_LIMIT, len(text) * 8 + 4)
 
 
+def pad_notification(text: str) -> str:
+    """Trailing spaces until the composite rect covers the drawn width.
+
+    Every character widens the blit rect by 8 px, but capitals and ``+ - =`` draw 12 px, so an
+    upper-case-heavy message overflows its own rect and loses its tail ("E-Crystals" showed as
+    "E", "FurryZX" as "FurryZ" — 2026-09-07 playtest). A trailing space adds 8 px of rect for 4 px
+    of pen, so a few of them make the rect wide enough without trimming a glyph.
+    """
+
+    padded = text
+    while notification_width(padded) > len(padded) * 8 + 4:
+        padded += " "
+    return padded
+
+
 def sanitize_notification(text: str) -> str:
-    """Reduce ``text`` to the renderable set, collapse blanks and trim it until it fits the
-    banner (<= :data:`NOTIFY_TEXT_MAX_CHARS` characters and the width rule)."""
+    """Reduce ``text`` to the renderable set, collapse blanks, pad it so its rect holds every
+    glyph and, only if that still does not fit the banner (<= :data:`NOTIFY_TEXT_MAX_CHARS`
+    characters of text, <= :data:`NOTIFY_TEXT_MAX_PADDED` with the padding), trim it."""
 
     cleaned = " ".join("".join(c if c in NOTIFY_ALLOWED_CHARS else " " for c in text).split())
-    while cleaned and (len(cleaned) > NOTIFY_TEXT_MAX_CHARS or not notification_fits(cleaned)):
+    while cleaned:
+        padded = pad_notification(cleaned)
+        if len(cleaned) <= NOTIFY_TEXT_MAX_CHARS and len(padded) <= NOTIFY_TEXT_MAX_PADDED:
+            return padded
         cleaned = cleaned[:-1].rstrip()
     return cleaned
 
@@ -1242,7 +1262,7 @@ def _with_player(text: str, ctx: Any, slot: int | None, preposition: str) -> lis
     if not name:
         return [text]
     longer = f"{text} {preposition} {name}"
-    if sanitize_notification(longer) == longer:
+    if sanitize_notification(longer).rstrip() == longer:
         return [longer]
     return [text, f"{preposition} {name}"]
 

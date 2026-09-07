@@ -48,6 +48,7 @@ from .data.addresses import (
     GEKOMON_LOCATION_NAME,
     ITEM_SHOP_LOCATION_NAMES,
     ITEM_SHOP_TIER_COUNTS,
+    MERIT_SHOP_LOCATION_NAMES,
     PIXIMON_MANUAL_LOCATION_NAME,
     SECRET_SHOP_ITEMS_PER_CLERK,
     SECRET_SHOP_LOCATION_NAMES,
@@ -59,7 +60,7 @@ from .locations import (
     RECRUIT_PP_REQUIREMENTS,
 )
 from .options import get_locked_regions
-from .regions import _EDGES, region_access_item_name
+from .regions import region_access_item_name
 
 if TYPE_CHECKING:
     from .world import DigimonWorldWorld
@@ -106,6 +107,7 @@ def set_all_rules(world: DigimonWorldWorld) -> None:
     _set_nanimon_quest_rules(world)
     _set_arena_cup_rules(world)
     _set_shop_rules(world)
+    _set_merit_rules(world)
     _set_piximon_manual_rule(world)
     _set_ogremon_quest_chest_rules(world)
     _set_chest_rules(world)
@@ -121,10 +123,15 @@ def _apply_region_locks(world: DigimonWorldWorld) -> None:
 
     * Runs AFTER :func:`_set_entrance_rules` so existing per-edge rules
       (Birdramon flight gates, bridge unlocks, etc.) are already in place.
-    * For every locked region L, iterates over all ``(source, L)`` pairs
-      in :data:`worlds.digimon_world.regions._EDGES` and uses
+    * For every locked region L, iterates over every entrance INTO L as
+      the region graph actually has it (``Region.entrances``) and uses
       :func:`worlds.generic.Rules.add_rule` to AND a resolved
-      ``Has("L Region Access")`` term onto that entrance.
+      ``Has("L Region Access")`` term onto that entrance. Walking the
+      live graph rather than :data:`worlds.digimon_world.regions._EDGES`
+      covers the option-conditional edges too — the ``factorial_gate``
+      door pair is connected outside ``_EDGES`` and the 2026-09-07
+      playtest had Factorial Town → Gear Savanna bypassing Gear Savanna
+      Region Access in logic (the ROM gates both directions).
     * ``add_rule`` cleanly handles both the "no existing rule" case
       (free edge → just install our rule) and the "rule already set"
       case (lambda-wrap with AND on the resolved callables).
@@ -141,13 +148,10 @@ def _apply_region_locks(world: DigimonWorldWorld) -> None:
     locked = get_locked_regions(world.options)
     if not locked:
         return
-    for source, target in _EDGES:
-        if target not in locked:
-            continue
+    for target in sorted(locked):
         access_rule = Has(region_access_item_name(target)).resolve(world)
-        entrance_name = f"{source} to {target}"
-        entrance = world.multiworld.get_entrance(entrance_name, world.player)
-        add_rule(entrance, access_rule, combine="and")
+        for entrance in world.get_region(target).entrances:
+            add_rule(entrance, access_rule, combine="and")
 
     # Special case (lab C3 gate, 2026-08-21): the Beetle Land return
     # ferry is ROM-gated on **Native Forest** Region Access when Native
@@ -212,28 +216,31 @@ def _set_entrance_rules(world: DigimonWorldWorld) -> None:
             world, "File City", region,
             Has("Birdramon Recruit") & Has(flight_item),
         )
-    # G Canyon Top is the 6th Birdramon-Messenger destination, but its
-    # in-game availability isn't simply "Birdramon Recruit set." In
-    # vanilla DW1 the player must have physically reached G Canyon Top
-    # at least once via the Greatlake bridge before the flight slot
-    # becomes navigable; Birdramon Recruit alone is not enough in
-    # general AP logic.
+    # G Canyon Top is the 6th Birdramon-Messenger destination (flight-table
+    # entry 0). Its gate is trigger 221 — Birdramon's VANILLA recruit bit,
+    # which only the field cutscene at Great Canyon sets (that engine read
+    # is not redirected to the AP mirror; see the isTriggerSet-wrapper
+    # preamble in data/addresses.py). So in a seed where Great Canyon is
+    # NOT locked the flight can never be the first way in — whoever has the
+    # bit has been there — and the edge stays out of logic; the GC-bridge
+    # edge is the modeled entry.
     #
-    # The ``starting_region: great_canyon`` bootstrap kit is the only
-    # case where AP wants to treat this flight as accessible from the
-    # start — the kit pre-collects ``Birdramon Recruit`` and the
-    # ``Great Canyon Region Access`` and implicitly stands in for the
-    # "you've been here once" precondition that the start kit
-    # represents thematically. For every other ``starting_region`` (and
-    # under ``region_locking: off`` / ``custom``), this flight edge is
-    # unreachable in AP logic; the bridge / GC-bridge AP item remains
-    # the only AP-modeled way to walk into Great Canyon.
+    # When Great Canyon IS locked this seed, the patcher rewrites entry 0
+    # to trigger 878 and the client pins that bit on ``Birdramon Recruit``
+    # AND ``Great Canyon Region Access`` (both AP items), so the flight is
+    # a sanctioned entry: rule = Birdramon Recruit here, the Region Access
+    # term is ANDed on by ``_apply_region_locks``. Fixed 2026-09-07 — the
+    # first playtest held both items and had nothing in Great Canyon in
+    # logic. The ``starting_region: great_canyon`` kit (Birdramon Recruit
+    # + Great Canyon Region Access, only valid under ``region_locking:
+    # all``) is the same case.
     from .options import StartingRegion
-    if int(options.starting_region.value) == StartingRegion.option_great_canyon:
-        _set_entrance_rule(
-            world, "File City", "Great Canyon",
-            Has("Birdramon Recruit"),
-        )
+    gc_flight_modeled = (
+        "Great Canyon" in get_locked_regions(options)
+        or int(options.starting_region.value) == StartingRegion.option_great_canyon
+    )
+    if gc_flight_modeled:
+        _set_entrance_rule(world, "File City", "Great Canyon", Has("Birdramon Recruit"))
     else:
         _set_entrance_rule(world, "File City", "Great Canyon", False_())
 
@@ -664,37 +671,27 @@ def _drimogemon_extra(world: DigimonWorldWorld):
     return None
 
 
-# Andromon's recruit requires File City to host all four major
-# buildings, which in turn need specific recruits to "create" them:
+# Andromon (Factorial Town): NO extra rule. His chain lives entirely inside
+# Factorial Town, read straight from the scripts (2026-09-07 — the earlier
+# "four File City buildings + 15 PP" model came from the wikis and is
+# wrong; that restaurant requirement is Giromon's, who is not an AP
+# location):
 #
-#   * **Hospital** — Centarumon. His recruit fight is in Tropical
-#     Jungle (Amida Forest); reaching Tropical Jungle is sufficient.
-#   * **Arena** — Greymon + 15 PP. Greymon is always reachable in
-#     File City and the 15 PP gate is in :data:`RECRUIT_PP_REQUIREMENTS`,
-#     so no extra rule is needed.
-#   * **Restaurant** — either Meramon OR Tyrannomon "creates" it
-#     (the other minor recruits only "join"). Meramon lives in
-#     Meramon Tunnel; Tyrannomon lives in Ancient Dino Region. Either
-#     path is sufficient.
-#   * **Item Shop** — Coelamon. The client pins his vanilla
-#     recruit-block bit to 1 each tick (see addresses.py
-#     ``COELAMON_RECRUIT_BIT``) so the game treats the shop as built
-#     without any AP logic gate; the restored Coelamon AP location
-#     (2026-08-22) runs on its own remapped trigger and doesn't change
-#     this. No extra rule.
+#   1. FACT08B walk-on cutscene (Script 154 §51)              -> trigger 344
+#   2. talk to Andromon (Script 151 §5: 344 & !211 & !341)    -> 341
+#   3. sewer FACT11B: Numemon's fight (Script 180 §6, after the
+#      §52 walk-on 340 and 341)                              -> 211 — the
+#      VANILLA bit: Script 151's read at vm 2380 is not in the recruit-read
+#      patch table, so it is the physical fight, not the AP item
+#   4. talk to Andromon (211 & !328)                          -> 328 (the
+#      door; non-vanilla ``factorial_gate`` neuters it to 329)
+#   5. vanilla only: a File City TWNB13 visit (MAPHEAD §192)  -> 329
+#   6. talk to Andromon (329): the data-read cutscene         -> 330
+#   7. talk to Andromon (330): "Andromon joins the city!"     -> 240, +3 PP
 #
-# ``CanReachRegion("Meramon Tunnel")`` transitively requires Lava Cave
-# Access in shuffled LCA mode (via the entrance rule), so we don't need
-# to AND it explicitly here. In vanilla LCA mode the Drill Tunnel →
-# Meramon Tunnel edge is free in AP logic (the in-game Champion-tier
-# boulder is left as the player's responsibility), so reaching Meramon
-# Tunnel is logic-free — see :func:`_drimogemon_extra` for the matching
-# stance on the Drimogemon recruit.
-def _andromon_extra(_world: DigimonWorldWorld):
-    restaurant = (
-        CanReachRegion("Meramon Tunnel") | CanReachRegion("Ancient Dino Region")
-    )
-    return CanReachRegion("Tropical Jungle") & restaurant
+# No pstat, building or prosperity check anywhere, and File City is always
+# reachable, so region reach (Whamon's ferry or the Gear Savanna door) is
+# the whole rule; ``RECRUIT_PP_REQUIREMENTS["Andromon"]`` is 0.
 
 
 _RECRUIT_EXTRA_RULES = {
@@ -722,7 +719,6 @@ _RECRUIT_EXTRA_RULES = {
     # modes (the corresponding AP item isn't in the pool).
     "Drimogemon":   _drimogemon_extra,
     "Coelamon":     _coelamon_extra,   # restored 2026-08-22 (bridge gate)
-    "Andromon":     _andromon_extra,
 }
 
 
@@ -852,7 +848,9 @@ def _set_keyitem_pickup_rules(world: DigimonWorldWorld) -> None:
       from hooking him while fishing in Dragon Eye Lake.
     * ``Leomonstone Pickup`` requires 45 Prosperity Points — Leomon's
       Ancestral Cave is gated by Drimogemon's daily dig, which only
-      breaks through to the cave once city Prosperity reaches 45."""
+      breaks through to the cave once city Prosperity reaches 45.
+    * ``Amazing Rod Pickup`` is a Merit Shop row: it needs a card source
+      (see :func:`_set_merit_rules`)."""
 
     mt_threshold = int(world.options.prosperity_goal.value)
     lava_mode = int(world.options.lava_cave_access.value)
@@ -918,14 +916,11 @@ def _set_nanimon_quest_rules(world: DigimonWorldWorld) -> None:
       fires after Section_5 (the WaruMonzaemon big-box minigame) has
       completed and set trigger 270 — i.e. the player has the Gear.
       Rule: ``Has("Gear")``.
-    * **Factorial Town (sewers)**: vanilla precondition is Andromon's
-      recruit completed. Andromon's recruit chain (per
-      :func:`_andromon_extra`) requires Tropical Jungle (Hospital) +
-      (Meramon Tunnel OR Ancient Dino Region) (Restaurant) + 15 PP
-      (Arena). Whamon Recruit is already implied by Factorial Town's
-      region rule but the other Andromon prereqs are independent and
-      must be replicated here. (The ``prosperity_goal`` option's floor
-      is 20, so the 15 PP gate is always reachable.)
+    * **Factorial Town (sewers)**: Nanimon (MAPHEAD §220 loads species
+      171 at sewer slot 2) appears once trigger 330 is set — Andromon's
+      data-read talk, one step before he joins — and that chain lives
+      entirely inside Factorial Town (see the Andromon note above
+      ``_RECRUIT_EXTRA_RULES``). Region reach only; no rule.
     * **Drill Tunnel** (Leomon's Ancestral Cave): vanilla precondition
       is Leomon recruited, which AP encodes as ``Has("Leomonstone")``
       (matches :func:`_leomon_extra`). The existing 45 PP cave-entrance
@@ -942,19 +937,8 @@ def _set_nanimon_quest_rules(world: DigimonWorldWorld) -> None:
         world.get_location("Nanimon Quest: Toy Town"), Has("Gear"),
     )
 
-    # Factorial Town — Andromon's recruit chain, kept in lockstep with
-    # :func:`_andromon_extra`. Whamon Recruit is already implied by
-    # Factorial Town's region rule but the rest of Andromon's chain
-    # is independent.
-    world.set_rule(
-        world.get_location("Nanimon Quest: Factorial Town"),
-        CanReachRegion("Tropical Jungle")
-        & (
-            CanReachRegion("Meramon Tunnel")
-            | CanReachRegion("Ancient Dino Region")
-        )
-        & _pp(15),
-    )
+    # Factorial Town — region reach only (Andromon's chain is internal to
+    # Factorial Town; see the note above ``_RECRUIT_EXTRA_RULES``).
 
     # Drill Tunnel — 45 PP cave entrance + Leomonstone (matches the
     # Leomon recruit gate). Both dropped when prosperity_goal < 45;
@@ -1081,6 +1065,32 @@ def _set_shop_rules(world: DigimonWorldWorld) -> None:
             Has("Progressive Secret Shop", count=secret_count)
             & Has("Progressive Item Shop", count=2),
         )
+
+
+def _set_merit_rules(world: DigimonWorldWorld) -> None:
+    """Gate every Merit-priced AP location on a source of Digimon cards.
+
+    ShogunGekomon's Merit Shop (Volume Villa, modeled inside Geko Swamp)
+    sells for Merit Points, and Merit is only earned by trading cards in
+    at that shop — the cards themselves come only from the two card
+    vending machines (Gear Savanna, free with the region; File City once
+    Betamon and Patamon are in town = ``Progressive Item Shop`` x2). Geko
+    Swamp is reachable without Gear Savanna (Birdramon Flight: Misty
+    Trees, then the walk back), so region reach alone put the Amazing Rod
+    in logic with no way to pay for it (2026-09-07 playtest). The
+    synthetic ``Card Vending`` region already encodes "either machine is
+    reachable", so the rule is ``CanReachRegion("Card Vending")`` — on
+    the v1 ``Amazing Rod Pickup`` row and on the 14 opt-in Merit Shop rows
+    alike. The price (how many cards) is not modeled, like money elsewhere.
+    """
+
+    world.set_rule(world.get_location("Amazing Rod Pickup"), CanReachRegion("Card Vending"))
+    for name in MERIT_SHOP_LOCATION_NAMES:
+        try:
+            location = world.get_location(name)
+        except KeyError:
+            break  # option off — none of the merit-shop rows exist
+        world.set_rule(location, CanReachRegion("Card Vending"))
 
 
 def _set_piximon_manual_rule(world: DigimonWorldWorld) -> None:

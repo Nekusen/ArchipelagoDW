@@ -31,6 +31,7 @@ from ..data.addresses import (
     NOTIFY_MAP_NAME_PTR_VANILLA,
     NOTIFY_MAP_NAME_SLOT,
     NOTIFY_TEXT_MAX_CHARS,
+    NOTIFY_TEXT_MAX_PADDED,
     NOTIFY_TOP_F1_RAM,
     NOTIFY_TOP_F1_VANILLA_WORDS,
     NOTIFY_TOP_F1_WORDS,
@@ -196,15 +197,34 @@ class TestSanitizer(unittest.TestCase):
         self.assertEqual(sanitize_notification('Got: "Meat" (x2) <now>'), "Got: Meat x2 now")
         self.assertEqual(sanitize_notification("   spaced   out   "), "spaced out")
         long = sanitize_notification("Sent: Progressive Item Shop Voucher of Doom")
-        self.assertLessEqual(len(long), NOTIFY_TEXT_MAX_CHARS)
+        self.assertLessEqual(len(long.rstrip()), NOTIFY_TEXT_MAX_CHARS)
+        self.assertLessEqual(len(long), NOTIFY_TEXT_MAX_PADDED)
         self.assertTrue(notification_fits(long))
         self.assertEqual(sanitize_notification("é\x80\x81"), "")
 
     def test_width_rule_trims_all_caps(self) -> None:
         caps = sanitize_notification("MASTER SWORD OF LEGEND HERE")
         self.assertTrue(notification_fits(caps))
-        self.assertLess(len(caps), len("MASTER SWORD OF LEGEND HERE"))
+        self.assertLess(len(caps.rstrip()), len("MASTER SWORD OF LEGEND HERE"))
+        self.assertLessEqual(len(caps), NOTIFY_TEXT_MAX_PADDED)
         self.assertTrue(notification_fits("Sent: Drill Tunnel Chest 03"))
+
+    def test_wide_glyphs_are_padded_not_trimmed(self) -> None:
+        """Capitals and ``-`` draw 12 px against the 8 px/char blit rect: the sanitizer now pads
+        with trailing spaces instead of dropping the tail (2026-09-07 playtest: "E-Crystals"
+        showed as "E", "FurryZX" as "FurryZ")."""
+
+        from ..client import notification_width, pad_notification
+
+        for text in ("Got: E-Crystals", "from FurryZX", "Sent: E-Crystals", "Got: MP Floppy"):
+            out = sanitize_notification(text)
+            self.assertEqual(out.rstrip(), text, text)
+            self.assertTrue(notification_fits(out), text)
+            self.assertLessEqual(len(out), NOTIFY_TEXT_MAX_PADDED)
+            self.assertLessEqual(notification_width(out), len(out) * 8 + 4, text)
+        self.assertEqual(sanitize_notification("Got: E-Crystals"), "Got: E-Crystals ")
+        self.assertEqual(sanitize_notification("from FurryZX"), "from FurryZX ")
+        self.assertEqual(pad_notification("Got: Meat"), "Got: Meat")      # nothing to pad
 
 
 class TestQueue(unittest.TestCase):
@@ -313,6 +333,18 @@ class TestClientContract(unittest.TestCase):
         # Too long for one banner: the receiver now gets a follow-up
         # banner instead of being dropped (2026-09-01).
         self.assertEqual(client._notifications.pop(), "Sent: Ultimate Digivolver")
+        self.assertEqual(client._notifications.pop(), "to Link")
+        # Wide glyphs (2026-09-07): every character survives; each banner is padded to its rect.
+        ctx.player_names[3] = "FurryZX"
+        client._notify_received(ctx, _Item(10, 3), "E-Crystals", 2)
+        self.assertEqual(client._notifications.pop(), "Got: E-Crystals ")
+        self.assertEqual(client._notifications.pop(), "from FurryZX ")
+        client._notify_received(ctx, _Item(10, 2), "E-Crystals", 3)
+        self.assertEqual(client._notifications.pop(), "Got: E-Crystals from Link")
+        ctx.item_names._by_slot[2][22] = "E-CRYSTALS"
+        sent = {"type": "ItemSend", "item": _Item(22, 1), "receiving": 2}
+        client.on_package(ctx, "PrintJSON", sent)  # type: ignore[arg-type]
+        self.assertEqual(client._notifications.pop(), "Sent: E-CRYSTALS" + " " * 9)
         self.assertEqual(client._notifications.pop(), "to Link")
         client.on_package(ctx, "PrintJSON", {"type": "ItemSend", "item": _Item(10, 2), "receiving": 1})  # type: ignore[arg-type]
         client.on_package(ctx, "PrintJSON", {"type": "Hint", "item": _Item(20, 1), "receiving": 2})  # type: ignore[arg-type]

@@ -265,14 +265,13 @@ RECRUIT_PP_REQUIREMENTS: Final[dict[str, int]] = {
     "Numemon": 0,
     "Giromon": 0,
     "MetalMamemon": 0,
+    # Andromon: 0 PP — his chain (FACT08B cutscene -> Numemon's sewer fight
+    # -> the door -> data read -> join) has no prosperity or building gate
+    # anywhere (Scripts 151/154/180, 2026-09-07; the "four buildings /
+    # ~15 PP" model came from the wikis and was Giromon's requirement).
+    "Andromon": 0,
     # 15 PP
     "Greymon": 15,
-    # Andromon: vanilla in-game gate is technically 0 PP, but practically
-    # the recruit requires 4 specific File City buildings whose collective
-    # PP cost lands around 15. Modeled as a 15 PP gate so
-    # ``_apply_pp_cutoffs`` correctly excludes Andromon when
-    # ``prosperity_goal < 15``.
-    "Andromon": 15,
     # 40 PP
     "SkullGreymon": 40,
     # 45 PP
@@ -458,9 +457,10 @@ _KEYITEM_LOCATIONS: Final[dict[str, LocationEntry]] = {
     "Blue Flute Pickup":             LocationEntry(69_004_009, "Greatlake"),
     "Leomonstone Pickup":            LocationEntry(69_004_010, "Drill Tunnel"),
     # Volume Villa is reached after defeating Otamamon in Geko Swamp;
-    # we model it as part of the Geko Swamp region. Merit Shop's
-    # 300-Merit cost isn't modeled in AP rules — Merit is earned by
-    # trading cards, which the player can do once at the shop.
+    # we model it as part of the Geko Swamp region. The Merit price is
+    # paid with cards traded in at the shop, so :mod:`.rules` gates this
+    # row (and the opt-in Merit Shop rows) on reaching a card vending
+    # machine (the ``Card Vending`` region); the amount isn't modeled.
     "Amazing Rod Pickup":            LocationEntry(69_004_011, "Geko Swamp"),
 }
 

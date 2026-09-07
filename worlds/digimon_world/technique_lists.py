@@ -12,7 +12,11 @@ The randomization keeps every structural property the engine relies on:
 * the populated slots stay populated (slot 0 is the reincarnation default, ``moves[0] = 0x2E``);
 * a slot keeps its **class** -- normal technique (id < 58), enemy finisher (58..112) or bubble
   attack (113..120) -- because field records point their 4th move at the finisher slot and the
-  versus mode needs one finisher-class id per species;
+  versus mode needs one finisher-class id per species. **Finisher slots are not re-drawn at all**
+  (2026-09-07): the partner's Finish!! attack (``stats.base.moves[3]`` -> ``entityGetTechFromAnim``
+  -> the list's finisher id) played an empty animation and never hit once the slot held another
+  species' finisher -- finisher techniques are per-species signature moves whose effect data does
+  not transplant the way the generic (< 58) techniques' does. They stay vanilla, like bubbles;
 * a slot keeps its **element**, so the partner can still learn the technique in battle (the
   learn filter only accepts techniques whose element matches one of the species' specialties)
   and brain training (per-specialty tier lists) keeps finding entries;
@@ -62,10 +66,11 @@ def tech_class(tech_id: int) -> int:
 
 
 def candidate_pool(tech_id: int) -> list[int]:
-    """Techniques that may replace ``tech_id``: same class, same element (bubbles never move)."""
+    """Techniques that may replace ``tech_id``: the normal techniques of the same element.
+    Finisher-class and bubble slots stay vanilla (see the module docstring)."""
 
     cls = tech_class(tech_id)
-    if cls == CLASS_BUBBLE:
+    if cls != CLASS_NORMAL:
         return [tech_id]
     return [
         other for other in sorted(VANILLA_VALUES)

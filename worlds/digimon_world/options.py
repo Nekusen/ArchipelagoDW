@@ -305,13 +305,13 @@ class StartingRegion(Choice):
       Region Access``. Player flies in via the Birdra-Messenger menu.
     * ``great_canyon`` — bootstrap kit is ``Birdramon Recruit +
       Great Canyon Region Access``. There's no separate ``Flight:``
-      item — the kit stands in for the in-game "you've been here
-      once" precondition for G Canyon Top in the Birdra-Messenger menu.
-      AP logic models the ``File City → Great Canyon`` flight edge
-      as accessible **only** under ``starting_region: great_canyon``;
-      every other start (and ``region_locking: off`` / ``custom``)
-      leaves that edge logically inaccessible — the GC-Bridge AP item
-      remains the way to walk in.
+      item: whenever Great Canyon is locked, the G Canyon Top flight
+      slot reads an AP bit the client pins on exactly those two items,
+      so the flight is the modeled ``File City → Great Canyon`` entry
+      for every locked seed, not just this start. In a seed where Great
+      Canyon is NOT locked the slot keeps its vanilla gate (Birdramon's
+      field-recruit bit, set only by visiting Great Canyon) and the
+      edge stays out of logic — the GC-Bridge AP item is the way in.
     * ``factorial_town`` — bootstrap kit is ``Whamon Recruit +
       Factorial Town Region Access``. Asymmetric with the Birdramon
       starts because Factorial Town is reached via Whamon's ferry,
@@ -1275,13 +1275,15 @@ class TechniqueEffectChance(DefaultOnToggle):
 
 class SpeciesTechniqueLists(Toggle):
     """Randomize which techniques each species can use and learn: every populated
-    slot of every species' 16-slot technique list is re-drawn among the
-    techniques of the same class (normal / enemy finisher / bubble) and the same
-    element, without repeats. Lists never grow (a model only carries animations
-    for its vanilla slots) and keep their element mix, so the partner can still
-    learn every technique in its list from battle and brain training. Wild Digimon
-    use whatever now sits in their slots; ``enemy_stats`` reads the shuffled lists.
-    Independent of ``technique_data`` (the techniques' own numbers).
+    normal-technique slot of every species' 16-slot technique list is re-drawn
+    among the normal techniques of the same element, without repeats. Finisher
+    and bubble slots stay vanilla (a species' Finish!! move is its own signature
+    attack; a foreign one plays an empty animation and never hits). Lists never
+    grow (a model only carries animations for its vanilla slots) and keep their
+    element mix, so the partner can still learn every technique in its list from
+    battle and brain training. Wild Digimon use whatever now sits in their slots;
+    ``enemy_stats`` reads the shuffled lists. Independent of ``technique_data``
+    (the techniques' own numbers).
     """
 
     display_name = "Species Technique Lists"
