@@ -8704,6 +8704,24 @@ ITEM_PARA_RELOC_NEW_ARENA_BASE: Final = 0x801C1B70
 ITEM_PARA_RELOC_NEW_ARENA_SIZE: Final = 0x2E390
 assert ITEM_PARA_RELOC_END_KUSEG == ITEM_PARA_RELOC_NEW_ARENA_BASE
 
+# --- malloc3 arena (model memory budget) -------------------------------------
+# ``InitHeap3(base, size)`` is called once from the master init with the base
+# and size derived from three crt0 config words; the ring's end sentinel costs
+# the last 8 bytes, so the usable figure is ``size - 8``.  Field Digimon models
+# are streamed into this arena whole (``loadMMD``); the player's partner and the
+# tamer are NOT -- they live in static ``.bss`` buffers, which is why the
+# partner may be any species.  Measured by the ``model_budget`` lab unit
+# (2026-09-09), exact on 31 live screens.
+MALLOC3_ARENA_BYTES_VANILLA: Final = 0x30390 - 8          # 197,512
+#: Every generated seed relocates ITEM_PARA by raising the arena base 8 KB, so
+#: this -- not the vanilla figure -- is the budget a seed actually has.
+MALLOC3_ARENA_BYTES_AP: Final = ITEM_PARA_RELOC_NEW_ARENA_SIZE - 8   # 189,320
+assert MALLOC3_ARENA_BYTES_VANILLA - MALLOC3_ARENA_BYTES_AP == 0x2000
+#: Safety margin held back from the measured budget when placing substitutes.
+#: Over-budget is a hard crash (``handleNullModel()`` is empty, so a failed
+#: allocation ends in ``readFile(path, NULL)``), never a graceful failure.
+MODEL_BUDGET_RESERVE: Final = 8_192
+
 # --- EXT_ITEM_PARA seed block (Cave6, .bin-backed) ---------------------------
 # Reuses the exact footprint of the retired Cave6 ITEM_PARA ext
 # segment: sector 148351 ud-bytes 0..959 (RAM 0x80096800..0x80096BC0).

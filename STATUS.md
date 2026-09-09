@@ -1,6 +1,6 @@
 # Digimon World 1 (PS1) APWorld — Project Status and Roadmap
 
-**Snapshot date: 2026-09-05.** Branch `digimon-world-ps1`, `world_version 0.6.0`.
+**Snapshot date: 2026-09-09.** Branch `digimon-world-ps1`, `world_version 0.6.0`.
 
 This is the live status document. [PLAN.md](PLAN.md) is the historical exploration record and
 [CLAUDE.md](CLAUDE.md) carries the working conventions; neither is updated for day-to-day state —
@@ -11,6 +11,57 @@ goal requires**.
 ---
 
 ## 1. Where the project is
+
+### 1.0 Latest change — enemy substitution rebuilt on a measured memory budget (2026-09-09)
+
+A playtest report ("every Ultimate came out as Tekkamon") traced to a conservative proxy in
+`enemies.py::substitute_pool`: substitutes were restricted to `species.heap <= original.heap`
+because the real per-screen headroom had never been measured. Two lab units later that guess is
+gone.
+
+**What was measured** (`work/dw1_re/decomp/model_budget/NOTES.md`, exact on 31 live screens,
+26/26 predicted ladder trials on both arenas, 9 real battles, cold boots from patched discs):
+
+- The partner and the tamer do **not** compete for the `malloc3` arena — `loadMMD`'s
+  `modelType == 2 / 3` paths read into static `.bss` buffers. That was the contradiction that
+  made the old model impossible (OGRE11 + a 96 KB partner would have needed ~290 KB of 185).
+- Arena: 197,512 B vanilla, **189,320 B in every seed** (the ITEM_PARA claim costs 8,192 B on
+  every screen). Measured live on the claimed arena for the first time.
+- No reachable path loads more than **three** distinct models on a screen; a section's
+  `loadDigimon` union over-counts badly.
+- Each placed entity costs heap too, via `DigimonPara.bone`.
+- Boundary: `arena - 152` plays, `arena + 416` faults — and failure is **not immediate**, so any
+  rule must be a hard bound.
+- Identity is not story role: recruits, story bosses and town clones are all safe as wild
+  substitutes; recruit state is untouched (screen load moves zero trigger bits).
+
+**What shipped** (`data/model_budget.py` + `tools/dw1_model_budget_table.py`, arena constants in
+`data/addresses.py`): one candidate per Digimon *identity* — the cheapest row **the game itself
+fights with**, never a town/quest clone — and **joint per-screen selection**: each group draws
+only from candidates that keep the screen's worst MAPHEAD trace inside its measured budget, so an
+impossible pick is never rolled.
+
+The clone exclusion is about animations, not memory. `startAnimation` indexes a model's `.MMD`
+animation table with no bounds check, and the bound derivable from the census only covers the
+opening pose and the per-technique animations — it says nothing about walking, being hit or
+dying. A row vanilla raises as a partner or fights in the wild is exercised across the whole
+repertoire; a clone that only talks in a town is not. Every identity has such a row, so nothing
+is lost. Measured cost of the preference: one species per seed. The one clone proven to
+hard-fault in battle (species 169, Kuwagamon) is held out explicitly as well
+(`ANIM_TABLE_UNSAFE`).
+
+| | before | after |
+| --- | ---: | ---: |
+| distinct species in a real `same_level` seed | 44 | **89** |
+| most-repeated substitute | ×18 | **×9** |
+| Ultimate identities reachable | 2 | **all 22** |
+| identities reachable under `any` | ~36 | **113 of 113** |
+| budget violations / screens forced to stay vanilla | — | **0 / 0** |
+
+Fresh and In-Training never appear under `same_level`, and that is correct: no wild group in the
+game is either level. Open: **File City TWNA13 peaks 2,008 B over the AP arena** — unreproduced,
+independent of randomization, and the first place to look if a File City hang is ever reported
+(§2.5).
 
 **The world is functionally complete and playable.** Generation, ROM patcher, two emulator clients
 and the Launcher integration all exist and are exercised by the test suite and the RE lab. The

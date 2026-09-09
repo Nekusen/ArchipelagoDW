@@ -1172,10 +1172,17 @@ class EnemyRandomization(Choice):
       play with their vanilla dialogue; a swapped boss may lack a cutscene-specific
       animation and stand still where the original posed.
 
-    Substitutes are drawn from species whose 3D model needs no more memory than the
-    original's, so no screen ever loads more model data than vanilla. A swapped
-    Digimon keeps the original record's stats; its techniques come from its own
-    list, chosen as ``enemy_stats`` dictates (power-equivalent under ``vanilla``).
+    Any Digimon in the game can stand in for any other: being a recruit target or a
+    story boss describes what a *record* is for, not what a *species* is. The one
+    limit is memory. A screen's models are streamed into a shared arena and
+    exceeding it crashes the game, so the species on a screen are chosen together
+    against that screen's measured budget, and a substitute that would not fit is
+    never rolled. Most screens have room for anything; the few that do not keep
+    their vanilla species rather than risk it.
+
+    A swapped Digimon keeps the original record's stats; its techniques come from
+    its own list, chosen as ``enemy_stats`` dictates (power-equivalent under
+    ``vanilla``).
     """
 
     display_name = "Enemy Randomization"
@@ -1189,8 +1196,13 @@ class EnemyRandomizationTier(Choice):
     """Which species may stand in for a randomized enemy.
 
     * ``same_level`` — Rookies become Rookies, Champions Champions, Ultimates
-      Ultimates (keeps the visual power curve honest).
-    * ``any`` — any fighting species that fits the memory budget.
+      Ultimates (keeps the visual power curve honest). Every wild group in the
+      game is Rookie, Champion or Ultimate, so Fresh and In-Training Digimon
+      never appear under this setting — there is nothing for them to replace.
+    * ``any`` — any fighting species at all.
+
+    Either way the screen's memory budget has the last word; see
+    ``enemy_randomization``.
     """
 
     display_name = "Enemy Randomization Tier"

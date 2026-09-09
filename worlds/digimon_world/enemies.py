@@ -59,8 +59,20 @@ from typing import TYPE_CHECKING, Final, NamedTuple
 
 from BaseClasses import CollectionState
 
-from .data.addresses import ROM_RECRUITMENT, SCREEN_FILENAMES
+from .data.addresses import (
+    MALLOC3_ARENA_BYTES_AP,
+    MODEL_BUDGET_RESERVE,
+    ROM_RECRUITMENT,
+    SCREEN_FILENAMES,
+)
 from .data.enemy_records import FIELD_RECORDS, MAPHEAD_SITES, MOVES, SPECIES
+from .data.model_budget import (
+    SCREEN_SCRIPT_EXTRA,
+    SCREEN_TRACES,
+    SPECIES_ENTITY_COST,
+    SPECIES_MODEL_COST,
+    TEXTURE_STAGE_BYTES,
+)
 
 if TYPE_CHECKING:
     from .world import DigimonWorldWorld
@@ -645,46 +657,175 @@ SCRIPT_PLACED_GROUPS: Final[frozenset[tuple[int, int]]] = frozenset({
 })
 
 
+#: Species whose ``.MMD`` animation table is too short to survive a battle even though the
+#: species otherwise fights. ``startAnimation`` (0x800C1A04) indexes that table with **no
+#: bounds check**, and a battle needs entry 0x21 (battle start) plus ``0x2E + k`` for every
+#: technique slot the record carries. The Kuwagamon clone has 28 entries against the 46+
+#: it would need and hard-faults at ``pc 0x800C1AD8``; it is the only one of the 143 fighting
+#: species below the bar (the minimum over the other 142 is 47 entries). Vanilla places it on
+#: BETL02 and TRAI00, but those records only ever talk. Kuwagamon still reaches the pool
+#: through its full-size row (51). Lab-measured 2026-09-09, ``model_budget`` follow-up.
+ANIM_TABLE_UNSAFE: Final[frozenset[int]] = frozenset({169})
+
+
+def _pick_representative(entries: list[Species]) -> Species | None:
+    """The single row an identity enters the pool as, or ``None`` if it never fights.
+
+    ``DIGIMON_DATA`` holds several rows for the same Digimon: a full-size one and the
+    lighter NPC / quest "clone" the game uses for town roles and story fights. They depict
+    the same creature, so only one belongs in the pool -- and it must be a row **the game
+    itself fights with**, which means never a clone.
+
+    The reason is animation coverage. A model's ``.MMD`` animation table is indexed by
+    ``startAnimation`` with no bounds check, and the static bound we can compute from the
+    census only covers the two classes we know a battle requests: the opening pose (0x21)
+    and ``0x2E + k`` per technique slot. It says nothing about walking, being hit, dying or
+    fleeing. A row the game raises as a partner, or places as a vanilla wild enemy, is
+    exercised across the whole repertoire by vanilla play; a clone that only ever stands in
+    a town and talks is not. Every identity in the game has such a row, so no clone is ever
+    needed -- and the one clone measured to hard-fault in battle (:data:`ANIM_TABLE_UNSAFE`)
+    is excluded twice over.
+
+    Among the rows that qualify, the cheapest model wins: it fits the most screens.
+    """
+
+    fighting = [species for species in entries
+                if species.fights and species.id not in ANIM_TABLE_UNSAFE]
+    if not fighting:
+        return None
+    battle_proven = [species for species in fighting if species.id < CLONE_SPECIES_BASE]
+    return min(battle_proven or fighting, key=lambda species: (species.heap, species.id))
+
+
+def _build_candidates() -> tuple[Species, ...]:
+    by_identity: dict[str, list[Species]] = {}
+    for species in SPECIES_BY_ID.values():
+        if species.level:                      # level 0 = town NPCs and the tamer
+            by_identity.setdefault(species.name, []).append(species)
+    picked = (_pick_representative(entries) for entries in by_identity.values())
+    return tuple(sorted((s for s in picked if s is not None), key=lambda s: s.id))
+
+
+#: One row per Digimon that can stand in for another: every identity in the game that
+#: fights, resolved to its cheapest battle-proven row by :func:`_pick_representative`.
+#: Being a recruit target or a story boss says what a *record* is for, not what a
+#: *species* is, so neither disqualifies a Digimon from appearing in the wild -- only the
+#: measured memory budget does, per screen. The originals that must stay vanilla are held
+#: out separately (:data:`SCRIPT_PLACED_GROUPS`, :func:`classify_record`).
+SUBSTITUTE_CANDIDATES: Final[tuple[Species, ...]] = _build_candidates()
+
+
+def screen_peak(map_id: int, substitutions: Mapping[int, int]) -> int:
+    """Worst-case ``malloc3`` bytes screen ``map_id`` reaches under ``substitutions``.
+
+    Walks every non-dominated MAPHEAD trace of the screen (:data:`SCREEN_TRACES`),
+    charging each distinct species' model once -- ``loadMMD`` refcounts repeats -- plus
+    one entity block per placement, with the transient texture stage live just before
+    each first load.
+    """
+
+    worst = 0
+    for trace in SCREEN_TRACES.get(map_id, ()):
+        current = peak = 0
+        loaded: set[int] = set()
+        for kind, vanilla_id in trace:
+            species_id = substitutions.get(vanilla_id, vanilla_id)
+            model = SPECIES_MODEL_COST.get(species_id)
+            if not model:
+                continue
+            if kind == "L":
+                if species_id in loaded:
+                    continue
+                peak = max(peak, current + TEXTURE_STAGE_BYTES)
+                current += model
+                loaded.add(species_id)
+            else:
+                current += SPECIES_ENTITY_COST[species_id]
+            peak = max(peak, current)
+        worst = max(worst, peak)
+    return worst
+
+
+def screen_budget(map_id: int) -> int:
+    """Model bytes screen ``map_id`` may reach in a generated seed.
+
+    Every seed relocates ITEM_PARA by raising the arena base, so the budget is the
+    claimed arena less a safety reserve and whatever the screen's own resident script
+    can allocate on top.
+    """
+
+    return (MALLOC3_ARENA_BYTES_AP - MODEL_BUDGET_RESERVE
+            - SCREEN_SCRIPT_EXTRA.get(map_id, 0))
+
+
 def substitute_pool(original: Species, same_level: bool) -> list[Species]:
-    """Fighting, non-story species whose model fits the original's heap budget."""
+    """Every Digimon that may stand in for ``original``, before the per-screen budget."""
 
     return [
-        species for species in SPECIES_BY_ID.values()
-        if species.fights
-        and species.id != original.id
-        and species.id < CLONE_SPECIES_BASE
-        and species.id not in RECRUIT_SPECIES_IDS
-        and species.id not in STORY_BOSS_SPECIES
-        and species.heap <= original.heap
+        species for species in SUBSTITUTE_CANDIDATES
+        if species.name != original.name
         and (not same_level or species.level == original.level)
     ]
+
+
+def _substitutable_groups(map_id: int, include_story: bool) -> list[int]:
+    """Species ids on ``map_id`` whose whole group may be swapped, in a stable order."""
+
+    records = RECORDS_BY_MAP[map_id]
+    groups = []
+    for species_id in sorted({record.type for record in records}):
+        if (map_id, species_id) in SCRIPT_PLACED_GROUPS:
+            continue  # the screen script places this entity itself — see the frozenset
+        kinds = {classify_record(record) for record in records if record.type == species_id}
+        if CLASS_NPC in kinds or (CLASS_STORY in kinds and not include_story):
+            continue
+        groups.append(species_id)
+    return groups
 
 
 def plan_substitutions(
     rng: Random, include_story: bool, same_level: bool,
 ) -> tuple[dict[tuple[int, int], int], dict[tuple[int, int], int]]:
-    """Returns ``(map, original species) -> substitute`` and ``(map, slot) -> final species``."""
+    """Returns ``(map, original species) -> substitute`` and ``(map, slot) -> final species``.
+
+    A screen's groups are chosen **together**: models share one arena, so what one group
+    may become depends on what the others already are. Each group in turn draws uniformly
+    from the candidates that keep the screen's worst trace inside :func:`screen_budget`
+    given the picks made so far, with the groups still undecided at their vanilla species.
+    That invariant holds at every step, so the finished screen is always within budget --
+    and since over-budget is a hard crash rather than a graceful failure, a candidate that
+    would not fit is never rolled in the first place.
+
+    The group order is shuffled per screen so no group systematically gets first claim on
+    the arena. A screen already over budget in vanilla (File City's heaviest, OGRE03) simply
+    keeps every group, which is the safe outcome.
+    """
 
     substitutions: dict[tuple[int, int], int] = {}
     final_species: dict[tuple[int, int], int] = {}
     for map_id in sorted(RECORDS_BY_MAP):
         if not _combat_screen(map_id) or map_id not in SITES_BY_MAP:
             continue
-        records = RECORDS_BY_MAP[map_id]
-        for species_id in sorted({record.type for record in records}):
-            if (map_id, species_id) in SCRIPT_PLACED_GROUPS:
-                continue  # the screen script places this entity itself — see the frozenset
-            group = [record for record in records if record.type == species_id]
-            kinds = {classify_record(record) for record in group}
-            if CLASS_NPC in kinds or (CLASS_STORY in kinds and not include_story):
+        if map_id not in SCREEN_TRACES:
+            continue  # no measured budget for this screen — never guess at it
+        groups = _substitutable_groups(map_id, include_story)
+        if not groups:
+            continue
+        budget = screen_budget(map_id)
+        chosen: dict[int, int] = {}
+        for species_id in rng.sample(groups, len(groups)):
+            fits = [
+                species for species in substitute_pool(SPECIES_BY_ID[species_id], same_level)
+                if screen_peak(map_id, {**chosen, species_id: species.id}) <= budget
+            ]
+            if not fits:
                 continue
-            pool = substitute_pool(SPECIES_BY_ID[species_id], same_level)
-            if not pool:
-                continue
-            substitute = rng.choice(sorted(pool, key=lambda species: species.id))
-            substitutions[(map_id, species_id)] = substitute.id
-            for record in group:
-                final_species[(record.map, record.slot)] = substitute.id
+            chosen[species_id] = rng.choice(fits).id
+        for species_id, substitute_id in chosen.items():
+            substitutions[(map_id, species_id)] = substitute_id
+            for record in RECORDS_BY_MAP[map_id]:
+                if record.type == species_id:
+                    final_species[(record.map, record.slot)] = substitute_id
     return substitutions, final_species
 
 

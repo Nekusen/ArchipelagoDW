@@ -277,18 +277,88 @@ class TestFullRandomPlanner(unittest.TestCase):
 
 
 class TestSubstitutionPlanner(unittest.TestCase):
-    def test_pool_respects_heap_and_level(self) -> None:
+    def test_pool_is_one_row_per_identity_and_excludes_nothing_else(self) -> None:
         goburimon = enemies.SPECIES_BY_ID[80]
         pool = enemies.substitute_pool(goburimon, same_level=True)
         self.assertTrue(pool)
+        names = [species.name for species in pool]
+        self.assertCountEqual(names, set(names), "an identity must appear at most once")
         for species in pool:
-            self.assertLessEqual(species.heap, goburimon.heap)
             self.assertEqual(species.level, goburimon.level)
             self.assertTrue(species.fights)
-            self.assertNotIn(species.id, enemies.RECRUIT_SPECIES_IDS)
-            self.assertNotIn(species.id, enemies.STORY_BOSS_SPECIES)
-            self.assertLess(species.id, enemies.CLONE_SPECIES_BASE)
+            self.assertNotEqual(species.name, goburimon.name)
         self.assertGreater(len(enemies.substitute_pool(goburimon, same_level=False)), len(pool))
+
+    def test_pool_holds_no_identity_back(self) -> None:
+        """Recruit target, story boss and town clone describe a record, not a species."""
+        candidates = {species.name for species in enemies.SUBSTITUTE_CANDIDATES}
+        for name in ("Mamemon", "Andromon", "Piximon",          # recruit targets
+                     "Machinedramon", "WaruSeadramon", "WaruMonzaemon"):   # story bosses
+            self.assertIn(name, candidates)
+        every_fighting_identity = {
+            species.name for species in enemies.SPECIES_BY_ID.values()
+            if species.fights and species.level
+        }
+        self.assertEqual(candidates, every_fighting_identity)
+
+    def test_representative_is_a_row_the_game_fights_with(self) -> None:
+        """Never a town / quest clone: only vanilla-battled rows have proven animations."""
+        by_id = {species.id: species for species in enemies.SUBSTITUTE_CANDIDATES}
+        for species in enemies.SUBSTITUTE_CANDIDATES:
+            self.assertLess(species.id, enemies.CLONE_SPECIES_BASE, species)
+        # the recruit rows win over their lighter town clones ...
+        for full, clone in ((55, 173), (48, 166), (51, 169), (5, 129), (22, 144)):
+            self.assertIn(full, by_id)
+            self.assertNotIn(clone, by_id)
+        # ... and the clone measured to hard-fault in battle is excluded twice over.
+        for species_id in enemies.ANIM_TABLE_UNSAFE:
+            self.assertNotIn(species_id, by_id)
+
+    def test_representative_is_the_cheapest_qualifying_row(self) -> None:
+        by_name: dict[str, list[Any]] = {}
+        for species in enemies.SPECIES_BY_ID.values():
+            if species.level:
+                by_name.setdefault(species.name, []).append(species)
+        for species in enemies.SUBSTITUTE_CANDIDATES:
+            qualifying = [other for other in by_name[species.name]
+                          if other.fights and other.id < enemies.CLONE_SPECIES_BASE
+                          and other.id not in enemies.ANIM_TABLE_UNSAFE]
+            self.assertEqual(species.heap, min(other.heap for other in qualifying), species)
+
+    def test_substitutions_stay_inside_the_screen_budget(self) -> None:
+        """Over-budget is a hard crash, so no plan may ever exceed a screen's arena."""
+        for seed in range(8):
+            with self.subTest(seed=seed):
+                substitutions, _ = enemies.plan_substitutions(
+                    Random(seed), include_story=True, same_level=bool(seed % 2))
+                per_screen: dict[int, dict[int, int]] = {}
+                for (map_id, original), substitute in substitutions.items():
+                    per_screen.setdefault(map_id, {})[original] = substitute
+                for map_id, chosen in per_screen.items():
+                    self.assertLessEqual(enemies.screen_peak(map_id, chosen),
+                                         enemies.screen_budget(map_id))
+
+    def test_every_identity_can_appear(self) -> None:
+        """The point of the budget model: nothing is unreachable for want of arena."""
+        seen: set[str] = set()
+        for seed in range(20):
+            substitutions, _ = enemies.plan_substitutions(
+                Random(seed), include_story=True, same_level=False)
+            seen |= {enemies.SPECIES_BY_ID[s].name for s in substitutions.values()}
+        self.assertEqual(seen, {species.name for species in enemies.SUBSTITUTE_CANDIDATES})
+
+    def test_same_level_reaches_every_identity_of_every_level_in_play(self) -> None:
+        """Fresh / In-Training never appear because no *original* group is one."""
+        seen: set[str] = set()
+        for seed in range(20):
+            substitutions, _ = enemies.plan_substitutions(
+                Random(seed), include_story=True, same_level=True)
+            seen |= {enemies.SPECIES_BY_ID[s].name for s in substitutions.values()}
+        planned, _ = enemies.plan_substitutions(Random(0), include_story=True, same_level=True)
+        levels_in_play = {enemies.SPECIES_BY_ID[original].level for _, original in planned}
+        self.assertEqual(levels_in_play, {3, 4, 5})
+        self.assertEqual(seen, {species.name for species in enemies.SUBSTITUTE_CANDIDATES
+                                if species.level in levels_in_play})
 
     def test_wild_mode_never_touches_story_or_npc(self) -> None:
         substitutions, final = enemies.plan_substitutions(Random(1), include_story=False, same_level=True)
