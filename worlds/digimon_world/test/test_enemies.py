@@ -286,8 +286,21 @@ class TestSubstitutionPlanner(unittest.TestCase):
         for species in pool:
             self.assertEqual(species.level, goburimon.level)
             self.assertTrue(species.fights)
-            self.assertNotEqual(species.name, goburimon.name)
+        # rolling what was already there is a legitimate outcome, so it is in the pool ...
+        self.assertIn(goburimon.name, names)
         self.assertGreater(len(enemies.substitute_pool(goburimon, same_level=False)), len(pool))
+
+    def test_drawing_the_original_identity_leaves_the_vanilla_row(self) -> None:
+        """... and resolves to "keep vanilla", never to the identity's other row."""
+        for seed in range(12):
+            substitutions, final = enemies.plan_substitutions(
+                Random(seed), include_story=True, same_level=bool(seed % 2))
+            for (map_id, original), substitute in substitutions.items():
+                self.assertNotEqual(enemies.SPECIES_BY_ID[original].name,
+                                    enemies.SPECIES_BY_ID[substitute].name,
+                                    (map_id, original, substitute))
+            for (map_id, slot), species_id in final.items():
+                self.assertNotEqual(species_id, enemies.RECORD_INDEX[(map_id, slot)].type)
 
     def test_pool_holds_no_identity_back(self) -> None:
         """Recruit target, story boss and town clone describe a record, not a species."""

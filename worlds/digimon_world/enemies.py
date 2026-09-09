@@ -759,12 +759,18 @@ def screen_budget(map_id: int) -> int:
 
 
 def substitute_pool(original: Species, same_level: bool) -> list[Species]:
-    """Every Digimon that may stand in for ``original``, before the per-screen budget."""
+    """Every Digimon that may stand in for ``original``, before the per-screen budget.
+
+    The original's own identity is in the pool: rolling the species that was already there
+    is a legitimate outcome of a randomizer, not a case to design out. It is drawn like any
+    other, and :func:`plan_substitutions` resolves it by leaving the screen's vanilla row
+    alone -- swapping a clone row for its full-size twin would spend budget on a Digimon
+    that looks exactly the same.
+    """
 
     return [
         species for species in SUBSTITUTE_CANDIDATES
-        if species.name != original.name
-        and (not same_level or species.level == original.level)
+        if not same_level or species.level == original.level
     ]
 
 
@@ -814,13 +820,22 @@ def plan_substitutions(
         budget = screen_budget(map_id)
         chosen: dict[int, int] = {}
         for species_id in rng.sample(groups, len(groups)):
+            original = SPECIES_BY_ID[species_id]
+            # drawing the original's own identity resolves to its vanilla row, so it costs
+            # nothing and is always admissible -- see substitute_pool
             fits = [
-                species for species in substitute_pool(SPECIES_BY_ID[species_id], same_level)
-                if screen_peak(map_id, {**chosen, species_id: species.id}) <= budget
+                species_id if species.name == original.name else species.id
+                for species in substitute_pool(original, same_level)
+            ]
+            fits = [
+                effective for effective in fits
+                if screen_peak(map_id, {**chosen, species_id: effective}) <= budget
             ]
             if not fits:
                 continue
-            chosen[species_id] = rng.choice(fits).id
+            drawn = rng.choice(fits)
+            if drawn != species_id:
+                chosen[species_id] = drawn
         for species_id, substitute_id in chosen.items():
             substitutions[(map_id, species_id)] = substitute_id
             for record in RECORDS_BY_MAP[map_id]:

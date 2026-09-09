@@ -60,10 +60,15 @@ hard-fault in battle (species 169, Kuwagamon) is held out explicitly as well
 
 Coverage was then verified exactly rather than by sampling: for every screen and group, which
 candidates the budget can admit at all. Both tiers reach that bound in 200-seed runs (95,600
-screen-seeds, zero violations), and a regression test asserts it. The identities that never
-appear are exactly the structurally impossible ones — Fresh and In-Training under `same_level`
-(no wild group is either level), plus Tekkamon under plain `wild`, where the game's only two
-Ultimate wild groups *are* the Tekkamon ones and an identity cannot replace itself.
+screen-seeds, zero violations), and a regression test asserts it. Every group's pool includes the
+species that was already there — rolling vanilla is a legitimate outcome, and it resolves to
+leaving the screen's row alone rather than swapping a clone row for its full-size twin. About
+1–3 % of groups land that way.
+
+The identities that never appear somewhere new are exactly the structurally impossible ones:
+Fresh and In-Training under `same_level`, since no wild group is either level, and Tekkamon
+under plain `wild` — the game's only two Ultimate wild groups *are* the Tekkamon ones, so
+there is nowhere else for it to turn up.
 
 Known, accepted behaviour: appearance frequency is skewed toward smaller models on
 budget-bound screens (~2.3x between extremes at Ultimate under `wild`). That is inherent to
