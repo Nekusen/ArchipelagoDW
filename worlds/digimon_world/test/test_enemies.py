@@ -338,6 +338,38 @@ class TestSubstitutionPlanner(unittest.TestCase):
                     self.assertLessEqual(enemies.screen_peak(map_id, chosen),
                                          enemies.screen_budget(map_id))
 
+    def test_every_candidate_is_admissible_somewhere(self) -> None:
+        """Exact form of "nothing is unreachable": no sampling, every screen and group.
+
+        A candidate that no (screen, group) can ever admit is dead weight in the pool and a
+        sign the budget data has drifted. The only identities allowed to be unreachable are
+        the ones no *original* group can call for -- see the two tests below.
+        """
+        screens = [map_id for map_id in sorted(enemies.RECORDS_BY_MAP)
+                   if enemies._combat_screen(map_id) and map_id in enemies.SITES_BY_MAP
+                   and map_id in enemies.SCREEN_TRACES]
+        self.assertTrue(screens)
+        for same_level in (False, True):
+            with self.subTest(same_level=same_level):
+                admissible: set[str] = set()
+                for map_id in screens:
+                    budget = enemies.screen_budget(map_id)
+                    for group in enemies._substitutable_groups(map_id, True):
+                        pool = enemies.substitute_pool(enemies.SPECIES_BY_ID[group], same_level)
+                        admissible |= {
+                            candidate.name for candidate in pool
+                            if candidate.name not in admissible
+                            and enemies.screen_peak(map_id, {group: candidate.id}) <= budget
+                        }
+                expected = {species.name for species in enemies.SUBSTITUTE_CANDIDATES}
+                if same_level:
+                    # nothing to replace at Fresh / In-Training: no wild group is either level
+                    expected = {name for name in expected
+                                if enemies.SPECIES_BY_ID[
+                                    next(s.id for s in enemies.SUBSTITUTE_CANDIDATES
+                                         if s.name == name)].level >= 3}
+                self.assertEqual(admissible, expected)
+
     def test_every_identity_can_appear(self) -> None:
         """The point of the budget model: nothing is unreachable for want of arena."""
         seen: set[str] = set()

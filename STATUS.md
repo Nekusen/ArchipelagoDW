@@ -58,8 +58,18 @@ hard-fault in battle (species 169, Kuwagamon) is held out explicitly as well
 | identities reachable under `any` | ~36 | **113 of 113** |
 | budget violations / screens forced to stay vanilla | — | **0 / 0** |
 
-Fresh and In-Training never appear under `same_level`, and that is correct: no wild group in the
-game is either level. Open: **File City TWNA13 peaks 2,008 B over the AP arena** — unreproduced,
+Coverage was then verified exactly rather than by sampling: for every screen and group, which
+candidates the budget can admit at all. Both tiers reach that bound in 200-seed runs (95,600
+screen-seeds, zero violations), and a regression test asserts it. The identities that never
+appear are exactly the structurally impossible ones — Fresh and In-Training under `same_level`
+(no wild group is either level), plus Tekkamon under plain `wild`, where the game's only two
+Ultimate wild groups *are* the Tekkamon ones and an identity cannot replace itself.
+
+Known, accepted behaviour: appearance frequency is skewed toward smaller models on
+budget-bound screens (~2.3x between extremes at Ultimate under `wild`). That is inherent to
+respecting the budget — conditioning on "it fits" favours small models — and not an artifact of
+the sequential filter: whole-screen rejection sampling was measured and gives the same skew for
+more cost. Open: **File City TWNA13 peaks 2,008 B over the AP arena** — unreproduced,
 independent of randomization, and the first place to look if a File City hang is ever reported
 (§2.5).
 
